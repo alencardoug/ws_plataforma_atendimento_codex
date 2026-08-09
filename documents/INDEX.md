@@ -1,0 +1,61 @@
+# Índice de documentos clínicos
+
+Total: 57 documents parent.
+
+- [Cirurgia conservadora da mama](clinical/mama/cirurgia-conservadora.md) — `MAMA-CIRURGIA_CONSERVADORA-001`
+- [Mastectomia simples](clinical/mama/mastectomia-simples.md) — `MAMA-MASTECTOMIA_SIMPLES-001`
+- [Mastectomia com reconstrução imediata](clinical/mama/mastectomia-reconstrucao-imediata.md) — `MAMA-MASTECTOMIA_RECONSTRUCAO_IMEDIATA-001`
+- [Biópsia do linfonodo sentinela](clinical/mama/linfonodo-sentinela.md) — `MAMA-LINFONODO_SENTINELA-001`
+- [Esvaziamento axilar](clinical/mama/esvaziamento-axilar.md) — `MAMA-ESVAZIAMENTO_AXILAR-001`
+- [Reconstrução com prótese ou expansor](clinical/mama/protese-expansor.md) — `MAMA-PROTESE_EXPANSOR-001`
+- [Reconstrução da mama com retalho](clinical/mama/reconstrucao-retalho.md) — `MAMA-RECONSTRUCAO_RETALHO-001`
+- [Cuidados com dreno após cirurgia da mama](clinical/mama/dreno-cirurgico.md) — `MAMA-DRENO_CIRURGICO-001`
+- [Seroma e cuidados com a ferida da mama](clinical/mama/seroma-ferida.md) — `MAMA-SEROMA_FERIDA-001`
+- [Prevenção e reconhecimento do linfedema](clinical/mama/linfedema-prevencao.md) — `MAMA-LINFEDEMA_PREVENCAO-001`
+- [Retorno às atividades após cirurgia da mama](clinical/mama/retorno-atividades.md) — `MAMA-RETORNO_ATIVIDADES-001`
+- [Consulta do resultado anatomopatológico da mama](clinical/mama/anatomopatologico.md) — `MAMA-ANATOMOPATOLOGICO-001`
+- [Antes de cada sessão de quimioterapia para câncer de mama](clinical/mama/pre-quimioterapia.md) — `MAMA-PRE_QUIMIOTERAPIA-001`
+- [Depois da quimioterapia para câncer de mama](clinical/mama/pos-quimioterapia.md) — `MAMA-POS_QUIMIOTERAPIA-001`
+- [Doxorrubicina e ciclofosfamida — orientação ao paciente](clinical/mama/regime-ac.md) — `MAMA-REGIME_AC-001`
+- [Paclitaxel — orientação ao paciente](clinical/mama/paclitaxel.md) — `MAMA-PACLITAXEL-001`
+- [Trastuzumabe — orientação ao paciente](clinical/mama/trastuzumabe.md) — `MAMA-TRASTUZUMABE-001`
+- [Planejamento da radioterapia da mama](clinical/mama/planejamento-radioterapia.md) — `MAMA-PLANEJAMENTO_RADIOTERAPIA-001`
+- [Cuidados durante a radioterapia da mama](clinical/mama/durante-radioterapia.md) — `MAMA-DURANTE_RADIOTERAPIA-001`
+- [Cuidados após radioterapia da mama](clinical/mama/apos-radioterapia.md) — `MAMA-APOS_RADIOTERAPIA-001`
+- [Preparo para mamografia e ultrassom das mamas](clinical/mama/mamografia-ultrassom.md) — `MAMA-MAMOGRAFIA_ULTRASSOM-001`
+- [Ressonância das mamas com contraste](clinical/mama/ressonancia-contraste.md) — `MAMA-RESSONANCIA_CONTRASTE-001`
+- [Sexualidade após tratamento do câncer de mama](clinical/mama/sexualidade.md) — `MAMA-SEXUALIDADE-001`
+- [Fertilidade e tratamento do câncer de mama](clinical/mama/fertilidade.md) — `MAMA-FERTILIDADE-001`
+- [Sintomas de menopausa durante o tratamento da mama](clinical/mama/menopausa.md) — `MAMA-MENOPAUSA-001`
+- [Imagem corporal e adaptação após cirurgia da mama](clinical/mama/imagem-corporal.md) — `MAMA-IMAGEM_CORPORAL-001`
+- [Apoio emocional no câncer de mama](clinical/mama/apoio-emocional.md) — `MAMA-APOIO_EMOCIONAL-001`
+- [Alertas especiais no tratamento do câncer de mama](clinical/mama/idosa-fragil-gestante-pcd.md) — `MAMA-IDOSA_FRAGIL_GESTANTE_PCD-001`
+- [Colectomia direita](clinical/colorretal/colectomia-direita.md) — `COLORRETAL-COLECTOMIA_DIREITA-001`
+- [Colectomia esquerda](clinical/colorretal/colectomia-esquerda.md) — `COLORRETAL-COLECTOMIA_ESQUERDA-001`
+- [Sigmoidectomia](clinical/colorretal/sigmoidectomia.md) — `COLORRETAL-SIGMOIDECTOMIA-001`
+- [Ressecção anterior do reto](clinical/colorretal/ressecao-anterior-reto.md) — `COLORRETAL-RESSECAO_ANTERIOR_RETO-001`
+- [Amputação abdominoperineal](clinical/colorretal/amputacao-abdominoperineal.md) — `COLORRETAL-AMPUTACAO_ABDOMINOPERINEAL-001`
+- [Cuidados com ileostomia](clinical/colorretal/ileostomia.md) — `COLORRETAL-ILEOSTOMIA-001`
+- [Cuidados com colostomia](clinical/colorretal/colostomia.md) — `COLORRETAL-COLOSTOMIA-001`
+- [Reversão de ileostomia ou colostomia](clinical/colorretal/reversao-estomia.md) — `COLORRETAL-REVERSAO_ESTOMIA-001`
+- [Cirurgia colorretal laparoscópica](clinical/colorretal/cirurgia-laparoscopica.md) — `COLORRETAL-CIRURGIA_LAPAROSCOPICA-001`
+- [Cirurgia colorretal robótica](clinical/colorretal/cirurgia-robotica.md) — `COLORRETAL-CIRURGIA_ROBOTICA-001`
+- [Ferida e dreno após cirurgia colorretal](clinical/colorretal/ferida-dreno.md) — `COLORRETAL-FERIDA_DRENO-001`
+- [Alimentação após cirurgia colorretal](clinical/colorretal/alimentacao-posop.md) — `COLORRETAL-ALIMENTACAO_POSOP-001`
+- [Mobilização e prevenção de trombose após cirurgia colorretal](clinical/colorretal/trombose-mobilizacao.md) — `COLORRETAL-TROMBOSE_MOBILIZACAO-001`
+- [Antes da quimioterapia para câncer colorretal](clinical/colorretal/pre-quimioterapia.md) — `COLORRETAL-PRE_QUIMIOTERAPIA-001`
+- [Depois da quimioterapia para câncer colorretal](clinical/colorretal/pos-quimioterapia.md) — `COLORRETAL-POS_QUIMIOTERAPIA-001`
+- [FOLFOX — orientação ao paciente](clinical/colorretal/folfox.md) — `COLORRETAL-FOLFOX-001`
+- [CAPOX — orientação ao paciente](clinical/colorretal/capox.md) — `COLORRETAL-CAPOX-001`
+- [Capecitabina em casa](clinical/colorretal/capecitabina.md) — `COLORRETAL-CAPECITABINA-001`
+- [Planejamento da radioterapia do reto](clinical/colorretal/planejamento-radio-reto.md) — `COLORRETAL-PLANEJAMENTO_RADIO_RETO-001`
+- [Durante a radioterapia pélvica](clinical/colorretal/durante-radio-reto.md) — `COLORRETAL-DURANTE_RADIO_RETO-001`
+- [Após radioterapia pélvica](clinical/colorretal/apos-radio-reto.md) — `COLORRETAL-APOS_RADIO_RETO-001`
+- [Preparo para colonoscopia](clinical/colorretal/colonoscopia.md) — `COLORRETAL-COLONOSCOPIA-001`
+- [Tomografia com contraste no câncer colorretal](clinical/colorretal/tomografia-contraste.md) — `COLORRETAL-TOMOGRAFIA_CONTRASTE-001`
+- [Ressonância da pelve para câncer de reto](clinical/colorretal/ressonancia-reto.md) — `COLORRETAL-RESSONANCIA_RETO-001`
+- [Adaptação da função intestinal](clinical/colorretal/funcao-intestinal.md) — `COLORRETAL-FUNCAO_INTESTINAL-001`
+- [Sexualidade e fertilidade no câncer colorretal](clinical/colorretal/sexualidade-fertilidade.md) — `COLORRETAL-SEXUALIDADE_FERTILIDADE-001`
+- [Retorno ao trabalho após tratamento colorretal](clinical/colorretal/retorno-trabalho.md) — `COLORRETAL-RETORNO_TRABALHO-001`
+- [Apoio emocional no câncer colorretal](clinical/colorretal/apoio-emocional.md) — `COLORRETAL-APOIO_EMOCIONAL-001`
+- [Alertas especiais no tratamento colorretal](clinical/colorretal/idoso-fragil-gestante-pcd.md) — `COLORRETAL-IDOSO_FRAGIL_GESTANTE_PCD-001`
