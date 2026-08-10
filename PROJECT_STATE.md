@@ -16,6 +16,18 @@ Last updated: 2026-08-10
 
 `001-v1-assisted-customer-service`
 
+## External review
+
+`specs/001-v1-assisted-customer-service/analysis.md` — cross-artifact analysis
+performed by Claude Code (2026-08-10), acting as external reviewer, not the
+authoring agent. Confirms the spec package is internally consistent; lists
+concrete spec-vs-repository gaps (PostgreSQL 17 vs. 16 running, missing
+Alembic/backend/frontend scaffolding, parent-child ingestion adapter design,
+missing `.env.example` vars) and one open scope decision (fate of the
+pre-existing scheduling/identity/billing schema and `app/main.py`) that the
+project owner must resolve before Phase 1. Read this before starting
+`tasks.md` Phase 0/1.
+
 ## V1 decisions frozen
 
 - anonymous customer, no account/password;
