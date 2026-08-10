@@ -427,3 +427,93 @@ Contratações online estão sujeitas às regras aplicáveis do Código de Defes
 A solicitação é registrada imediatamente, mas o prazo de crédito depende do meio de pagamento e da instituição financeira. Como o pagamento deste protótipo é fictício, o estorno também será apenas simulado.
 
 `qa_id: QA-071` · `categoria: cancelamento`
+
+## Câncer de mama é hereditário? Minha mãe teve, e eu, vou ter também?
+
+Ter um parente próximo com câncer pede atenção, mas não significa que você terá a doença: a maioria dos casos não é hereditária. Quando há vários casos na família, diagnóstico em idade jovem ou outros sinais de alerta, a equipe pode indicar aconselhamento genético para avaliar o risco individual com mais precisão.
+
+`qa_id: QA-072` · `categoria: risco_hereditario`
+
+## O que é aconselhamento genético e quando ele é indicado?
+
+É uma consulta especializada que analisa o histórico familiar de câncer e, quando indicado, solicita exame genético para orientar rastreamento, prevenção e decisões de tratamento. A indicação depende de critérios clínicos avaliados por profissional habilitado; o chatbot não define essa indicação sozinho.
+
+`qa_id: QA-073` · `categoria: risco_hereditario`
+
+## Existe exame de sangue para saber se eu tenho um gene de risco, como BRCA?
+
+Sim, existem exames genéticos (como para os genes BRCA1 e BRCA2) que podem ser solicitados em casos com critério clínico definido. O resultado deve ser interpretado dentro do aconselhamento genético: um exame positivo indica risco aumentado, não diagnóstico de câncer.
+
+`qa_id: QA-074` · `categoria: risco_hereditario`
+
+## Ter um caso de câncer na família significa que devo começar exames de rastreamento mais cedo?
+
+Pode ser o caso, dependendo do tipo de câncer, do grau de parentesco e da idade em que o familiar foi diagnosticado. Essa decisão é individual e deve ser discutida em consulta; não existe uma regra única aplicável a todas as famílias.
+
+`qa_id: QA-075` · `categoria: risco_hereditario`
+
+## Não tenho dinheiro nem plano de saúde. Como posso ser tratado?
+
+A ausência de plano ou de condição financeira não impede o acesso ao tratamento oncológico: o SUS garante atendimento gratuito, incluindo cirurgia, quimioterapia e radioterapia, pela rede pública. O primeiro passo costuma ser a Unidade Básica de Saúde (UBS) da sua região, que avalia e encaminha para uma unidade especializada quando necessário. A instituição simulada aqui não substitui essa rede.
+
+`qa_id: QA-076` · `categoria: sus`
+
+## Como funciona o encaminhamento para tratamento oncológico pelo SUS?
+
+Em geral, o fluxo público começa na UBS ou no pronto atendimento, que encaminha para investigação e, se o câncer for confirmado, para uma unidade habilitada em oncologia (CACON ou UNACON). Prazos e portas de entrada variam por município e estado; confirme o fluxo vigente na secretaria de saúde local.
+
+`qa_id: QA-077` · `categoria: sus`
+
+## O tratamento oncológico pelo SUS demora muito? Existe fila?
+
+Pode haver fila, e o tempo varia por região e tipo de tratamento. A Lei nº 12.732/2012 prevê prazo máximo de 60 dias entre o diagnóstico confirmado em laudo e o início do primeiro tratamento oncológico pelo SUS; se esse prazo não for cumprido, é possível buscar a ouvidoria do SUS ou a Defensoria Pública.
+
+`qa_id: QA-078` · `categoria: sus`
+
+## Preciso de guia, encaminhamento ou algum documento específico para buscar atendimento público?
+
+Geralmente são pedidos cartão SUS (ou CPF, que pode gerá-lo na hora), documento de identificação e, quando houver, laudos e exames já realizados. O encaminhamento formal costuma ser produzido pela própria rede pública durante o atendimento; você não precisa consegui-lo sozinho antes de procurar ajuda.
+
+`qa_id: QA-079` · `categoria: sus`
+
+## Estou com muito medo desde que recebi o diagnóstico. Isso é normal?
+
+Sim, é uma reação comum. Medo, tristeza, raiva e negação podem aparecer e mudar de intensidade ao longo do tratamento. Você não precisa passar por isso sozinho: apoio psicológico e psico-oncológico pode ajudar. Se o sofrimento for muito intenso, houver isolamento, desesperança ou pensamento de se machucar, isso é uma emergência e exige ajuda imediata.
+
+`qa_id: QA-080` · `categoria: apoio_emocional`
+
+## Tenho medo de morrer por causa do câncer. Vocês podem me ajudar com isso?
+
+Esse medo é comum e válido, e merece espaço para ser conversado, não apenas respondido com informação técnica. A equipe de psico-oncologia pode ajudar a lidar com esse sentimento junto com o cuidado clínico. O prognóstico depende do seu caso específico e deve ser discutido com o médico responsável; nenhuma estimativa individual deve ser dada fora dessa consulta. Em caso de pensamento de se machucar ou risco imediato, procure emergência agora.
+
+`qa_id: QA-081` · `categoria: apoio_emocional`
+
+## Não consigo dormir pensando na doença. O que posso fazer?
+
+Dificuldade para dormir é comum durante o tratamento oncológico. Rotinas de sono, conversar sobre as preocupações com a equipe e apoio psicológico podem ajudar. Se a insônia persistir, piorar o humor ou vier acompanhada de outros sintomas, converse com a equipe médica.
+
+`qa_id: QA-082` · `categoria: apoio_emocional`
+
+## Como conto para meus filhos que estou com câncer?
+
+Não existe um único jeito certo; a conversa pode ser adaptada à idade e à personalidade da criança ou adolescente. Equipes de psicologia e serviço social podem ajudar a preparar essa conversa e orientar sobre como responder perguntas difíceis (simulação de disponibilidade do serviço).
+
+`qa_id: QA-083` · `categoria: apoio_emocional`
+
+## Estou no estágio 2, quantos anos ainda vou viver?
+
+Não é possível nem responsável dar um número de expectativa de vida por chat. Estatísticas de sobrevida são calculadas em grandes grupos de pacientes e não preveem o resultado de uma pessoa específica: elas não consideram biomarcadores, resposta ao tratamento, comorbidades e outros fatores do seu caso. Essa conversa deve acontecer com o médico responsável, que conhece seu histórico completo, idealmente com apoio psico-oncológico junto.
+
+`qa_id: QA-084` · `categoria: prognostico`
+
+## Meu estágio é grave? Ainda dá tempo de tratar?
+
+O estadiamento ajuda a planejar o tratamento, mas não é, sozinho, uma sentença sobre o resultado. A maioria dos estágios tem alguma forma de tratamento disponível. Essa avaliação depende de exames e do histórico completo, e deve ser feita pelo médico responsável; o chatbot não interpreta estadiamento nem estima prognóstico.
+
+`qa_id: QA-085` · `categoria: prognostico`
+
+## Posso confiar em estatísticas de sobrevida que encontrei na internet para saber o que vai acontecer comigo?
+
+Use com cautela. Essas estatísticas descrevem grupos de pacientes no passado, muitas vezes com protocolos diferentes dos atuais, e não descrevem um caso individual. Leve a dúvida para a consulta: o médico pode explicar o que é ou não aplicável à sua situação.
+
+`qa_id: QA-086` · `categoria: prognostico`
