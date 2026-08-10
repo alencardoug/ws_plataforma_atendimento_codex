@@ -1,0 +1,313 @@
+{
+  "package": "customer-care-ai-sdd",
+  "baseline": "V1 clarified rebase",
+  "generated_on": "2026-08-10",
+  "file_count": 61,
+  "files": [
+    {
+      "path": ".specify/memory/constitution.md",
+      "sha256": "52ac3a273c193d54ba07f3116a44e66e9a33325269dca9a0ce4c3df92822562e",
+      "bytes": 3126
+    },
+    {
+      "path": "AGENTS.md",
+      "sha256": "e235e176d1d04e6dbc86bb6a683b8bc5553918d01e0fe712ba851202c8773a38",
+      "bytes": 3874
+    },
+    {
+      "path": "API_SPEC.md",
+      "sha256": "816af04dc9649e6cbfa8e8237773353399f763da627a427da4288841e9aed54f",
+      "bytes": 1004
+    },
+    {
+      "path": "ARCHITECTURE.md",
+      "sha256": "f75a5cc7bfec5c41bdfcc4b6e25ca81314c9a1fda1e45bf598b4a6ff07566964",
+      "bytes": 5463
+    },
+    {
+      "path": "CHANGELOG_V1_REBASE.md",
+      "sha256": "67df26884ac1d211b25196da4dd68f227d73a35e5eb261bdc0c2a49481389d7c",
+      "bytes": 1322
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "2faab3f98c6564044a93a401d625e196d1d567494efaff6c29588c96f952b357",
+      "bytes": 1505
+    },
+    {
+      "path": "DATA_MODEL.md",
+      "sha256": "8e4ada482f04e0d5102e9f55f6130ced46f9569355b732527157294dda4cacce",
+      "bytes": 1039
+    },
+    {
+      "path": "DECISIONS.md",
+      "sha256": "36c6a8263bd53c573e4c7733e910f67a979a7235543a4b5cf6a4afe4cc03e52d",
+      "bytes": 1820
+    },
+    {
+      "path": "DEPLOYMENT.md",
+      "sha256": "36eb6d795d596e7bb2baeb261e39df866d4b9f152074509e05fd26a54e7ff408",
+      "bytes": 609
+    },
+    {
+      "path": "DEVELOPMENT.md",
+      "sha256": "d18502c824a5c2fec7b371cc6ecdd925f95c8c9666c7a13bfcf742b9db7d2a27",
+      "bytes": 1107
+    },
+    {
+      "path": "GLOSSARY.md",
+      "sha256": "5c2d1a1d2126d641599e48c4aba153068cb0044bb84a1bfaa638d55260271ac1",
+      "bytes": 1276
+    },
+    {
+      "path": "OBSERVABILITY.md",
+      "sha256": "4a4141386fe6c1d3df10c3c39cc203e77db7dfabb46b791a634a05f80e66657f",
+      "bytes": 1589
+    },
+    {
+      "path": "OPERATIONS.md",
+      "sha256": "806c81a98afcfbedce59a2f9228e2d87ad0f3ecdf4ccfa7adfb79d5dfa6f12dc",
+      "bytes": 991
+    },
+    {
+      "path": "PROJECT_STATE.md",
+      "sha256": "a647e09081a5d6b17235a97b7b16a835f6e2d353afaea668e1b49b1c7581d38a",
+      "bytes": 1772
+    },
+    {
+      "path": "PROMPT_START_V1.md",
+      "sha256": "2b5eb09ca8189c03e6d8a8ba98d0e33e7c29a6927317f26f62ff913f7fb879d0",
+      "bytes": 1202
+    },
+    {
+      "path": "README.md",
+      "sha256": "3701b31b6d3f72869755647fd72c0970b78e6488c7f4301714991dddb478efb0",
+      "bytes": 4566
+    },
+    {
+      "path": "REQUIREMENTS.md",
+      "sha256": "e4082a7e693946e391b88d69e13ca9ed8e0605556b88d4942448b600ad08bbcd",
+      "bytes": 1657
+    },
+    {
+      "path": "ROADMAP.md",
+      "sha256": "dbfdf8a99148fee099bbc366a5ba18010780e733f6645eb0f4d2843dcdc57086",
+      "bytes": 3339
+    },
+    {
+      "path": "SDD_MANIFEST.md",
+      "sha256": "6093cb9bacaaa90e4fc79f056fb986e8420b5c86120a8cc83f4f8fbd16bc6686",
+      "bytes": 852
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "ab51d2e252bf1178b1fcca5b9a7afebf92affb2c883055ff90343f5edcfce018",
+      "bytes": 2908
+    },
+    {
+      "path": "SETUP_CODEX_CLAUDE.md",
+      "sha256": "3dba7bced8d4fca102ce5bc610461a430cc8c5f1f5bf2ad708a3528811faf510",
+      "bytes": 1250
+    },
+    {
+      "path": "TEST_PLAN.md",
+      "sha256": "ee804d9456af16663d7ae7f16121f90fd1f58e9c457a06a8fef5b01ae9a0ab9b",
+      "bytes": 2397
+    },
+    {
+      "path": "THREAT_MODEL.md",
+      "sha256": "e3595539470840c9ce083a9c99de4b8bafbe45b79fc9a3bd234fbb309564e45f",
+      "bytes": 2188
+    },
+    {
+      "path": "adr/0001-modular-monolith.md",
+      "sha256": "e8dc88aea0859d61899872fae2a3f5e7a2781427e8cf06ae350c46495a0cbaae",
+      "bytes": 478
+    },
+    {
+      "path": "adr/0002-anonymous-per-tab-session.md",
+      "sha256": "f0d3951e9dff1b8cb2feca9797d5e5384c0ddf693cdd500caa4a8cfa1e4cf749",
+      "bytes": 569
+    },
+    {
+      "path": "adr/0003-n1-n2-outbound-gate.md",
+      "sha256": "be3ea803696dd2c16cb42c90ad405b3e80806d9feb71c742e49c8036db7068d4",
+      "bytes": 389
+    },
+    {
+      "path": "adr/0004-operator-capacity-manual-claim.md",
+      "sha256": "e17585fa04852932a5b206789e5111ac41510db4dc63d59b4ecaaebd6415d490",
+      "bytes": 312
+    },
+    {
+      "path": "adr/0005-dual-rag-strategy.md",
+      "sha256": "67131ae89b689f852baec4a762bea9f0225bee6067d08eb6db06515cb5b52a1b",
+      "bytes": 390
+    },
+    {
+      "path": "adr/0006-offline-ingestion-v1.md",
+      "sha256": "71abf126b4b3280f6712d5588a945b749fa490b036926290bf43cb51dbc62949",
+      "bytes": 403
+    },
+    {
+      "path": "adr/0007-citation-exposure.md",
+      "sha256": "bee36c7f510c977b565dadb80a177131f36f66206cc84729f58fec561641ddfc",
+      "bytes": 400
+    },
+    {
+      "path": "adr/0008-web-now-telegram-later.md",
+      "sha256": "1dd41d7b0500d9a18f12bb82ee2bf3597b667d6868af91ef5736b3598a52771f",
+      "bytes": 314
+    },
+    {
+      "path": "adr/0009-future-persisted-continuity.md",
+      "sha256": "1f3f7671e85f79c5cc924e812093d384ddc5b353817d0e6c415fc1953a393afe",
+      "bytes": 466
+    },
+    {
+      "path": "docs/architecture/CHANNEL_ABSTRACTION.md",
+      "sha256": "7cd76de00f9ad3a2dc18ce947b85cbc2b8a13b6155d18f822c4ca3f52b08c7ca",
+      "bytes": 682
+    },
+    {
+      "path": "docs/architecture/CONVERSATION_STATE_MACHINE.md",
+      "sha256": "11b2637257633176c21eecfcf0147a7cced47e8aac6c25bed8f5b0d964501060",
+      "bytes": 1239
+    },
+    {
+      "path": "docs/architecture/EVENT_CATALOG.md",
+      "sha256": "adc1ed23a9b55c6506633c2465a79bb561dbaa3f7858df18c3e9abf5d80e4085",
+      "bytes": 1999
+    },
+    {
+      "path": "docs/architecture/KNOWLEDGE_INGESTION.md",
+      "sha256": "5ba2ecae7152fa64e8b0d9ef23cfcc21188a7c84fd4b10f2b03b9308954f4ceb",
+      "bytes": 2752
+    },
+    {
+      "path": "docs/architecture/RAG_DESIGN.md",
+      "sha256": "dd77c00d75a9c402c83c92066cbb2ea7bac413b94476ae56336867e58f68e997",
+      "bytes": 2627
+    },
+    {
+      "path": "docs/architecture/RBAC.md",
+      "sha256": "5ddf9fe211ed42368f62b6f2cf3eab09ef0722346a8d499361e0f77b7595ac24",
+      "bytes": 837
+    },
+    {
+      "path": "docs/architecture/SEQUENCE_FLOWS.md",
+      "sha256": "8a60ed49db1a4bf24574745afeb4e6ab549e492a64b1d99094c86407edb9ce4e",
+      "bytes": 2167
+    },
+    {
+      "path": "docs/governance/AUTONOMY_GOVERNANCE.md",
+      "sha256": "100f77c6502a4729033e9909c37c1a844c92e3361cf3258a9ea1359cd5b9ea8f",
+      "bytes": 542
+    },
+    {
+      "path": "docs/governance/CITATION_POLICY.md",
+      "sha256": "f658b7a03492291c7611575f8be30caaa9ef3ef31a4610f56dae9e4e137f1281",
+      "bytes": 651
+    },
+    {
+      "path": "docs/product/AUTONOMY_MATURITY_MODEL.md",
+      "sha256": "9b2e273b77a7a2bfefb30533bef5253da48c3f3ac0b9d7e0f1f5f4b5c1d259dc",
+      "bytes": 601
+    },
+    {
+      "path": "docs/product/FUTURE_SESSION_CONTINUITY.md",
+      "sha256": "b8c802a628051acf30181f67e64fa36c66af9849681accbb112ae5bbce7091f9",
+      "bytes": 1431
+    },
+    {
+      "path": "docs/product/V1_INTERFACE_CONTRACT.md",
+      "sha256": "65ea5093ab74d81995919078040e533e9dfd6574a1734e30c8f54162e168e80a",
+      "bytes": 2170
+    },
+    {
+      "path": "docs/product/V1_SCOPE.md",
+      "sha256": "7ac110872d026d1eae8393f23d3af80702fbbcc74a2a11271d34575cf7f6a39f",
+      "bytes": 998
+    },
+    {
+      "path": "docs/sdd/GRILL_GATE.md",
+      "sha256": "b8f51c850ed55d910a4e8a132824afc1f3a4413a7cbe6f751b139660457a519a",
+      "bytes": 639
+    },
+    {
+      "path": "docs/sdd/SDD_WORKFLOW.md",
+      "sha256": "00eaf0f27087243e91b5022a68991b1deb0b819c0752d53a2849545312bc1d56",
+      "bytes": 771
+    },
+    {
+      "path": "prompts/rag_answer.md",
+      "sha256": "a5f02ba5e8ecb7e2862e745c899e1d3958f70e22a4e49f33fd6847817815f044",
+      "bytes": 1041
+    },
+    {
+      "path": "prompts/rag_regenerate.md",
+      "sha256": "ddf07c533613ebdc3426360a8c3b2a0534bde59cde4d862f8f1234981cc3b496",
+      "bytes": 356
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/acceptance.md",
+      "sha256": "a093e4f856bb7cd3b2a5d5197033d4f638acb78bd6454b92e9aa6537de7e27a7",
+      "bytes": 3826
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/checklists/done.md",
+      "sha256": "ceea6c5711451d178dd0aa42c28a09c8cef9bde2e9b6faeeda0b30fd9ba5f55c",
+      "bytes": 663
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/checklists/requirements.md",
+      "sha256": "1bf9d5b90a4c39c44226e9fcb027aaafff590ffe272cce639480b40519d7fdb0",
+      "bytes": 749
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/checklists/security.md",
+      "sha256": "2e88ab517f221b074cc11c0f93df267af1ec5a56215b9f2c0ce009971427e9fe",
+      "bytes": 664
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/checklists/traceability.md",
+      "sha256": "09dbb4ba3449b82731af8f23147f1dd61d652bc12383b26687302b1f2b25ac25",
+      "bytes": 774
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/contracts/openapi.yaml",
+      "sha256": "e62a83501c27fabaf681f04f5abfcf759a83fab68b3d5368440a677eece39f9b",
+      "bytes": 19952
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/data-model.md",
+      "sha256": "77f7131661f23a3afbbc1d83fa7f012561739e2c73b5d94cef8470f5c66978ea",
+      "bytes": 6499
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/plan.md",
+      "sha256": "12db6f9702c9549cc4bba131d155431d41df20a0229b44579c89c9fa38256e52",
+      "bytes": 7294
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/quickstart.md",
+      "sha256": "85e3b37ce8c59e26e9cfff4984e16fcfaf0ab9dd61dcadccdbe51501947801c9",
+      "bytes": 940
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/research.md",
+      "sha256": "42a82f99e877f7817259809ba458aa9426be4fb60fed99300be9bf4fb0dc5ab0",
+      "bytes": 2033
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/spec.md",
+      "sha256": "bad169741ac3df669052fbc38bd364e675c251b741fd4fd06121d0a693f69c8b",
+      "bytes": 20039
+    },
+    {
+      "path": "specs/001-v1-assisted-customer-service/tasks.md",
+      "sha256": "cd06080e94525e4f4008be13ffc55354087f81e0f868a3dc4b1ded8b01196c29",
+      "bytes": 13297
+    }
+  ]
+}

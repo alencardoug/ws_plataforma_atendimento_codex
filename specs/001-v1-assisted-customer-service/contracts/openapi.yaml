@@ -1,0 +1,596 @@
+openapi: 3.1.0
+info:
+  title: Customer Care AI V1 API
+  version: 1.0.0
+  description: >-
+    V1 contract for anonymous customer conversations and authenticated operator
+    N1/N2 service. AI generation is internal; no endpoint directly publishes an AI
+    generation to the customer.
+servers:
+  - url: http://localhost:8000/api/v1
+paths:
+  /public/conversations:
+    post:
+      tags: [Public Customer]
+      summary: Create anonymous conversation
+      security: []
+      responses:
+        '201':
+          description: Conversation created; raw access token is returned once.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateConversationResponse'
+  /public/conversations/{conversationId}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags: [Public Customer]
+      summary: Read token-bound conversation
+      security:
+        - customerConversationToken: []
+      responses:
+        '200':
+          description: Customer-safe conversation projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerConversation'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Public Customer]
+      summary: Close token-bound conversation
+      security:
+        - customerConversationToken: []
+      responses:
+        '200':
+          description: Closed conversation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerConversation'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /public/conversations/{conversationId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Public Customer]
+      summary: Send customer message
+      description: Persists message without requiring synchronous AI generation.
+      security:
+        - customerConversationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCustomerMessageRequest'
+      responses:
+        '201':
+          description: Customer message persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerMessage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /auth/operator/login:
+    post:
+      tags: [Operator Auth]
+      summary: Operator login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorLoginRequest'
+      responses:
+        '200':
+          description: Authenticated operator token/session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorLoginResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /operator/me:
+    get:
+      tags: [Operator]
+      summary: Current operator
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Operator identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operator'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /operator/runtime-config:
+    get:
+      tags: [Operator]
+      summary: Read V1 runtime mode/capacity configuration
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Read-only operator-visible configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConfig'
+  /operator/conversations:
+    get:
+      tags: [Operator]
+      summary: List waiting and/or own active conversations
+      security:
+        - operatorBearer: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [waiting, active, all]
+            default: all
+      responses:
+        '200':
+          description: Operator conversation summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OperatorConversationSummary'
+  /operator/conversations/{conversationId}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags: [Operator]
+      summary: Read operator conversation detail
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Internal operator projection including visible AI/evidence metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationDetail'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/conversations/{conversationId}/claim:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Claim waiting conversation
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Conversation activated/assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationDetail'
+        '409':
+          description: Capacity exceeded or conversation no longer claimable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /operator/conversations/{conversationId}/release:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Release active conversation back to waiting queue
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationSummary'
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operator/conversations/{conversationId}/close:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Close assigned conversation
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationSummary'
+  /operator/conversations/{conversationId}/take-over:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Reduce effective N2 conversation to N1 until close
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TakeOverRequest'
+      responses:
+        '200':
+          description: Effective mode changed to N1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationDetail'
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operator/conversations/{conversationId}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Explicitly send final customer-visible operator message
+      description: >-
+        This is the only V1 operator operation that creates a customer-visible
+        operator message. An AI generation may be referenced as provenance but is
+        never sent directly.
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendOperatorMessageRequest'
+      responses:
+        '201':
+          description: Final message sent/persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorMessage'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/conversations/{conversationId}/drafts:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator AI]
+      summary: Generate internal grounded draft in effective N2
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateDraftRequest'
+      responses:
+        '201':
+          description: Internal draft generated or abstained
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGeneration'
+        '409':
+          description: Conversation is N1/taken-over or message not eligible
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /operator/drafts/{generationId}/regenerate:
+    parameters:
+      - $ref: '#/components/parameters/GenerationId'
+    post:
+      tags: [Operator AI]
+      summary: Create a new internal generation with lineage
+      security:
+        - operatorBearer: []
+      responses:
+        '201':
+          description: New generation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGeneration'
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /operator/knowledge/search:
+    post:
+      tags: [Operator AI]
+      summary: Manual evidence search
+      description: >-
+        Returns evidence only. In effective/global N1 this requires the assistive
+        search flag. In N2 it is available to operator as a review tool.
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeSearchRequest'
+      responses:
+        '200':
+          description: Internal evidence results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeSearchResponse'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+components:
+  securitySchemes:
+    customerConversationToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-conversation-token
+    operatorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT-or-session-token
+  parameters:
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    GenerationId:
+      name: generationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  responses:
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated credential is not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Domain state conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ValidationError:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: AI/RAG provider dependency unavailable; manual service may remain available
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        request_id: { type: [string, 'null'] }
+    CreateConversationResponse:
+      type: object
+      required: [conversation, access_token]
+      properties:
+        conversation:
+          $ref: '#/components/schemas/CustomerConversation'
+        access_token:
+          type: string
+          description: Returned once; frontend stores in this tab's sessionStorage.
+    CustomerConversation:
+      type: object
+      required: [id, status, messages, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/CustomerVisibleMessage' }
+        created_at: { type: string, format: date-time }
+        closed_at: { type: [string, 'null'], format: date-time }
+    CustomerVisibleMessage:
+      oneOf:
+        - $ref: '#/components/schemas/CustomerMessage'
+        - $ref: '#/components/schemas/OperatorMessage'
+    CustomerMessage:
+      type: object
+      required: [id, author_type, body, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        author_type: { type: string, const: CUSTOMER }
+        body: { type: string, minLength: 1, maxLength: 8000 }
+        created_at: { type: string, format: date-time }
+    OperatorMessage:
+      type: object
+      required: [id, author_type, body, citations, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        author_type: { type: string, const: OPERATOR }
+        body: { type: string }
+        citations:
+          type: array
+          items: { $ref: '#/components/schemas/CustomerCitation' }
+        created_at: { type: string, format: date-time }
+    CustomerCitation:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        section: { type: [string, 'null'] }
+        url: { type: [string, 'null'], format: uri }
+    SendCustomerMessageRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 8000 }
+    OperatorLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    OperatorLoginResponse:
+      type: object
+      required: [access_token, operator]
+      properties:
+        access_token: { type: string }
+        operator: { $ref: '#/components/schemas/Operator' }
+    Operator:
+      type: object
+      required: [id, email, display_name]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        display_name: { type: string }
+    RuntimeConfig:
+      type: object
+      required: [global_maturity_mode, n1_assistive_search_enabled, max_active_conversations]
+      properties:
+        global_maturity_mode: { $ref: '#/components/schemas/MaturityMode' }
+        n1_assistive_search_enabled: { type: boolean }
+        max_active_conversations: { type: integer, minimum: 1 }
+    ConversationStatus:
+      type: string
+      enum: [WAITING, ACTIVE, CLOSED]
+    MaturityMode:
+      type: string
+      enum: [N1, N2]
+    OperatorConversationSummary:
+      type: object
+      required: [id, status, effective_mode, created_at, last_message_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        effective_mode: { $ref: '#/components/schemas/MaturityMode' }
+        created_at: { type: string, format: date-time }
+        last_message_at: { type: [string, 'null'], format: date-time }
+        unread_customer_messages: { type: integer, minimum: 0 }
+    OperatorConversationDetail:
+      allOf:
+        - $ref: '#/components/schemas/OperatorConversationSummary'
+        - type: object
+          required: [messages]
+          properties:
+            messages:
+              type: array
+              items: { $ref: '#/components/schemas/CustomerVisibleMessage' }
+            latest_generation:
+              oneOf:
+                - $ref: '#/components/schemas/AIGeneration'
+                - type: 'null'
+    TakeOverRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 500
+    SendOperatorMessageRequest:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 12000 }
+        source_generation_id: { type: [string, 'null'], format: uuid }
+        citation_source_ids:
+          type: array
+          items: { type: string, format: uuid }
+          default: []
+    GenerateDraftRequest:
+      type: object
+      required: [triggering_message_id]
+      properties:
+        triggering_message_id: { type: string, format: uuid }
+    AIGeneration:
+      type: object
+      required:
+        - id
+        - conversation_id
+        - triggering_message_id
+        - status
+        - draft_text
+        - evidence
+        - created_at
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        triggering_message_id: { type: string, format: uuid }
+        prior_generation_id: { type: [string, 'null'], format: uuid }
+        status:
+          type: string
+          enum: [ANSWER, ABSTAIN]
+        draft_text: { type: string }
+        reason_code:
+          type: [string, 'null']
+          enum: [INSUFFICIENT_EVIDENCE, CONFLICTING_EVIDENCE, OUT_OF_SCOPE, RETRIEVAL_FAILURE, null]
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/InternalEvidence' }
+        model: { type: string }
+        prompt_version: { type: string }
+        duration_ms: { type: [integer, 'null'] }
+        created_at: { type: string, format: date-time }
+    KnowledgeSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 4000 }
+        conversation_id: { type: [string, 'null'], format: uuid }
+        top_k: { type: integer, minimum: 1, maximum: 20, default: 8 }
+    KnowledgeSearchResponse:
+      type: object
+      required: [retrieval_run_id, evidence]
+      properties:
+        retrieval_run_id: { type: string, format: uuid }
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/InternalEvidence' }
+    InternalEvidence:
+      type: object
+      required:
+        - retrieval_hit_id
+        - knowledge_type
+        - rank
+        - score
+        - title
+        - content
+        - customer_citation_allowed
+      properties:
+        retrieval_hit_id: { type: string, format: uuid }
+        knowledge_type:
+          type: string
+          enum: [ADMIN_QA, CLINICAL]
+        rank: { type: integer, minimum: 1 }
+        score: { type: number }
+        title: { type: string }
+        section: { type: [string, 'null'] }
+        content: { type: string }
+        matched_child_excerpt: { type: [string, 'null'] }
+        customer_citation_allowed: { type: boolean }
