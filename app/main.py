@@ -242,7 +242,7 @@ def search_content(q: str, cancer_type: str | None = None, limit: int = Query(5,
               FROM content.chunks c
               JOIN content.documents d ON d.document_id=c.parent_document_id
              WHERE c.search_vector @@ websearch_to_tsquery('portuguese', :q)
-               AND (:cancer_type IS NULL OR d.cancer_type=:cancer_type)
+               AND (CAST(:cancer_type AS text) IS NULL OR d.cancer_type=CAST(:cancer_type AS text))
              ORDER BY rank DESC LIMIT :limit
         """), {"q": q, "cancer_type": cancer_type, "limit": limit}).mappings().all()
     return {"items": [dict(r) for r in rows]}
