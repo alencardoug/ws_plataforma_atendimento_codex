@@ -14,6 +14,11 @@ If Spec Kit is already initialized, preserve its command/skill integration and m
 
 `CLAUDE.md` delegates to `AGENTS.md` and provides the artifact read order. Start with `PROMPT_START_V1.md`.
 
+After human V1 acceptance, use `PROMPT_REVIEW_V1_CLAUDE.md` for an independent
+read-only closure review. Run the first pass in Claude Code Plan mode and keep
+its report in chat until a human has reviewed the findings. Do not let the
+reviewer edit canonical artifacts while it is determining the verdict.
+
 ## Spec Kit
 
 Use the repository's installed Spec Kit integration. The conceptual lifecycle is:

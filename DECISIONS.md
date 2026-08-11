@@ -29,3 +29,4 @@ Canonical design decisions are also captured as ADRs under `adr/`.
 | D-023 | Adopt existing `content.documents` parent -> `content.chunks` child and flat `content.qa_entries` in place; do not duplicate the corpus | Accepted |
 | D-024 | Preserve legacy scheduling/identity/billing source and schema as dormant historical assets, but exclude their endpoints and behavior from the V1 runtime | Accepted |
 | D-025 | Keep the existing `app/` + pip backend root; reorganize it into required logical modules instead of a greenfield `backend/`/Poetry migration | Accepted |
+| D-026 | Specify the next feature cycle as read-only dynamic appointment availability; unresolved `dynamic_data_required` evidence must abstain/fall back safely and never expose internal implementation text | Accepted for next-cycle specification |

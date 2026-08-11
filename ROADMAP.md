@@ -8,6 +8,35 @@ This roadmap preserves the long-term product vision. It is **not executable scop
 
 Current scope. Anonymous web customer, operator, N1/N2, offline ingestion, dual RAG strategy, queue/capacity, audit, local Docker Compose.
 
+### Next feature cycle — Dynamic appointment availability
+
+Planned Spec Kit feature directory: `specs/002-dynamic-appointment-availability/`.
+This entry records agreed intent but is not executable scope until its own
+specification, plan, tasks, and consistency analysis are approved.
+
+The cycle must begin with a safety correction: administrative evidence marked
+`dynamic_data_required=true` must never be passed through as a literal answer
+when its resolver is unavailable. It must produce a controlled abstention or a
+manual-service instruction without exposing internal table names, resolver
+names, placeholders, or implementation guidance.
+
+Planned in scope:
+
+- allowlisted resolution of `dynamic_resolver=appointment_availability`;
+- read-only consultation of synthetic availability in PostgreSQL;
+- structured, time-zone-aware evidence for RAG and operator review;
+- explicit operator send remains the only customer-visible outbound action;
+- append-only audit of resolver request, outcome, and safe provenance;
+- manual fallback for unavailable, stale, empty, or failed dynamic data;
+- tests for unresolved dynamic data, fabrication prevention, data freshness,
+  resolver allowlisting, failure fallback, and information exposure.
+
+Explicitly deferred from this cycle:
+
+- holding, reserving, confirming, rescheduling, or cancelling appointments;
+- CPF, customer identity/profile persistence, payment, or saved continuity;
+- autonomous AI send or autonomous scheduling.
+
 ### V2 — Commercial product experience
 
 - professional UI/UX;
