@@ -128,7 +128,7 @@ export function CustomerPage() {
 
 export function OperatorPage() {
   const [token, setToken] = useState(() => sessionStorage.getItem("operator_token") || "");
-  const [email, setEmail] = useState("operator@example.com");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [items, setItems] = useState<ConversationSummary[]>([]);
   const [selected, setSelected] = useState<OperatorConversation | null>(null);

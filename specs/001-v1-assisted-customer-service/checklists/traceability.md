@@ -5,7 +5,7 @@ The coding agent should expand this into an implementation/test matrix during T0
 | Requirement family | Primary tasks | Acceptance area |
 |---|---|---|
 | Anonymous session FR-001..007 | T040-T048 | A/B/I |
-| Operator auth FR-010..011 | T050-T054 | B/I |
+| Operator auth FR-010..011, FR-017 | T050-T054, T201-T203 | A/B/I/J |
 | Queue/capacity FR-012..016 | T060-T066 | B |
 | Mode/take-over FR-020..024 | T160-T165 | D/E |
 | Messaging FR-030..035 | T070-T074, T140-T144 | C/D/E/I |

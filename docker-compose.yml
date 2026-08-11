@@ -18,12 +18,22 @@ services:
 
   backend:
     build: ./app
-    env_file: .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oncology:oncology_demo_change_me@db:5432/oncology}
-      AI_PROVIDER: ${AI_PROVIDER:-openai}
       GLOBAL_MATURITY_MODE: ${GLOBAL_MATURITY_MODE:-N2}
       N1_ASSISTIVE_SEARCH_ENABLED: ${N1_ASSISTIVE_SEARCH_ENABLED:-true}
+      OPERATOR_MAX_ACTIVE_CONVERSATIONS: ${OPERATOR_MAX_ACTIVE_CONVERSATIONS:-4}
+      ANONYMOUS_TOKEN_PEPPER: ${ANONYMOUS_TOKEN_PEPPER:?set ANONYMOUS_TOKEN_PEPPER in .env}
+      OPERATOR_AUTH_SECRET: ${OPERATOR_AUTH_SECRET:?set OPERATOR_AUTH_SECRET in .env}
+      OPERATOR_AUTH_TTL_MINUTES: ${OPERATOR_AUTH_TTL_MINUTES:-480}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      AI_GENERATION_MODEL: ${AI_GENERATION_MODEL:-gpt-5-mini}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
+      AI_EMBEDDING_DIMENSION: ${AI_EMBEDDING_DIMENSION:-1536}
+      API_ROOT_PATH: ${API_ROOT_PATH:-/api/v1}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      TZ: ${APP_TIMEZONE:-America/Sao_Paulo}
     ports:
       - "8000:8000"
     depends_on:

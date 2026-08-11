@@ -8,6 +8,11 @@ This is the executable definition of DONE, supplementary to `spec.md`.
 - [x] PostgreSQL 17 + pgvector is healthy.
 - [x] Migrations apply from empty database.
 - [x] Synthetic operator seed is reproducible.
+- [x] Operator provisioning has exactly one V1 path: the explicit offline seed
+  command; application/Compose startup creates no operator from environment
+  credentials.
+- [x] Re-seeding the same normalized operator email updates/reactivates exactly
+  one account and does not create a duplicate.
 - [x] Administrative demo Q&A ingestion succeeds.
 - [x] Clinical parent-child demo ingestion succeeds.
 - [x] Re-running ingestion does not duplicate unchanged records.

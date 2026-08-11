@@ -42,6 +42,18 @@ docker compose run --rm backend python -m customer_care.auth.seed_operator \
 docker compose run --rm backend python -m customer_care.knowledge.ingest
 ```
 
+A criação/atualização de operadores ocorre **somente** pelo comando explícito
+`customer_care.auth.seed_operator` acima. O startup do Compose/backend não cria
+contas. Não adicione `LOGIN_OPERATOR_USERNAME` ou `LOGIN_OPERATOR_PASSWORD` ao
+`.env`: essas variáveis não são configuração suportada e são ignoradas. A senha
+em texto puro existe apenas como argumento dessa execução pontual; somente o
+hash Argon2 é persistido.
+
+Executar o seed novamente com o mesmo e-mail (ignorando maiúsculas/minúsculas e
+espaços externos) atualiza a senha/nome e reativa a mesma conta. Usar outro
+e-mail cria outro operador válido; contas criadas anteriormente não são
+removidas automaticamente.
+
 A ingestão é idempotente e carrega as duas famílias de conhecimento do V1: Q&A administrativo plano e conteúdo clínico parent-child. Ela usa o provedor de embeddings configurado em `.env`.
 
 ### 3. Subir a aplicação

@@ -253,6 +253,11 @@ As the system owner, I want critical facts recorded so future quality/governance
 - **FR-014:** Maximum active conversations per operator shall be configurable; V1 acceptance value = 4.
 - **FR-015:** Capacity check shall prevent a fifth active assignment and be safe against race conditions.
 - **FR-016:** Six simultaneous anonymous conversations shall coexist for acceptance testing.
+- **FR-017:** V1 operator provisioning shall occur only through the explicit
+  offline seed command. Application/Compose startup and login-related
+  environment variables shall not auto-create an operator. Re-seeding the same
+  normalized email shall update/reactivate that account rather than create a
+  duplicate.
 
 ### Maturity / take-over
 

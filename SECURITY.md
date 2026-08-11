@@ -12,6 +12,9 @@ Operator:
 - password stored using a modern password hash (Argon2id preferred, or framework-vetted equivalent);
 - server issues an authenticated operator session/token;
 - all operator authorization is server-side.
+- account provisioning only through the explicit offline seed command;
+- no plaintext operator credential retained in backend/Compose runtime
+  settings and no account auto-created at application startup.
 
 Anonymous customer:
 

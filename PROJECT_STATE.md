@@ -73,6 +73,10 @@ the completed V1 and confirms no material spec/code divergence.
   so new customer messages appear automatically;
 - operator workspace now exposes an explicit `Encerrar conversa` action using
   the existing audited close endpoint.
+- operator provisioning is now explicitly limited to the offline seed command;
+  Compose allowlists supported backend settings and does not forward unsupported
+  `LOGIN_OPERATOR_*` values, startup creates no account, and repeated normalized
+  email seed updates/reactivates one account.
 
 ## Next action
 

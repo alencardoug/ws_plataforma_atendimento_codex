@@ -9,6 +9,12 @@
 5. ingest administrative + clinical demo knowledge;
 6. verify health endpoints.
 
+Operator provisioning is deliberately separate from application startup. The
+only V1 provisioning path is the explicit
+`python -m customer_care.auth.seed_operator` command documented below. Runtime
+variables named `LOGIN_OPERATOR_USERNAME` or `LOGIN_OPERATOR_PASSWORD` are not
+supported and do not create accounts.
+
 ## Mode configuration
 
 V1 mode is durable for the running deployment and configured outside the product UI:
@@ -61,6 +67,11 @@ docker compose run --rm backend python -m customer_care.auth.seed_operator \
   --email operator@example.com --password 'choose-a-local-password' \
   --display-name 'Operador Demo'
 ```
+
+The command upserts by normalized email. Reusing the same email changes that
+account; choosing another email creates an additional valid operator. It does
+not delete/deactivate historical operators because they may be referenced by
+assignments, messages, generations, retrievals, and audit events.
 
 Reconcile/re-embed the approved corpus idempotently:
 

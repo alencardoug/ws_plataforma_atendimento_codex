@@ -224,3 +224,49 @@ Convergence findings and repairs made during the final pass:
   probes outside the feature contract.
 
 No material V1 spec/code divergence remains. No V2 behavior was introduced.
+
+## 10. Human-acceptance refinement — operator provisioning
+
+Review on 2026-08-11 found no tracked implementation of
+`LOGIN_OPERATOR_USERNAME` or `LOGIN_OPERATOR_PASSWORD`: Pydantic settings ignore
+those extra local `.env` keys and FastAPI startup does not invoke operator seed
+logic. Compose previously used `env_file: .env`, which unnecessarily forwarded
+the ignored values to the backend process but still did not provision an
+account. The correction replaces that pass-through with an explicit allowlist
+of supported backend settings. The persisted local demonstration database did
+contain multiple active synthetic operators created by prior explicit
+seed/smoke invocations; that durable state, rather than environment-driven
+auto-provisioning, explains why more than one credential could log in.
+
+The repaired V1 contract makes the existing intended boundary explicit:
+
+- the offline seed CLI is the only operator provisioning path;
+- startup never provisions credentials;
+- Compose does not forward unsupported local `.env` entries to the backend;
+- the plaintext seed password is passed to the one-shot command, not retained
+  as a backend runtime setting;
+- normalized-email upsert keeps repeated provisioning idempotent for that
+  identity;
+- multiple operators remain valid domain data, so historical accounts are not
+  destructively removed as part of this correction.
+
+This is a V1 security/operations clarification covered by FR-017 and
+T201-T203. It does not introduce a second auth route, restrict the domain to a
+single operator, or activate future scheduling behavior.
+
+Post-repair convergence evidence:
+
+- Compose configuration resolves successfully and its backend environment
+  allowlist excludes both unsupported `LOGIN_OPERATOR_*` keys even while they
+  remain in the local interpolation-only `.env` file;
+- unit tests prove normalized-email seed update, ignored unsupported settings,
+  and absence of provisioning from the application factory;
+- backend Ruff, mypy, and pytest pass (7 tests);
+- frontend ESLint, TypeScript, Vitest (3 tests), and production build pass;
+- the recreated Compose stack reports backend health/readiness and serves the
+  operator frontend.
+
+No material spec/plan/tasks/code divergence remains for this refinement. The
+local database's historical synthetic operators remain active pending an
+explicit human choice of which account(s) to retain; no destructive cleanup was
+required to establish the single provisioning path.

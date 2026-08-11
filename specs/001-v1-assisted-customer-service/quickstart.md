@@ -34,6 +34,13 @@ docker compose run --rm backend python -m customer_care.auth.seed_operator \
   --display-name 'Operador Demo'
 ```
 
+This explicit offline command is the only V1 operator-provisioning path.
+Compose/backend startup does not create an operator. Do not configure
+`LOGIN_OPERATOR_USERNAME` or `LOGIN_OPERATOR_PASSWORD`; they are unsupported
+and ignored. The command normalizes email and updates/reactivates the same
+account when repeated. A different email intentionally creates a different
+operator, and existing accounts are not implicitly removed.
+
 When upgrading an existing PostgreSQL 16 environment, do not attach its data
 directory directly to PostgreSQL 17. Back up/restore or recreate the synthetic
 local volume, then run Alembic and ingestion. Compose uses the new named volume
@@ -68,3 +75,6 @@ E2E_OPERATOR_EMAIL=operator@example.com \
 E2E_OPERATOR_PASSWORD='your-local-seeded-password' \
 npm --prefix frontend run test:e2e
 ```
+
+`E2E_OPERATOR_EMAIL` and `E2E_OPERATOR_PASSWORD` configure only the Playwright
+test process; they do not provision an application operator.

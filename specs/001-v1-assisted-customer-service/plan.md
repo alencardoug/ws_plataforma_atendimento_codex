@@ -84,6 +84,17 @@ Public request header may use `Authorization: Bearer <conversation-token>` or an
 
 Seed one or more synthetic operator accounts through a seed command.
 
+The offline `customer_care.auth.seed_operator` command is the only V1 operator
+provisioning path. Backend/Compose startup must not create accounts from
+environment credentials. In particular, `LOGIN_OPERATOR_USERNAME` and
+`LOGIN_OPERATOR_PASSWORD` are not supported settings: keeping a reusable
+plaintext login password in the backend process environment would unnecessarily
+broaden secret exposure. Compose must explicitly allowlist supported backend
+settings rather than forward every local `.env` entry. The seed command receives
+the plaintext password only for that one-shot invocation, persists an Argon2
+hash, normalizes email, and upserts by normalized email so rerunning it
+updates/reactivates the same account.
+
 Use strong password hashing. V1 may use stateless signed access tokens or secure server sessions; keep implementation simple and documented.
 
 ## 6. Queue and assignment

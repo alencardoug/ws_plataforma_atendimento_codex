@@ -202,6 +202,18 @@ Legend:
 - [x] **T199** Run Spec Kit `converge` or equivalent spec-to-code review; repair drift.
 - [x] **T200** Update `PROJECT_STATE.md` to V1 DONE only if every DONE item passes; do not start V2.
 
+## Phase 17 — Human-acceptance refinements
+
+- [x] **T201 [US2]** Make the explicit offline seed command the documented only
+  V1 operator-provisioning path; state that startup and `LOGIN_OPERATOR_*`
+  environment variables do not create accounts, and allowlist supported
+  backend environment settings in Compose.
+- [x] **T202 [US2]** Add automated evidence that application startup does not
+  provision an operator and that re-seeding the same normalized email updates
+  one account rather than creating a duplicate.
+- [x] **T203 [US2]** Re-run affected auth/configuration/documentation gates and
+  record convergence without enabling V2 behavior.
+
 ## Dependency summary
 
 ```text
