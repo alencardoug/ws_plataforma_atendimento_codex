@@ -21,7 +21,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CreateConversationResponse'
-  /public/conversations/{conversationId}:
+  /public/conversations/{conversation_id}:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     get:
@@ -52,7 +52,7 @@ paths:
                 $ref: '#/components/schemas/CustomerConversation'
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /public/conversations/{conversationId}/messages:
+  /public/conversations/{conversation_id}/messages:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -145,7 +145,7 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/OperatorConversationSummary'
-  /operator/conversations/{conversationId}:
+  /operator/conversations/{conversation_id}:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     get:
@@ -162,7 +162,7 @@ paths:
                 $ref: '#/components/schemas/OperatorConversationDetail'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-  /operator/conversations/{conversationId}/claim:
+  /operator/conversations/{conversation_id}/claim:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -183,7 +183,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-  /operator/conversations/{conversationId}/release:
+  /operator/conversations/{conversation_id}/release:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -199,7 +199,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperatorConversationSummary'
         '409': { $ref: '#/components/responses/Conflict' }
-  /operator/conversations/{conversationId}/close:
+  /operator/conversations/{conversation_id}/close:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -214,7 +214,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperatorConversationSummary'
-  /operator/conversations/{conversationId}/take-over:
+  /operator/conversations/{conversation_id}/take-over:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -236,7 +236,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/OperatorConversationDetail'
         '409': { $ref: '#/components/responses/Conflict' }
-  /operator/conversations/{conversationId}/messages:
+  /operator/conversations/{conversation_id}/messages:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -264,7 +264,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationError' }
-  /operator/conversations/{conversationId}/drafts:
+  /operator/conversations/{conversation_id}/drafts:
     parameters:
       - $ref: '#/components/parameters/ConversationId'
     post:
@@ -292,7 +292,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
-  /operator/drafts/{generationId}/regenerate:
+  /operator/drafts/{generation_id}/regenerate:
     parameters:
       - $ref: '#/components/parameters/GenerationId'
     post:
@@ -345,14 +345,14 @@ components:
       bearerFormat: JWT-or-session-token
   parameters:
     ConversationId:
-      name: conversationId
+      name: conversation_id
       in: path
       required: true
       schema:
         type: string
         format: uuid
     GenerationId:
-      name: generationId
+      name: generation_id
       in: path
       required: true
       schema:
@@ -519,7 +519,7 @@ components:
       properties:
         body: { type: string, minLength: 1, maxLength: 12000 }
         source_generation_id: { type: [string, 'null'], format: uuid }
-        citation_source_ids:
+        citation_retrieval_hit_ids:
           type: array
           items: { type: string, format: uuid }
           default: []

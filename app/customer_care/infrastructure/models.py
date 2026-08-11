@@ -1,0 +1,222 @@
+from datetime import date, datetime
+from uuid import UUID
+
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID as PGUUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class OperatorUser(Base):
+    __tablename__ = "operator_users"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    email: Mapped[str] = mapped_column(Text, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text)
+    display_name: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    channel: Mapped[str] = mapped_column(String, default="WEB")
+    status: Mapped[str] = mapped_column(String, default="WAITING")
+    anonymous_token_digest: Mapped[str] = mapped_column(Text, unique=True)
+    initial_mode: Mapped[str] = mapped_column(String)
+    effective_mode: Mapped[str] = mapped_column(String)
+    taken_over_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ConversationAssignment(Base):
+    __tablename__ = "conversation_assignments"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"))
+    operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    release_reason: Mapped[str | None] = mapped_column(Text)
+
+
+class Message(Base):
+    __tablename__ = "messages"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"))
+    author_type: Mapped[str] = mapped_column(String)
+    operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    body: Mapped[str] = mapped_column(Text)
+    source_generation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class KnowledgeDocument(Base):
+    __tablename__ = "documents"
+    __table_args__ = {"schema": "content"}
+    document_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    document_type: Mapped[str] = mapped_column(Text)
+    cancer_type: Mapped[str | None] = mapped_column(Text)
+    care_phase: Mapped[str | None] = mapped_column(Text)
+    procedure_slug: Mapped[str | None] = mapped_column(Text)
+    audience: Mapped[list[str]] = mapped_column(ARRAY(Text))
+    language: Mapped[str] = mapped_column(Text)
+    responsible_physician: Mapped[str] = mapped_column(Text)
+    version: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String)
+    created_at: Mapped[date] = mapped_column(Date)
+    last_reviewed_at: Mapped[date] = mapped_column(Date)
+    next_review_at: Mapped[date] = mapped_column(Date)
+    patient_markdown_path: Mapped[str] = mapped_column(Text)
+    content_markdown: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    customer_citation_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    dynamic_data_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    dynamic_resolver: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("parent_document_id", "ordinal"), {"schema": "content"})
+    chunk_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    parent_document_id: Mapped[str] = mapped_column(ForeignKey("content.documents.document_id"))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    heading: Mapped[str] = mapped_column(Text)
+    content_markdown: Mapped[str] = mapped_column(Text)
+    retrieval_intents: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    symptoms: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    urgency: Mapped[str] = mapped_column(Text, default="educativo")
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    embedding_provider: Mapped[str | None] = mapped_column(Text)
+    embedding_model: Mapped[str | None] = mapped_column(Text)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer)
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class QAEntry(Base):
+    __tablename__ = "qa_entries"
+    __table_args__ = {"schema": "content"}
+    qa_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    category: Mapped[str] = mapped_column(Text)
+    question: Mapped[str] = mapped_column(Text)
+    answer_markdown: Mapped[str] = mapped_column(Text)
+    retrieval_intents: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    dynamic_data_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    dynamic_resolver: Mapped[str | None] = mapped_column(Text)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, default=dict)
+    content_hash: Mapped[str | None] = mapped_column(Text)
+    customer_citation_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1536))
+    embedding_provider: Mapped[str | None] = mapped_column(Text)
+    embedding_model: Mapped[str | None] = mapped_column(Text)
+    embedding_dimension: Mapped[int | None] = mapped_column(Integer)
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class RetrievalRun(Base):
+    __tablename__ = "retrieval_runs"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    conversation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.conversations.id"))
+    triggering_message_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.messages.id"))
+    operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    purpose: Mapped[str] = mapped_column(String)
+    query_text: Mapped[str] = mapped_column(Text)
+    embedding_model: Mapped[str] = mapped_column(Text)
+    top_k: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    error_code: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RetrievalHit(Base):
+    __tablename__ = "retrieval_hits"
+    __table_args__ = (UniqueConstraint("retrieval_run_id", "rank"), {"schema": "customer_service"})
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    retrieval_run_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.retrieval_runs.id"))
+    matched_kind: Mapped[str] = mapped_column(String)
+    matched_qa_id: Mapped[str | None] = mapped_column(ForeignKey("content.qa_entries.qa_id"))
+    matched_chunk_id: Mapped[str | None] = mapped_column(ForeignKey("content.chunks.chunk_id"))
+    expanded_parent_document_id: Mapped[str | None] = mapped_column(ForeignKey("content.documents.document_id"))
+    rank: Mapped[int] = mapped_column(Integer)
+    score: Mapped[float] = mapped_column(Float)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class AIGeneration(Base):
+    __tablename__ = "ai_generations"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"))
+    triggering_message_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.messages.id"))
+    retrieval_run_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.retrieval_runs.id"))
+    prior_generation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
+    operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    status: Mapped[str] = mapped_column(String)
+    draft_text: Mapped[str] = mapped_column(Text)
+    abstention_reason: Mapped[str | None] = mapped_column(Text)
+    provider: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(Text)
+    prompt_version: Mapped[str] = mapped_column(Text)
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class AIGenerationSource(Base):
+    __tablename__ = "ai_generation_sources"
+    __table_args__ = (UniqueConstraint("ai_generation_id", "use_order"), {"schema": "customer_service"})
+    ai_generation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.ai_generations.id"), primary_key=True)
+    retrieval_hit_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.retrieval_hits.id"), primary_key=True)
+    use_order: Mapped[int] = mapped_column(Integer)
+
+
+class MessageCitation(Base):
+    __tablename__ = "message_citations"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    message_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.messages.id"))
+    knowledge_document_id: Mapped[str] = mapped_column(ForeignKey("content.documents.document_id"))
+    knowledge_chunk_id: Mapped[str | None] = mapped_column(ForeignKey("content.chunks.chunk_id"))
+    display_title: Mapped[str] = mapped_column(Text)
+    display_section: Mapped[str | None] = mapped_column(Text)
+    display_url: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    event_type: Mapped[str] = mapped_column(Text)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    actor_type: Mapped[str] = mapped_column(String)
+    actor_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True))
+    conversation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.conversations.id"))
+    correlation_id: Mapped[str | None] = mapped_column(Text)
+    payload_json: Mapped[dict] = mapped_column(JSONB, default=dict)

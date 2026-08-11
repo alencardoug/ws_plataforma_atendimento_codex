@@ -115,3 +115,112 @@ For whoever implements ingestion, concrete old→new field mapping observed dire
 - `customer_citation_allowed` defaults `true` for approved clinical parents per `data-model.md` §5.
 
 This confirms `plan.md` §9's instruction ("write an adapter... rather than rewriting source data") is achievable, but the PARENT-synthesis-from-file step should be made explicit in the plan since it's currently only inferable, not stated.
+
+---
+
+## 8. Repository-aware follow-up — Codex, 2026-08-10
+
+This section is a later review and supersedes recommendations in §§3–7 where
+explicitly stated. The original Claude Code review is retained above as an
+independent historical record.
+
+### 8.1 Inspection scope and evidence boundary
+
+Read/reviewed: agent instructions, constitution, every active feature artifact,
+root architecture/security/data/test/operations documents, ADRs, OpenAPI,
+existing FastAPI source, Docker configuration, all DDL/bootstrap SQL, corpus
+generators, JSONL catalogs, prompts, and the structure/content contract of the
+generated clinical Markdown corpus.
+
+The Docker service was stopped during this follow-up, so no new live-database
+claims are made here. Live PostgreSQL 16.14/table/NULL-embedding counts in §2
+remain evidence from Claude's earlier direct inspection. Version-controlled
+assets were independently reconciled with these results:
+
+```text
+clinical catalog parents:       57 unique IDs
+clinical Markdown files:        57; 0 missing; 0 front-matter ID mismatches
+SQL clinical parent inserts:    57
+SQL clinical child inserts:     570; 0 orphan/duplicate child IDs
+administrative JSONL Q&A:       86 unique IDs
+```
+
+### 8.2 Corrected parent-child finding
+
+The existing hierarchy is already structurally valid:
+
+```text
+content.documents.document_id (clinical parent)
+                 ^
+                 |
+content.chunks.parent_document_id (clinical child, 570 rows)
+```
+
+The recommendation in §7 to manufacture one additional `PARENT` chunk per
+document is rejected. It would duplicate the parent identity and force a second
+knowledge corpus solely to match a conceptual table sketch. V1 instead adopts
+`content.documents`, `content.chunks`, and flat `content.qa_entries` in place.
+Ingestion loads/validates each Markdown parent body and persists its canonical
+snapshot/hash on `content.documents`; only child and Q&A records are embedded.
+`data-model.md`, `plan.md`, ingestion architecture, and T022/T080/T081/T091 now
+state this mapping.
+
+### 8.3 Repository-fit corrections
+
+- Greenfield `backend/` + Poetry was unnecessary churn. The plan now keeps the
+  existing `app/` backend root and pip workflow while requiring the same logical
+  modules and dependency boundaries.
+- Legacy `db/init/*.sql` may already be applied and cannot serve as editable
+  Alembic history. The plan now requires forward-only Alembic adoption with
+  explicit empty-DB and legacy-baseline preflight test paths.
+- V1 conversation/audit tables use a separate service schema; the populated
+  `content.*` knowledge tables are evolved in place.
+- PostgreSQL 16 -> 17 requires a documented data-volume migration/recreation
+  path; changing only the Docker image is not sufficient.
+- Legacy scheduling/payment/CPF source and schemas may remain as historical
+  assets, but their endpoints are excluded from the V1 runtime because the
+  active spec explicitly excludes scheduling execution and persisted customer
+  identity.
+- The OpenAPI send request now accepts retrieval-hit IDs as citation candidates,
+  removing an ambiguity between text knowledge IDs and UUID API identifiers.
+- FR and NFR task/test traceability is now explicit.
+
+### 8.4 Remaining implementation gaps (not documentation contradictions)
+
+No V1 implementation has been completed. PostgreSQL 17 Compose, Alembic,
+modular backend, frontend, authentication, conversations, audit, ingestion,
+embeddings/retrieval, AI drafts, security enforcement, and all automated gates
+remain tasks. `.env.example` still lacks V1 settings and is intentionally left
+for T013 together with typed settings T014 so names cannot drift.
+
+### 8.5 Analyze verdict
+
+After the repairs above, the authoritative V1 artifacts are mutually
+consistent and fit the repository's actual reusable assets. Acceptance coverage
+is complete at task/test-planning level. Phase 0 T000–T003 is complete; this
+does not imply that any implementation or DONE checklist item has passed.
+
+## 9. Post-implementation convergence — Codex, 2026-08-10
+
+The completed implementation was compared again with the constitution, spec,
+plan, tasks, data model, OpenAPI, event catalog, security rules, and actual
+PostgreSQL schema. The earlier §8.4 gap list is now historical: PostgreSQL 17,
+Alembic, modular backend, React frontend, authentication, conversations,
+audit, ingestion, pgvector retrieval, N2 drafts, citations, and automated gates
+are implemented.
+
+Convergence findings and repairs made during the final pass:
+
+- retained the canonical `content.documents -> content.chunks` hierarchy and
+  flat `content.qa_entries`, with no duplicate knowledge corpus;
+- fixed changed-content ingestion so canonical Q&A/child fields and embeddings
+  are updated together;
+- added the missing `knowledge.manual_search` audit event;
+- added Compose overrides needed to run deterministic N1/N2 acceptance without
+  altering secret-bearing `.env` values;
+- completed the N1 evidence-only UI and real Chrome E2E scenarios;
+- compared all 17 contracted operation paths with the generated FastAPI
+  OpenAPI surface; only `/health` and `/ready` remain additional operational
+  probes outside the feature contract.
+
+No material V1 spec/code divergence remains. No V2 behavior was introduced.

@@ -1,6 +1,6 @@
 services:
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-oncology}
       POSTGRES_USER: ${POSTGRES_USER:-oncology}
@@ -9,27 +9,36 @@ services:
     ports:
       - "${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./db/init:/docker-entrypoint-initdb.d:ro
+      - postgres17_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-oncology} -d ${POSTGRES_DB:-oncology}"]
       interval: 5s
       timeout: 5s
       retries: 20
 
-  api:
+  backend:
     build: ./app
+    env_file: .env
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://oncology:oncology_demo_change_me@db:5432/oncology}
-      CPF_ENCRYPTION_KEY: ${CPF_ENCRYPTION_KEY:-demo-only-change-before-use-32bytes}
-      APP_TIMEZONE: America/Sao_Paulo
+      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      GLOBAL_MATURITY_MODE: ${GLOBAL_MATURITY_MODE:-N2}
+      N1_ASSISTIVE_SEARCH_ENABLED: ${N1_ASSISTIVE_SEARCH_ENABLED:-true}
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ./documents:/app/documents:ro
+      - ./documents:/workspace/documents:ro
+      - ./prompts:/workspace/prompts:ro
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
 
 volumes:
-  postgres_data:
+  postgres17_data:

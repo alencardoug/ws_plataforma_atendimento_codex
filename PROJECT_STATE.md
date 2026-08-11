@@ -1,15 +1,15 @@
 # Project State
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 ## Lifecycle
 
 - long-term product discovery: sufficiently complete for roadmap;
 - V1 requirements clarification: complete;
 - V1 spec baseline: ready;
-- V1 implementation plan: ready for analyze pass;
-- V1 tasks: ready for analyze pass;
-- V1 code: not started in this package;
+- V1 implementation plan: complete and repository-converged;
+- V1 tasks: complete (T000–T200);
+- V1 code: **DONE**; all required implementation and acceptance gates pass;
 - V2+: roadmap only.
 
 ## Authorized feature
@@ -23,10 +23,18 @@ performed by Claude Code (2026-08-10), acting as external reviewer, not the
 authoring agent. Confirms the spec package is internally consistent; lists
 concrete spec-vs-repository gaps (PostgreSQL 17 vs. 16 running, missing
 Alembic/backend/frontend scaffolding, parent-child ingestion adapter design,
-missing `.env.example` vars) and one open scope decision (fate of the
-pre-existing scheduling/identity/billing schema and `app/main.py`) that the
-project owner must resolve before Phase 1. Read this before starting
-`tasks.md` Phase 0/1.
+missing `.env.example` vars) and originally raised one open scope decision
+about the pre-existing scheduling/identity/billing schema and `app/main.py`.
+Read the Codex follow-up below before starting Phase 1.
+
+Codex follow-up §§8–9 (2026-08-10) reconciles the version-controlled corpus and
+repairs the plan: the existing 57 `content.documents` parents, 570
+`content.chunks` children, and 86 flat `content.qa_entries` are adopted in
+place; no synthetic PARENT chunks or duplicate knowledge tables are created.
+The existing `app/`/pip project is evolved rather than replaced. Legacy
+scheduling/payment/CPF endpoints are excluded from the V1 runtime while their
+source/schema may remain dormant. The post-implementation convergence records
+the completed V1 and confirms no material spec/code divergence.
 
 ## V1 decisions frozen
 
@@ -51,13 +59,22 @@ project owner must resolve before Phase 1. Read this before starting
 - all data synthetic/demo;
 - local Docker Compose only; no GCP acceptance requirement.
 
-## Next coding-agent action
+## V1 acceptance result
 
-1. Read `AGENTS.md` / `CLAUDE.md` and constitution.
-2. Read the entire feature directory.
-3. Run a cross-artifact consistency/analyze pass.
-4. Fix documentation contradictions before code.
-5. Implement tasks in dependency order.
-6. Run all acceptance gates.
-7. Converge implementation against the spec.
-8. Stop before V2.
+- PostgreSQL 17/pgvector and forward-only Alembic migration pass from empty and legacy-baseline databases.
+- Canonical knowledge contains 57 clinical parents, 570 child chunks, and 86 flat administrative Q&A records.
+- Deterministic API acceptance, real OpenAI adapter smoke, concurrent max-four capacity, restart/audit/security checks, and Chrome E2E N1/N2 scenarios pass.
+- Backend Ruff/mypy/pytest and frontend ESLint/TypeScript/Vitest/build/Playwright gates pass.
+- The normal Compose stack is restored from `.env` and healthy on 2026-08-10.
+
+## Post-acceptance fixes — 2026-08-11
+
+- operator workspace now polls the selected conversation as well as the queue,
+  so new customer messages appear automatically;
+- operator workspace now exposes an explicit `Encerrar conversa` action using
+  the existing audited close endpoint.
+
+## Next action
+
+Human acceptance may now be performed at `/customer` and `/operator`. Stop
+before V2 unless a new feature is explicitly authorized.

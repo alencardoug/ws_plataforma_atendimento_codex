@@ -17,8 +17,7 @@ docker compose up --build
 ## Repository target shape
 
 ```text
-backend/
-  app/
+app/
     auth/
     anonymous_access/
     conversations/
@@ -31,7 +30,7 @@ backend/
     shared/
   tests/
   alembic/
-  pyproject.toml
+  requirements*.txt
 frontend/
   src/
     api/

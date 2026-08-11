@@ -4,13 +4,13 @@ This is the executable definition of DONE, supplementary to `spec.md`.
 
 ## A. Environment
 
-- [ ] Fresh/known local environment can start with documented Docker Compose commands.
-- [ ] PostgreSQL 17 + pgvector is healthy.
-- [ ] Migrations apply from empty database.
-- [ ] Synthetic operator seed is reproducible.
-- [ ] Administrative demo Q&A ingestion succeeds.
-- [ ] Clinical parent-child demo ingestion succeeds.
-- [ ] Re-running ingestion does not duplicate unchanged records.
+- [x] Fresh/known local environment can start with documented Docker Compose commands.
+- [x] PostgreSQL 17 + pgvector is healthy.
+- [x] Migrations apply from empty database.
+- [x] Synthetic operator seed is reproducible.
+- [x] Administrative demo Q&A ingestion succeeds.
+- [x] Clinical parent-child demo ingestion succeeds.
+- [x] Re-running ingestion does not duplicate unchanged records.
 
 ## B. Six-client queue scenario
 
@@ -114,3 +114,17 @@ Simulate/fake generation provider failure.
 - type/lint gates pass;
 - OpenAPI matches implementation;
 - no material spec/code divergence remains.
+
+## Execution record — 2026-08-10
+
+All sections A–J passed against local Docker Compose/PostgreSQL 17. Evidence:
+
+- migrations passed both on an empty database and over the legacy bootstrap schema;
+- ingestion reconciled 57 clinical parents, 570 children, and 86 flat Q&A records; a second run embedded zero records, while a controlled one-record change re-embedded exactly one record;
+- concurrent capacity returned four `200` claims and two `409` conflicts;
+- deterministic API smokes covered N1/N2, dual RAG, parent expansion, citations, abstention/provider failure, explicit human send, take-over, security negatives, and append-only audit;
+- real-provider smoke used the configured OpenAI embedding/generation adapters and verified grounded draft, abstention normalization, explicit send, and safe citation projection;
+- Playwright with local Chrome passed the six independent browser-context N2 scenario and the N1 manual-service/disabled-search scenario;
+- backend Ruff, mypy, pytest and frontend ESLint, TypeScript, Vitest, production build, and Playwright gates passed.
+
+Temporary deterministic databases were isolated from the normal Compose database. Synthetic test credentials and corpora only were used.

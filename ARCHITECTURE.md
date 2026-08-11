@@ -17,7 +17,7 @@ Backend:
 - Alembic;
 - PostgreSQL 17;
 - pgvector;
-- Poetry;
+- pip/requirements files (the repository's existing workflow; Poetry is not required by V1);
 - OpenAI adapter behind provider-neutral interfaces.
 
 Frontend:
@@ -148,6 +148,13 @@ V1 exposes a CLI/application command with idempotent/upsert semantics. Inputs ar
 
 - Administrative Q&A: searchable text should combine normalized question + answer; answer is grounding content.
 - Clinical parent-child: only child records are vector-indexed; retrieval expands each selected child to its parent context.
+
+Repository mapping: `content.documents` is the clinical parent entity and
+`content.chunks.parent_document_id` is the existing child-to-parent relation.
+`content.qa_entries` is the flat administrative family. These tables are
+adopted/evolved in place through forward Alembic revisions; V1 must not create a
+parallel duplicate knowledge corpus. Parent Markdown bodies referenced by the
+catalog are validated and snapshotted during ingestion.
 
 See `docs/architecture/KNOWLEDGE_INGESTION.md` and `RAG_DESIGN.md`.
 

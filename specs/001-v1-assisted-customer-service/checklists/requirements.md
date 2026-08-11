@@ -17,4 +17,4 @@
 
 Before implementation:
 
-- [ ] `analyze` finds no contradiction across spec/plan/tasks/OpenAPI/data model.
+- [x] Repository-aware equivalent `analyze` completed; contradictions repaired and residual implementation gaps documented in `analysis.md` §8.

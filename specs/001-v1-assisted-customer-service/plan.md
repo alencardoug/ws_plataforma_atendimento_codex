@@ -2,19 +2,25 @@
 
 ## 1. Technical summary
 
-Implement a local Docker Compose modular monolith:
+Evolve the existing local Docker Compose repository into a V1 modular monolith:
 
 - React/TypeScript/Vite SPA with `/customer` and `/operator` surfaces;
 - FastAPI backend with explicit domain/application modules;
 - PostgreSQL 17 + pgvector;
 - OpenAI generation/embedding adapters behind interfaces;
-- offline ingestion CLI;
+- offline ingestion CLI that adopts the existing `content.*` corpus in place;
 - pytest + frontend unit/component + E2E test stack.
+
+The repository is not greenfield. `app/main.py`, raw `db/init/*.sql`, and the
+`scheduling`/`identity`/`billing` demo predate this feature. V1 preserves those
+files as historical/preparatory assets, but the V1 runtime must not expose the
+legacy scheduling/payment/CPF endpoints. The existing clinical and Q&A content
+is the source corpus and must not be copied into a parallel knowledge store.
 
 ## 2. Module boundaries
 
 ```text
-backend/app/
+app/
   auth/
   anonymous_access/
   conversations/
@@ -32,7 +38,25 @@ Each module should expose application services and repository/provider ports whe
 
 ## 3. Persistence strategy
 
-Use SQLAlchemy models + Alembic migrations.
+Use SQLAlchemy models + Alembic migrations. Keep `app/` as the backend project
+root and retain the repository's pip/requirements workflow unless a later,
+analyzed need justifies changing package managers. A Poetry conversion has no
+V1 requirement and would add migration work without product value.
+
+The existing `db/init/001_schema.sql` through `005_lifecycle.sql` are legacy
+bootstrap files that may already have been applied. Do not edit or treat them as
+the V1 migration history. Introduce Alembic with two verified paths:
+
+- empty database: establish/adopt the existing content baseline, then apply V1
+  revisions;
+- existing legacy database: stamp only after schema preflight proves the
+  expected baseline, then apply the same forward-only V1 revisions.
+
+New V1 conversational tables should live in an explicit service schema (for
+example `customer_service`) to avoid collisions with the existing legacy
+schemas. Existing `content.documents`, `content.chunks`, and
+`content.qa_entries` remain the canonical knowledge tables and are evolved by
+forward migrations rather than duplicated as `knowledge_*` tables.
 
 Transactions:
 
@@ -93,7 +117,7 @@ Customer send:
 Operator send:
 
 1. validate operator assignment/authorization;
-2. accept final text + optional source_generation_id + selected citation source IDs;
+2. accept final text + optional source_generation_id + selected retrieval-hit IDs as citation candidates;
 3. validate every customer citation exposure server-side;
 4. create operator Message;
 5. record generation provenance and edited/accepted status;
@@ -124,7 +148,28 @@ Implement canonical adapters for:
 - administrative Q&A;
 - clinical parent-child.
 
-Input format should be explicit JSONL/JSON/CSV mapping or adapter to existing prepared data. If source schema already exists in the implementation repository, write an adapter that maps it into the canonical DTO rather than rewriting source data.
+The source formats are already fixed and versioned:
+
+- administrative: `documents/qa/qa-catalog.jsonl` and existing
+  `content.qa_entries` (`qa_id` is the stable external ID);
+- clinical parents: `documents/catalog.jsonl` plus each referenced Markdown
+  file (`document_id` is the stable parent ID);
+- clinical children: existing/generated `content.chunks`
+  (`chunk_id`, `parent_document_id`).
+
+The current parent-child relation is `content.documents.document_id` ->
+`content.chunks.parent_document_id`; it is already the V1 hierarchy. Do not
+synthesize duplicate `PARENT` chunk rows. During ingestion, parse and validate
+the Markdown front matter/body, persist a canonical parent-body snapshot and
+content hash on `content.documents`, then embed only Q&A and child rows. A
+missing Markdown file, mismatched document ID, or orphan child fails validation.
+
+Add the minimum forward-migrated fields needed for V1 traceability and policy:
+parent body/hash, active state, citation exposure, and embedding
+provider/model/dimension/hash/timestamp on searchable records. Preserve the
+existing `vector(1536)` columns and HNSW indexes only if the configured model is
+pinned to 1536 dimensions; otherwise require an explicit migration and full
+re-embedding.
 
 Use content hashes and external IDs for idempotency.
 
@@ -229,13 +274,13 @@ No premature optimization. Capture timings around embedding/retrieval/generation
 
 ## 16. Deliverables
 
-- working backend/frontend/db compose stack;
+- working backend/frontend/db compose stack using PostgreSQL 17 + pgvector;
 - migrations;
 - seed command;
 - ingestion command and demo corpus mapping;
 - OpenAPI implementation;
 - tests;
-- `.env.example`;
+- `.env.example` with both retained database variables and every V1 setting;
 - quickstart;
 - acceptance evidence/log.
 

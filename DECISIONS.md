@@ -26,3 +26,6 @@ Canonical design decisions are also captured as ADRs under `adr/`.
 | D-020 | Future wrong CPF/password combination can fall back to new anonymous session but cannot access/overwrite persisted identity | Roadmap |
 | D-021 | Telegram is a later channel adapter, not a parallel engine | Roadmap |
 | D-022 | Autonomy may auto-decrease in future; never auto-increase | Roadmap |
+| D-023 | Adopt existing `content.documents` parent -> `content.chunks` child and flat `content.qa_entries` in place; do not duplicate the corpus | Accepted |
+| D-024 | Preserve legacy scheduling/identity/billing source and schema as dormant historical assets, but exclude their endpoints and behavior from the V1 runtime | Accepted |
+| D-025 | Keep the existing `app/` + pip backend root; reorganize it into required logical modules instead of a greenfield `backend/`/Poetry migration | Accepted |

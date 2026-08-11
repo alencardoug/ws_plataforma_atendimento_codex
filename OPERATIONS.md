@@ -37,4 +37,37 @@ Database unavailable:
 
 ## Demo reset
 
-Provide a documented way to delete/reseed synthetic conversations and re-ingest demo knowledge without manually editing database tables.
+All V1 data is synthetic. To reset only service interactions while preserving
+operators, migrations, and the knowledge corpus:
+
+```bash
+docker compose exec db sh -lc 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "TRUNCATE customer_service.audit_events,
+            customer_service.message_citations,
+            customer_service.ai_generation_sources,
+            customer_service.ai_generations,
+            customer_service.retrieval_hits,
+            customer_service.retrieval_runs,
+            customer_service.messages,
+            customer_service.conversation_assignments,
+            customer_service.conversations CASCADE;"'
+```
+
+This is destructive and appropriate only for the local synthetic demo. Re-seed
+an operator with a password supplied at invocation time:
+
+```bash
+docker compose run --rm backend python -m customer_care.auth.seed_operator \
+  --email operator@example.com --password 'choose-a-local-password' \
+  --display-name 'Operador Demo'
+```
+
+Reconcile/re-embed the approved corpus idempotently:
+
+```bash
+docker compose run --rm backend python -m customer_care.knowledge.ingest
+```
+
+For a completely fresh local PostgreSQL 17 database, explicitly remove the
+Compose volume, start `db`, apply `alembic upgrade head`, seed, and ingest. Never
+attach a PostgreSQL 16 data directory directly to PostgreSQL 17.

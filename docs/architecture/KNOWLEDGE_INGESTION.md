@@ -37,13 +37,13 @@ Customer citation exposure:
 
 ### 2. Clinical parent-child
 
-Content is already logically structured into parent and child units before V1 ingestion.
+Content is already physically structured as `content.documents` parents and
+`content.chunks` children linked by `parent_document_id`.
 
 Canonical parent fields:
 
-- `external_id`
-- `document_external_id`
-- `content`
+- `document_id` / `external_id`
+- `content` loaded from the Markdown path in `documents/catalog.jsonl`
 - `title`
 - `section/path`
 - source/version metadata
@@ -51,7 +51,7 @@ Canonical parent fields:
 Canonical child fields:
 
 - `external_id`
-- `parent_external_id`
+- `parent_document_id`
 - `content`
 - section/path metadata
 
@@ -59,6 +59,10 @@ Index:
 
 - child content is embedded and vector indexed;
 - parent need not be vector indexed in V1 unless implementation evidence proves value.
+
+Do not synthesize a duplicate PARENT chunk. Ingestion validates that catalog,
+Markdown front matter, existing document row, and every child agree on the
+stable parent ID, then persists the parent-body snapshot/hash on the document.
 
 Retrieval:
 

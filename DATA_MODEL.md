@@ -26,6 +26,10 @@ Core entities:
 - a customer-visible operator message may reference an AI generation as provenance;
 - customer-visible citation must point only to knowledge marked exposable;
 - audit events are immutable through application APIs;
-- clinical child chunks may reference one parent chunk;
+- clinical `content.chunks` reference one parent `content.documents` row;
 - administrative Q&A chunks have no parent requirement;
 - embedding metadata stores model/version and embedding status.
+
+V1 adopts the existing `content.documents`, `content.chunks`, and
+`content.qa_entries` tables in place. No parallel `knowledge_*` corpus is
+created.

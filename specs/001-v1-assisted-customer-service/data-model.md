@@ -62,55 +62,79 @@ Only customer-visible conversation messages belong here.
 
 Important: there is no `AI` author in V1 customer messages.
 
-## 5. `knowledge_documents`
+## 5. Existing canonical knowledge tables
+
+The repository already has a populated knowledge model. V1 adopts and evolves
+it in place instead of creating parallel `knowledge_documents` /
+`knowledge_chunks` copies. Names below are implementation-canonical.
+
+### 5.1 `content.documents` — clinical parents
 
 | Field | Notes |
 |---|---|
-| id UUID PK | |
-| external_id text UNIQUE | source stable ID |
-| knowledge_type enum | `ADMIN_QA`, `CLINICAL` |
+| document_id text PK | existing stable parent/source ID |
 | title text | |
-| source_label text nullable | |
-| source_uri text nullable | internal/public source ref |
-| version text nullable | |
+| version text | existing source version |
+| patient_markdown_path text | existing repository source path; internal only |
+| content_markdown text | V1 parent-body snapshot loaded from source file |
 | content_hash text | |
-| customer_citation_allowed bool | default false for admin, explicit/true for approved clinical |
+| customer_citation_allowed bool | true only for approved clinical parent projection |
 | is_active bool | |
-| metadata_json jsonb | bounded source metadata |
+| metadata jsonb | existing bounded source metadata |
 | created_at/updated_at | |
 
-## 6. `knowledge_chunks`
+Existing clinical/review fields are retained. `patient_markdown_path` is never
+customer-visible.
+
+### 5.2 `content.chunks` — clinical children
 
 | Field | Notes |
 |---|---|
-| id UUID PK | |
-| document_id FK | |
-| external_id text | unique within source/document |
-| chunk_role enum | `QNA`, `PARENT`, `CHILD` |
-| parent_chunk_id self-FK nullable | required for clinical CHILD |
-| question text nullable | for QNA |
-| content text | Q&A answer, parent body, or child body |
-| search_text text | material used for embedding |
-| section_path text nullable | |
+| chunk_id text PK | existing stable child ID |
+| parent_document_id FK | required reference to `content.documents.document_id` |
+| ordinal int | unique within parent |
+| heading text | section heading/path |
+| content_markdown text | child grounding/search body |
 | content_hash text | |
-| embedding vector(D) nullable | only QNA/CHILD normally |
+| embedding vector(1536) nullable | existing representation; model must match |
+| embedding_provider text nullable | |
 | embedding_model text nullable | |
 | embedding_dimension int nullable | |
 | embedded_at timestamptz nullable | |
 | is_active bool | |
-| metadata_json jsonb | |
+| metadata jsonb | existing metadata |
 | created_at/updated_at | |
 
 Constraints:
 
-- `QNA`: no parent required; question recommended; embedding required after ingestion success.
-- `PARENT`: no parent; embedding optional/not required V1.
-- `CHILD`: `parent_chunk_id` required and parent role must be PARENT at application validation.
-- unique `(document_id, external_id)`.
+- every child references an existing clinical parent document;
+- unique `(parent_document_id, ordinal)` (already present);
+- embedding metadata/dimension matches the vector and configured model;
+- ingestion success requires an embedding for every active child.
 
-Vector index: create on searchable rows using the chosen V1 embedding dimension/operator class.
+The parent is a document, not a synthetic chunk. Retrieval expands a matched
+child through `parent_document_id` and uses the parent's snapshotted body.
 
-## 7. `retrieval_runs`
+### 5.3 `content.qa_entries` — flat administrative Q&A
+
+| Field | Notes |
+|---|---|
+| qa_id text PK | existing stable ID |
+| category text | existing grouping |
+| question text | searchable question |
+| answer_markdown text | grounding content |
+| content_hash text | canonical content hash |
+| customer_citation_allowed bool | default and V1 invariant `false` |
+| embedding vector(1536) nullable | existing representation; model must match |
+| embedding_provider/model/dimension | traceability |
+| embedded_at timestamptz nullable | |
+| is_active bool | |
+| metadata jsonb | existing bounded metadata |
+
+Administrative Q&A has no parent relation. Ingestion success requires an
+embedding for every active Q&A row.
+
+## 6. `retrieval_runs`
 
 | Field | Notes |
 |---|---|
@@ -127,21 +151,24 @@ Vector index: create on searchable rows using the chosen V1 embedding dimension/
 | error_code text nullable | |
 | created_at/completed_at | |
 
-## 8. `retrieval_hits`
+## 7. `retrieval_hits`
 
 | Field | Notes |
 |---|---|
 | id UUID PK | |
 | retrieval_run_id FK | |
-| matched_chunk_id FK | QNA or CHILD |
-| expanded_parent_chunk_id FK nullable | clinical |
+| matched_kind enum/text | `ADMIN_QA` or `CLINICAL_CHILD` |
+| matched_qa_id FK nullable | administrative match |
+| matched_chunk_id FK nullable | clinical child match |
+| expanded_parent_document_id FK nullable | clinical expansion |
 | rank int | |
 | score numeric/float | normalized/documented semantics |
 | created_at | |
 
-Unique `(retrieval_run_id, rank)` and preferably `(retrieval_run_id, matched_chunk_id)`.
+Exactly one matched target is set. Unique `(retrieval_run_id, rank)` and a
+run/target uniqueness rule prevent duplicate hits.
 
-## 9. `ai_generations`
+## 8. `ai_generations`
 
 | Field | Notes |
 |---|---|
@@ -165,7 +192,7 @@ Unique `(retrieval_run_id, rank)` and preferably `(retrieval_run_id, matched_chu
 
 No update required after creation except if implementation uses a short-lived processing state. Final successful generations should be immutable.
 
-## 10. `ai_generation_sources`
+## 9. `ai_generation_sources`
 
 Recommended normalized relation.
 
@@ -177,7 +204,7 @@ Recommended normalized relation.
 
 PK/unique on generation + hit.
 
-## 11. `message_citations`
+## 10. `message_citations`
 
 Only customer-visible citation attachments.
 
@@ -185,8 +212,8 @@ Only customer-visible citation attachments.
 |---|---|
 | id UUID PK | |
 | message_id FK | operator final message |
-| knowledge_document_id FK | source |
-| knowledge_chunk_id FK nullable | typically clinical parent |
+| knowledge_document_id FK | `content.documents`; clinical sources only in V1 |
+| knowledge_chunk_id FK nullable | supporting child provenance |
 | display_title text | snapshot approved display |
 | display_section text nullable | |
 | display_url text nullable | only approved public URL |
@@ -194,7 +221,7 @@ Only customer-visible citation attachments.
 
 Server creates only after checking source exposure policy.
 
-## 12. `audit_events`
+## 11. `audit_events`
 
 | Field | Notes |
 |---|---|
@@ -209,7 +236,7 @@ Server creates only after checking source exposure policy.
 
 No application update/delete methods.
 
-## 13. Future entities explicitly absent
+## 12. Future entities explicitly absent
 
 Do not create V1 tables for:
 
