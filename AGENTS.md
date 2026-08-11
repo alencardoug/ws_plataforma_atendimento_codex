@@ -15,9 +15,17 @@ Do not silently invent a resolution to conflicting requirements. Update the high
 
 ## Current authorized scope
 
-Feature: `specs/001-v1-assisted-customer-service`
+V1 baseline: `specs/001-v1-assisted-customer-service` — implemented and closed
+for new product behavior.
 
-Implement V1 only.
+V2 discovery/specification: `specs/002-v2-commercial-product-experience` —
+explicitly authorized by the human on 2026-08-11. Complete its specification,
+clarification record, plan, tasks, contracts, acceptance, and cross-artifact
+analysis before writing V2 production behavior; then implement in the approved
+SDD dependency order.
+
+Dynamic appointment availability remains a distinct future feature. It is not
+part of V2 unless a human explicitly adds it to the V2 specification.
 
 ## Required SDD flow
 
@@ -35,7 +43,7 @@ After code:
 1. run unit/integration/API/frontend/E2E gates;
 2. run spec-to-code convergence review;
 3. update docs for any approved implementation detail;
-4. stop before V2.
+4. do not begin a later feature without its own authorized specification.
 
 ## V1 non-negotiables
 
@@ -60,6 +68,10 @@ After code:
 - synthetic/demo data only;
 - no chain-of-thought persistence.
 
+These rules remain the V1 baseline. A V2 artifact may deliberately supersede a
+rule only when the human-approved V2 specification says so and preserves the
+constitution's safety constraints.
+
 ## Architecture rules
 
 Required logical modules:
@@ -81,7 +93,9 @@ The AI provider is behind an interface. The initial adapter may use OpenAI.
 
 The channel boundary must allow a later Telegram adapter without duplicating conversation/business/RAG logic.
 
-Do not add LangChain, LlamaIndex, Redis, Kafka, Celery, microservices, or a vector database separate from PostgreSQL unless an analyzed V1 requirement proves necessity.
+Do not add LangChain, LlamaIndex, Redis, Kafka, Celery, microservices, or a
+vector database separate from PostgreSQL unless an analyzed active-feature
+requirement proves necessity.
 
 ## Data rules
 

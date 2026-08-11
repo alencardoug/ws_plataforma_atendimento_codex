@@ -1,6 +1,9 @@
-# Product Roadmap — Frozen During V1
+# Product Roadmap
 
-This roadmap preserves the long-term product vision. It is **not executable scope**. Future versions must receive their own Spec Kit feature directory and clarification before implementation.
+This roadmap preserves the long-term product vision. It is **not executable
+scope**. The human authorized the V2 specification cycle on 2026-08-11, but
+V2 production behavior still requires its own completed Spec Kit flow before
+implementation. All other entries remain roadmap only.
 
 ## Era A — Existence
 
@@ -8,11 +11,12 @@ This roadmap preserves the long-term product vision. It is **not executable scop
 
 Current scope. Anonymous web customer, operator, N1/N2, offline ingestion, dual RAG strategy, queue/capacity, audit, local Docker Compose.
 
-### Next feature cycle — Dynamic appointment availability
+### Future feature — Dynamic appointment availability
 
-Planned Spec Kit feature directory: `specs/002-dynamic-appointment-availability/`.
-This entry records agreed intent but is not executable scope until its own
-specification, plan, tasks, and consistency analysis are approved.
+This is intentionally separate from V2. Choose a feature ID and create its
+Spec Kit directory only when a human authorizes this scope. This entry records
+agreed intent but is not executable scope until its own specification, plan,
+tasks, and consistency analysis are approved.
 
 The cycle must begin with a safety correction: administrative evidence marked
 `dynamic_data_required=true` must never be passed through as a literal answer
@@ -37,9 +41,26 @@ Explicitly deferred from this cycle:
 - CPF, customer identity/profile persistence, payment, or saved continuity;
 - autonomous AI send or autonomous scheduling.
 
-### V2 — Commercial product experience
+### V2 — Commercial product experience (authorized specification cycle)
+
+Feature package: `specs/002-v2-commercial-product-experience/`. The items
+below are approved discovery/specification inputs, not authorization to add V2
+runtime behavior before its SDD gates.
 
 - professional UI/UX;
+- customer-facing display and copy action for that customer's own conversation
+  token, without placing the token in URLs or logs;
+- operator-selected evidence workflow: manual search displays retrieved Q&A
+  records and clinical child chunks; the operator may select them before
+  generation. A selected clinical child returns its complete parent document
+  for explicit operator send, while selected Q&A records are supplied to the
+  LLM to compose a concise response focused on the customer request. Selection,
+  parent expansion, generation provenance, and explicit human send remain
+  auditable;
+- operator-selected conversation context: each message has a checkbox so the
+  operator can choose which customer and operator messages are provided to
+  draft generation; the selected message IDs and resulting generation remain
+  traceable and auditable;
 - streaming where beneficial;
 - stronger operator workspace ergonomics;
 - hybrid push/pull routing baseline;

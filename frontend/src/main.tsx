@@ -37,9 +37,14 @@ interface ConversationSummary {
   effective_mode: MaturityMode;
 }
 
-interface Evidence {
+export interface Evidence {
   retrieval_hit_id: string;
+  knowledge_type: "ADMIN_QA" | "CLINICAL";
+  rank: number;
   title: string;
+  section?: string | null;
+  content: string;
+  matched_child_excerpt?: string | null;
 }
 
 interface Draft {
@@ -74,6 +79,14 @@ async function api<T>(path: string, init: RequestInit = {}, token?: string): Pro
     throw new Error(message);
   }
   return body as T;
+}
+
+export function MessageBody({ body }: { body: string }) {
+  return <p className="message-body">{body}</p>;
+}
+
+export function ManualEvidence({ evidence }: { evidence: Evidence }) {
+  return <article className="manual-evidence"><strong>{evidence.title}</strong>{evidence.section && <small>Seção: {evidence.section}</small>}<MessageBody body={evidence.content} />{evidence.matched_child_excerpt && <><small>Trecho encontrado</small><MessageBody body={evidence.matched_child_excerpt} /></>}</article>;
 }
 
 export function CustomerPage() {
@@ -123,7 +136,7 @@ export function CustomerPage() {
     return <main><h1>Atendimento</h1><p>Converse anonimamente com nossa equipe.</p><button onClick={() => void start().catch((caught) => setError(errorMessage(caught)))}>Iniciar conversa</button>{error && <p role="alert">{error}</p>}</main>;
   }
 
-  return <main><h1>Atendimento</h1><p>Status: <strong>{conversation?.status || "carregando"}</strong></p><section className="messages" aria-live="polite">{conversation?.messages.map((message) => <article key={message.id} className={message.author_type.toLowerCase()}><strong>{message.author_type === "CUSTOMER" ? "Você" : "Atendente"}</strong><p>{message.body}</p>{message.citations?.map((citation) => <small key={`${citation.title}-${citation.section || ""}`}>Fonte: {citation.title}{citation.section ? ` — ${citation.section}` : ""}</small>)}</article>)}</section><form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><label>Mensagem<textarea value={text} onChange={(event) => setText(event.target.value)} required /></label><button disabled={conversation?.status === "CLOSED"}>Enviar</button></form>{conversation?.status !== "CLOSED" && <button onClick={() => void close().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}{error && <p role="alert">{error}</p>}</main>;
+  return <main><h1>Atendimento</h1><p>Status: <strong>{conversation?.status || "carregando"}</strong></p><section className="messages" aria-live="polite">{conversation?.messages.map((message) => <article key={message.id} className={message.author_type.toLowerCase()}><strong>{message.author_type === "CUSTOMER" ? "Você" : "Atendente"}</strong><MessageBody body={message.body} />{message.citations?.map((citation) => <small key={`${citation.title}-${citation.section || ""}`}>Fonte: {citation.title}{citation.section ? ` — ${citation.section}` : ""}</small>)}</article>)}</section><form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><label>Mensagem<textarea value={text} onChange={(event) => setText(event.target.value)} required /></label><button disabled={conversation?.status === "CLOSED"}>Enviar</button></form>{conversation?.status !== "CLOSED" && <button onClick={() => void close().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}{error && <p role="alert">{error}</p>}</main>;
 }
 
 export function OperatorPage() {
@@ -223,7 +236,8 @@ export function OperatorPage() {
   }
 
   const searchAvailable = selected?.effective_mode === "N2" || runtimeConfig?.n1_assistive_search_enabled;
-  return <main className="workspace"><aside><h2>Fila</h2>{items.map((conversation) => <div key={conversation.id}><button onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}>{conversation.status} · {conversation.effective_mode} · {conversation.id.slice(0, 8)}</button></div>)}</aside><section><h1>Conversa {selected?.effective_mode}</h1>{selected?.messages.map((message) => <article key={message.id}><strong>{message.author_type}</strong><p>{message.body}</p></article>)}{selected && <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><textarea value={text} onChange={(event) => setText(event.target.value)} required /><button>Enviar</button></form>}{selected && <button onClick={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}</section><aside><h2>IA / Evidências</h2>{selected?.effective_mode === "N2" && <button onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>}{selected?.effective_mode === "N2" && <button onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Take over</button>}{selected && searchAvailable && <form onSubmit={(event) => void search(event).catch((caught) => setError(errorMessage(caught)))}><label>Busca manual<input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} required /></label><button>Buscar evidências</button></form>}{selected?.effective_mode === "N1" && !searchAvailable && <p>Busca assistiva N1 desabilitada.</p>}{draft && <div><p>{draft.status}</p><p>{draft.draft_text}</p><button onClick={() => setText(draft.draft_text)}>Usar sugestão</button><button onClick={() => void regenerate().catch((caught) => setError(errorMessage(caught)))}>Regenerar</button>{draft.evidence.map((item) => <small key={item.retrieval_hit_id}>{item.title}</small>)}</div>}{searchEvidence.map((item) => <small key={item.retrieval_hit_id}>{item.title}</small>)}{error && <p role="alert">{error}</p>}</aside></main>;
+  const useDraftLabel = draft?.evidence.find((item) => item.rank === 1)?.knowledge_type === "CLINICAL" ? "Usar documento completo" : "Usar sugestão";
+  return <main className="workspace"><aside><h2>Fila</h2>{items.map((conversation) => <div key={conversation.id}><button onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}>{conversation.status} · {conversation.effective_mode} · {conversation.id.slice(0, 8)}</button></div>)}</aside><section><h1>Conversa {selected?.effective_mode}</h1>{selected?.messages.map((message) => <article key={message.id}><strong>{message.author_type}</strong><MessageBody body={message.body} /></article>)}{selected && <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><textarea value={text} onChange={(event) => setText(event.target.value)} required /><button>Enviar</button></form>}{selected && <button onClick={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}</section><aside><h2>IA / Evidências</h2>{selected?.effective_mode === "N2" && <button onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>}{selected?.effective_mode === "N2" && <button onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>}{selected && searchAvailable && <form onSubmit={(event) => void search(event).catch((caught) => setError(errorMessage(caught)))}><label>Busca manual<input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} required /></label><button>Buscar evidências</button></form>}{selected?.effective_mode === "N1" && !searchAvailable && <p>Busca assistiva N1 desabilitada.</p>}{draft && <div><p>{draft.status}</p><p>{draft.draft_text}</p><button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button><button onClick={() => void regenerate().catch((caught) => setError(errorMessage(caught)))}>Regenerar</button>{draft.evidence.map((item) => <small key={item.retrieval_hit_id}>{item.title}</small>)}</div>}{searchEvidence.map((item) => <ManualEvidence key={item.retrieval_hit_id} evidence={item} />)}{error && <p role="alert">{error}</p>}</aside></main>;
 }
 
 export function App() {

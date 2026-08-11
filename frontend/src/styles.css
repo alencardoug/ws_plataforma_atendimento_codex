@@ -9,6 +9,7 @@ input, textarea, button { font:inherit; padding:.6rem; }
 textarea { min-height:5rem; width:100%; box-sizing:border-box; }
 .messages { min-height:20rem; }
 article { margin:.5rem 0; padding:.75rem; border-radius:.5rem; background:#eef2f8; }
+.message-body { white-space: pre-wrap; overflow-wrap: anywhere; }
 article.customer { margin-left:20%; background:#dcecff; }
 small { display:block; margin:.35rem 0; }
 a { color: #1756a9; }

@@ -8,6 +8,8 @@ Canonical acceptance scenarios are in `specs/001-v1-assisted-customer-service/ac
 
 - maturity/effective mode policy;
 - take-over N2 -> N1;
+- plain-text multiline message rendering;
+- concise draft and retrieval-specific draft-strategy behavior;
 - citation exposure policy;
 - abstention decision mapping;
 - active capacity rule;
@@ -37,6 +39,7 @@ OpenAPI response/status behavior including authorization failures and capacity c
 - N2 draft/edit/send;
 - take-over control;
 - internal vs customer-visible citations.
+- manual-search evidence content/clinical matched-child excerpt rendering.
 
 ### End-to-end
 

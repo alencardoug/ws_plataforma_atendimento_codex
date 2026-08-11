@@ -4,46 +4,48 @@ Read and obey `AGENTS.md` first.
 
 ## Current lifecycle state
 
-- V1 implementation and automated acceptance are complete.
-- Human V1 acceptance and independent closure review are the current work.
-- `specs/001-v1-assisted-customer-service` remains the only executable feature.
-- `specs/002-dynamic-appointment-availability` is planned but does not exist as
-  executable scope yet. Do not implement it from `ROADMAP.md` or `DECISIONS.md`.
+- V1 implementation and acceptance are complete. Post-acceptance V1 refinements
+  exist in the current **uncommitted** worktree; preserve and review them rather
+  than resetting or replacing them.
+- The human explicitly authorized V2 discovery/specification on 2026-08-11.
+  Its package is `specs/002-v2-commercial-product-experience/`.
+- V2 production code must not begin until its feature artifacts have passed
+  `specify -> clarify -> plan -> tasks -> analyze` and acceptance coverage is
+  confirmed. The human authorization already covers proceeding in that order.
+  The V1 runtime remains the executable baseline in the meantime.
+- Dynamic appointment availability is a separate future feature, not the V2
+  package, unless a later human decision explicitly combines the scopes.
 
 Read in this order:
 
 1. `.specify/memory/constitution.md`
 2. `PROJECT_STATE.md`
-3. `specs/001-v1-assisted-customer-service/spec.md`
-4. `specs/001-v1-assisted-customer-service/plan.md`
-5. `specs/001-v1-assisted-customer-service/tasks.md`
-6. `specs/001-v1-assisted-customer-service/data-model.md`
-7. `specs/001-v1-assisted-customer-service/contracts/openapi.yaml`
-8. `specs/001-v1-assisted-customer-service/acceptance.md`
-9. `specs/001-v1-assisted-customer-service/analysis.md` and checklists
-10. `SDD_MANIFEST.md`, `ROADMAP.md`, and `DECISIONS.md`
-11. root architecture/security/data/test/operations documents
-12. ADRs as referenced by the plan
-13. the current Git diff when reviewing uncommitted work
+3. `CLAUDE_CODE_HANDOFF.md`
+4. `specs/002-v2-commercial-product-experience/spec.md`
+5. the complete V1 package, especially its `spec.md`, `plan.md`, `tasks.md`,
+   `data-model.md`, contract, acceptance, analysis, and checklists
+6. `SDD_MANIFEST.md`, `ROADMAP.md`, and `DECISIONS.md`
+7. root architecture/security/data/test/operations documents
+8. ADRs as referenced by the plan
+9. the current Git diff before changing any file
 
 ## Operating modes
 
-### Independent V1 closure review
+### V1 baseline and pending worktree review
 
-Use `PROMPT_REVIEW_V1_CLAUDE.md`. The first pass must be independent and
-read-only, preferably in Claude Code Plan mode:
+The V1 acceptance result is historical evidence, not permission to discard the
+uncommitted refinements. Before committing or building on them:
 
-- analyze artifacts, implementation, tests, acceptance evidence, and current
-  uncommitted changes;
-- report findings in chat with exact evidence and a GO, CONDITIONAL GO, or
-  NO-GO recommendation;
-- do not edit files, run state-changing commands, implement fixes, commit,
-  push, or start the next feature;
-- propose any useful verification commands and wait for explicit human
-  approval before running them.
+- inspect the diff and verify it remains in V1 scope;
+- run the relevant quality gates available in the environment, including the
+  newly added generation-strategy tests and credential-backed E2E when
+  credentials are supplied;
+- preserve the explicit-send, audit, token, and citation boundaries;
+- commit only when the human requests a commit.
 
-Do not update canonical artifacts while determining the review verdict. A
-human must first classify and approve each proposed correction.
+`PROMPT_REVIEW_V1_CLAUDE.md` remains available if an additional independent,
+read-only closure review is requested; its historic instruction not to start V2
+does not override this newer human authorization.
 
 ### Approved V1 correction
 
@@ -53,20 +55,19 @@ change, propagate the decision through plan/tasks when required, analyze again,
 then implement and rerun the affected gates. Do not broaden a defect fix into
 future scheduling behavior.
 
-### Next feature cycle
+### Authorized V2 specification cycle
 
-The planned next cycle is read-only dynamic appointment availability, recorded
-in `ROADMAP.md` and decision D-026. When a human explicitly authorizes that
-cycle, create `specs/002-dynamic-appointment-availability/` and start at
-`specify -> clarify -> plan -> tasks -> analyze`. Do not copy the V1 artifacts
-as if they were an approved feature specification, and do not write production
-code before the new analysis and acceptance coverage are complete.
+Start from `specs/002-v2-commercial-product-experience/spec.md`. It records
+only the V2 outcomes already agreed with the human. Resolve its explicit open
+questions through clarification; do not infer product behavior for them. Then
+write V2 `plan.md`, `tasks.md`, data model/contract updates, acceptance, and
+analysis. Do not copy V1 artifacts as if they were V2 requirements and do not
+write V2 production code before those gates are complete.
 
 ## General Claude Code behavior
 
-Use installed Spec Kit commands/skills when available. For V1 closure, perform
-analyze/convergence rather than regenerating product scope. For a newly
-authorized feature, begin a fresh SDD lifecycle.
+Use installed Spec Kit commands/skills when available. For V2, begin a fresh
+SDD lifecycle and run its analysis before implementation.
 
 If a `grill-me` style skill is available, do **not** run it for V1 unless a genuinely unresolved design decision blocks implementation. The V1 product decisions are frozen. Use grilling for future features before their specs are finalized.
 
@@ -75,11 +76,10 @@ If a `grill-me` style skill is available, do **not** run it for V1 unless a genu
 Stop the affected implementation and repair design artifacts first if:
 
 - direct AI-to-customer send appears necessary;
-- a V2+ capability becomes a dependency;
-- a data model cannot preserve V1 security invariants;
-- the OpenAPI contract conflicts with the spec;
-- implementing six independent customer tabs would require shared anonymous identity;
-- clinical/admin citation exposure cannot be enforced server-side;
-- unresolved `dynamic_data_required` evidence would expose internal table,
-  resolver, placeholder, or implementation text;
+- a data model cannot preserve the applicable token, authorization, citation,
+  traceability, or audit invariant;
+- V2 scope conflicts with the active V2 specification or a V1 safety boundary;
+- the OpenAPI contract conflicts with the V2 specification;
+- selected evidence/context cannot be durably traceable without persisting
+  chain-of-thought;
 - real patient data becomes necessary.

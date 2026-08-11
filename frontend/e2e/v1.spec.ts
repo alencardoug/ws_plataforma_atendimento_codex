@@ -67,15 +67,22 @@ test("six independent customers, capacity, hidden N2 draft, explicit send and ta
     await operator.getByRole("button", { name: "Gerar rascunho" }).click();
     await expect(operator.getByText(/ANSWER|ABSTAIN/, { exact: true })).toBeVisible();
     for (const page of customerPages) await expect(page.getByText(/ANSWER|ABSTAIN/, { exact: true })).toHaveCount(0);
-    await operator.getByRole("button", { name: "Usar sugestão" }).click();
+    await operator.getByRole("button", { name: /Usar (sugestão|documento completo)/ }).click();
     const reply = operator.locator("main.workspace > section textarea");
-    await reply.fill(`${await reply.inputValue()}\n\nComplemento revisado pelo operador.`);
+    const multilineReply = `${await reply.inputValue()}\n\nComplemento revisado pelo operador.`;
+    await reply.fill(multilineReply);
     await operator.locator("main.workspace > section").getByRole("button", { name: "Enviar" }).click();
     await expect(operator.getByText("Complemento revisado pelo operador.")).toBeVisible();
     await expect(customerPages[selectedSessionIndex].getByText("Complemento revisado pelo operador.")).toBeVisible({ timeout: 10_000 });
+    const operatorReply = operator.locator("main.workspace > section article .message-body").last();
+    const customerReply = customerPages[selectedSessionIndex].locator("article.operator .message-body").last();
+    await expect(operatorReply).toHaveCSS("white-space", "pre-wrap");
+    await expect(customerReply).toHaveCSS("white-space", "pre-wrap");
+    expect(await operatorReply.textContent()).toBe(multilineReply);
+    expect(await customerReply.textContent()).toBe(multilineReply);
 
     await operator.getByRole("button", { name: /^ACTIVE/ }).nth(1).click();
-    await operator.getByRole("button", { name: "Take over" }).click();
+    await operator.getByRole("button", { name: "Assumir controle" }).click();
     await expect(operator.getByRole("heading", { name: "Conversa N1" })).toBeVisible();
     await expect(operator.getByRole("button", { name: "Gerar rascunho" })).toHaveCount(0);
   } finally {

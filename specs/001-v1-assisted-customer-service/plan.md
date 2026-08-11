@@ -135,6 +135,10 @@ Operator send:
 6. audit send + draft accepted/edited;
 7. return customer-visible DTO.
 
+Message text is plain text. Persisted `\\n` line breaks must be rendered as line
+breaks in both customer and operator message histories; rendering remains text-only
+and must not interpret message content as HTML.
+
 ## 8. N1/N2
 
 Global configuration loaded centrally.
@@ -223,6 +227,23 @@ Persist result before returning to operator UI.
 
 Structured output validation is preferred to parsing free-form status.
 
+For `ANSWER`, `draft_text` is exclusively the concise, customer-ready reply:
+normally one to three short sentences, expanded only when the grounded facts
+need it. It has no explanatory preamble, operator instruction, source/citation
+metadata, retrieval score, or copied evidence/chunk text. Simple greetings
+receive a simple natural greeting. The provider receives the versioned prompt
+content used to derive the persisted prompt version; the evidence projection
+remains a separate operator-only field.
+
+Generation strategy follows the highest-ranked retrieval result. A clinical
+child hit already has its parent expanded in `Evidence.content`; use that parent
+document verbatim as the draft so the operator can explicitly send the complete
+approved document. For an administrative Q&A hit, pass only administrative Q&A
+evidence to the LLM and require it to answer the latest customer request rather
+than reproduce retrieval text. With no evidence, permit a brief general answer
+or clarification request only; clinical and organization-specific claims still
+require evidence and otherwise abstain.
+
 Provider failure becomes an application error shown to operator without blocking manual response.
 
 ## 12. Frontend
@@ -262,6 +283,12 @@ Actions:
 - close.
 
 Show effective N1/N2 badge prominently.
+
+Manual evidence search remains evidence-only in V1: it sends the text entered
+in the manual-search field and displays each returned evidence item's title,
+full content, and matching child excerpt when present. It does not alter the
+separate N2 draft-generation retrieval query or select evidence for generation;
+that workflow is deferred to V2.
 
 ## 13. Audit
 

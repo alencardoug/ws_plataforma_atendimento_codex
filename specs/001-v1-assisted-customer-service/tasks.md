@@ -166,7 +166,7 @@ Legend:
 
 - [x] **T160 [US9]** Implement take-over domain/application service, one-way until close.
 - [x] **T161 [US9]** Implement take-over endpoint and audit event.
-- [x] **T162 [US9] [P]** Implement prominent effective-mode badge + `Take over` action in operator UI.
+- [x] **T162 [US9] [P]** Implement prominent effective-mode badge + `Assumir controle` action in operator UI.
 - [x] **T163 [US9]** Disable/reject N2 draft generation after take-over.
 - [x] **T164 [US9]** Verify manual send and optional N1 search still work after take-over.
 - [x] **T165 [US9]** Add end-to-end take-over test.
@@ -213,6 +213,21 @@ Legend:
   one account rather than creating a duplicate.
 - [x] **T203 [US2]** Re-run affected auth/configuration/documentation gates and
   record convergence without enabling V2 behavior.
+- [x] **T204 [US4]** Preserve newline characters in rendered customer-visible
+  messages on both web surfaces; add a frontend/component or E2E regression
+  test for an operator reply containing multiple lines.
+- [x] **T205 [US6]** Constrain `ANSWER` drafts to concise customer-ready text;
+  pass the versioned prompt to the provider, keep retrieval evidence separate,
+  and add deterministic tests for greeting and RAG-backed responses without
+  copied chunks or operator-facing commentary.
+- [x] **T206 [US6]** Select generation behavior by highest-ranked retrieval
+  type: make a clinical parent document available in full for explicit send,
+  use administrative Q&A for an LLM answer focused on the customer request, and
+  allow only safe general/clarifying no-evidence responses; add regression
+  coverage for all three paths.
+- [x] **T207 [US5]** Render the full content and applicable matching-child
+  excerpt of V1 manual-search evidence, and add a frontend regression test that
+  proves the displayed result is evidence-only.
 
 ## Dependency summary
 

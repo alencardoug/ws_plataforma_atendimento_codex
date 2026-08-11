@@ -45,7 +45,7 @@ Desktop functional layout:
 - customer/operator message history;
 - effective mode badge N1/N2;
 - manual composer/send always available for assigned active conversation;
-- `Take over` visible when effective N2;
+- `Assumir controle` visible when effective N2;
 - after take-over, badge N1 and no N2 generation control.
 
 ### Right pane

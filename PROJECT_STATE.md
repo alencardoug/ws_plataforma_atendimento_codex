@@ -2,83 +2,83 @@
 
 Last updated: 2026-08-11
 
-## Lifecycle
+## Lifecycle and authority
 
-- long-term product discovery: sufficiently complete for roadmap;
-- V1 requirements clarification: complete;
-- V1 spec baseline: ready;
-- V1 implementation plan: complete and repository-converged;
-- V1 tasks: complete (T000–T200);
-- V1 code: **DONE**; all required implementation and acceptance gates pass;
-- V2+: roadmap only.
+- V1 (`specs/001-v1-assisted-customer-service`) is the completed executable
+  baseline. Its original acceptance gates completed on 2026-08-10.
+- The human explicitly authorized the **V2 specification cycle** on 2026-08-11.
+  Its feature package is `specs/002-v2-commercial-product-experience/`.
+- V2 implementation is authorized only in SDD order: it must first complete
+  `specify -> clarify -> plan -> tasks -> analyze`, with acceptance coverage,
+  before production code is written.
+- Dynamic appointment availability is a separate future feature, recorded in
+  `ROADMAP.md` and D-026. It is not V2 scope unless explicitly added later.
 
-## Authorized feature
+## V1 baseline
 
-`001-v1-assisted-customer-service`
+V1 provides anonymous per-tab web conversations, authenticated operator
+service, manual queue/capacity, global N1/N2 modes, RAG ingestion/retrieval,
+internal AI drafts, explicit operator send, clinical-only customer citation
+exposure, and append-only audit events. The V1 hard safety boundaries remain in
+force while V2 is designed: no direct AI send, no raw anonymous token at rest
+or in URLs/logs, server-side authorization/exposure enforcement, and manual
+service when AI/RAG fails.
 
-## External review
+The 2026-08-10 acceptance record covers PostgreSQL 17/pgvector migrations,
+ingestion (57 clinical parents, 570 children, 86 Q&A records), N1/N2 API and
+E2E paths, capacity, security negatives, real-provider smoke, and the normal
+quality gates. Refer to `specs/001-v1-assisted-customer-service/acceptance.md`
+and `analysis.md` §9 for details.
 
-`specs/001-v1-assisted-customer-service/analysis.md` — cross-artifact analysis
-performed by Claude Code (2026-08-10), acting as external reviewer, not the
-authoring agent. Confirms the spec package is internally consistent; lists
-concrete spec-vs-repository gaps (PostgreSQL 17 vs. 16 running, missing
-Alembic/backend/frontend scaffolding, parent-child ingestion adapter design,
-missing `.env.example` vars) and originally raised one open scope decision
-about the pre-existing scheduling/identity/billing schema and `app/main.py`.
-Read the Codex follow-up below before starting Phase 1.
+## Current uncommitted V1 refinements
 
-Codex follow-up §§8–9 (2026-08-10) reconciles the version-controlled corpus and
-repairs the plan: the existing 57 `content.documents` parents, 570
-`content.chunks` children, and 86 flat `content.qa_entries` are adopted in
-place; no synthetic PARENT chunks or duplicate knowledge tables are created.
-The existing `app/`/pip project is evolved rather than replaced. Legacy
-scheduling/payment/CPF endpoints are excluded from the V1 runtime while their
-source/schema may remain dormant. The post-implementation convergence records
-the completed V1 and confirms no material spec/code divergence.
+The worktree intentionally contains post-acceptance refinements. Do not reset,
+checkout, or overwrite them while starting V2. Review them, run the applicable
+gates, and commit only on human instruction.
 
-## V1 decisions frozen
+They cover:
 
-- anonymous customer, no account/password;
-- customer browser close/session close ends V1 experience;
-- operator authentication required;
-- global N1/N2 configuration only;
-- N1 optional manual knowledge search;
-- N2 grounded AI draft + explicit operator send;
-- operator may `Take over` N2 conversation -> conversation remains N1 until closed;
-- no streaming;
-- operator manually claims conversations;
-- maximum 4 active conversations/operator;
-- acceptance test: 6 client tabs, 4 active, 2 waiting;
-- ingestion/vectorization is V1 scope;
-- administrative Q&A uses flat retrieval records;
-- clinical knowledge uses parent-child retrieval;
-- clinical citations can be customer-visible; administrative Q&A citations cannot;
-- insufficient evidence -> abstain draft; no automatic escalation;
-- conversation history is persisted and used within the active conversation;
-- no cross-session customer memory in V1;
-- all data synthetic/demo;
-- local Docker Compose only; no GCP acceptance requirement.
+- preserved multiline rendering for customer and operator messages;
+- renamed operator control `Assumir controle`;
+- concise customer-ready draft prompt/provider behavior, without an artificial
+  completion-token ceiling;
+- retrieval-specific behavior: clinical rank-one result yields the complete
+  parent document for explicit send; administrative Q&A is interpreted by the
+  LLM; no-evidence replies stay general/clarifying and safe;
+- manual evidence results now show full content and matching clinical child
+  excerpt, but remain evidence-only in V1;
+- V1 spec/plan/tasks/OpenAPI/acceptance/analysis updates and deterministic
+  provider regression tests supporting those behaviors.
 
-## V1 acceptance result
+The refinements are recorded in V1 `analysis.md` §§11–15. Frontend lint,
+TypeScript, Vitest, and production build passed; Python compilation and the
+deterministic generation strategy tests passed; the Compose stack was healthy.
+The full Python lint/type/pytest tools and credential-backed E2E were not
+available in the final refinement environment, so rerun them before committing
+or declaring a new full-gate record.
 
-- PostgreSQL 17/pgvector and forward-only Alembic migration pass from empty and legacy-baseline databases.
-- Canonical knowledge contains 57 clinical parents, 570 child chunks, and 86 flat administrative Q&A records.
-- Deterministic API acceptance, real OpenAI adapter smoke, concurrent max-four capacity, restart/audit/security checks, and Chrome E2E N1/N2 scenarios pass.
-- Backend Ruff/mypy/pytest and frontend ESLint/TypeScript/Vitest/build/Playwright gates pass.
-- The normal Compose stack is restored from `.env` and healthy on 2026-08-10.
+## V2 handoff
 
-## Post-acceptance fixes — 2026-08-11
+Read `CLAUDE_CODE_HANDOFF.md` after this file. The V2 draft specification
+captures only decisions already made by the human:
 
-- operator workspace now polls the selected conversation as well as the queue,
-  so new customer messages appear automatically;
-- operator workspace now exposes an explicit `Encerrar conversa` action using
-  the existing audited close endpoint.
-- operator provisioning is now explicitly limited to the offline seed command;
-  Compose allowlists supported backend settings and does not forward unsupported
-  `LOGIN_OPERATOR_*` values, startup creates no account, and repeated normalized
-  email seed updates/reactivates one account.
+- professional customer/operator experience;
+- customer-safe display/copy of the conversation token;
+- operator-selected evidence from manual search, with full clinical parent
+  expansion for explicit send and Q&A evidence for LLM composition;
+- operator-selected customer and operator message context for draft generation;
+- durable traceability/audit of selections, expansions, generations, and final
+  sends.
 
-## Next action
+It also lists the product decisions that require clarification before a V2 plan
+or code can be honestly produced.
 
-Human acceptance may now be performed at `/customer` and `/operator`. Stop
-before V2 unless a new feature is explicitly authorized.
+## Immediate next action for Claude Code
+
+1. Read `AGENTS.md`, the constitution, this file, `CLAUDE_CODE_HANDOFF.md`,
+   the V2 draft spec, complete V1 package, and current Git diff.
+2. Preserve the V1 worktree; verify/commit it only with human authorization.
+3. Clarify the open V2 decisions and update V2 `spec.md` as their canonical
+   resolution.
+4. Create V2 plan/tasks/contracts/data model/acceptance, run cross-artifact
+   analysis, and then implement V2 in dependency order.

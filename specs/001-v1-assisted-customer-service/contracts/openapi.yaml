@@ -427,7 +427,11 @@ components:
       properties:
         id: { type: string, format: uuid }
         author_type: { type: string, const: CUSTOMER }
-        body: { type: string, minLength: 1, maxLength: 8000 }
+        body:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: Plain text; line breaks are preserved in message rendering.
         created_at: { type: string, format: date-time }
     OperatorMessage:
       type: object
@@ -435,7 +439,9 @@ components:
       properties:
         id: { type: string, format: uuid }
         author_type: { type: string, const: OPERATOR }
-        body: { type: string }
+        body:
+          type: string
+          description: Plain text; line breaks are preserved in message rendering.
         citations:
           type: array
           items: { $ref: '#/components/schemas/CustomerCitation' }
@@ -451,7 +457,11 @@ components:
       type: object
       required: [body]
       properties:
-        body: { type: string, minLength: 1, maxLength: 8000 }
+        body:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: Plain text; line breaks are preserved in message rendering.
     OperatorLoginRequest:
       type: object
       required: [email, password]
@@ -517,7 +527,11 @@ components:
       type: object
       required: [body]
       properties:
-        body: { type: string, minLength: 1, maxLength: 12000 }
+        body:
+          type: string
+          minLength: 1
+          maxLength: 12000
+          description: Plain text; line breaks are preserved in message rendering.
         source_generation_id: { type: [string, 'null'], format: uuid }
         citation_retrieval_hit_ids:
           type: array
@@ -546,7 +560,13 @@ components:
         status:
           type: string
           enum: [ANSWER, ABSTAIN]
-        draft_text: { type: string }
+        draft_text:
+          type: string
+          description: >-
+            For ANSWER, only the concise customer-ready reply. It excludes
+            preambles, operator instructions, evidence/chunk text, and
+            retrieval or citation metadata, except when it is the complete
+            clinical parent document selected by parent-child retrieval.
         reason_code:
           type: [string, 'null']
           enum: [INSUFFICIENT_EVIDENCE, CONFLICTING_EVIDENCE, OUT_OF_SCOPE, RETRIEVAL_FAILURE, null]

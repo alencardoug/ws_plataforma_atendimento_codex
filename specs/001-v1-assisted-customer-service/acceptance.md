@@ -48,10 +48,23 @@ Pass condition: independent tabs + durable queue + max-four rule.
 
 Repeat with operator editing draft before send and verify `ai.draft_edited` semantics.
 
+For a simple `Oi`, verify the generated `draft_text` is a short, natural
+greeting. For a RAG-backed question, verify `draft_text` contains only the
+customer-ready answer, while source/chunk content remains only in the separate
+operator evidence projection.
+
+For a question whose highest-ranked result is clinical parent-child evidence,
+verify `draft_text` is the complete parent document and `Usar documento completo`
+places that complete text in the operator send box. For an administrative Q&A result,
+verify the LLM answers the customer's request from the Q&A content rather than
+returning the retrieved record verbatim. With no evidence, verify the response
+is brief and general/clarifying and contains no unsupported clinical or
+organization-specific fact.
+
 ## D. Take-over scenario
 
 1. In another active N2 conversation, generate/observe a draft if desired.
-2. Click `Take over`.
+2. Click `Assumir controle`.
 3. Verify effective mode badge becomes N1.
 4. Verify transition persisted/audited.
 5. Verify normal N2 draft generation now fails/is disabled.
@@ -63,7 +76,9 @@ Repeat with operator editing draft before send and verify `ai.draft_edited` sema
 2. Receive customer message.
 3. Verify no AI draft is created automatically.
 4. Send manual response.
-5. Enable N1 assistive search and verify evidence-only search works.
+5. Enable N1 assistive search, enter a distinctive manual query, and verify the
+   returned evidence title and full content correspond to that query; it remains
+   evidence-only and does not alter draft generation.
 6. Disable flag and verify action is unavailable/forbidden.
 
 ## F. Dual RAG scenario
@@ -119,6 +134,16 @@ Simulate/fake generation provider failure.
 - type/lint gates pass;
 - OpenAPI matches implementation;
 - no material spec/code divergence remains.
+
+## K. Multiline message rendering
+
+1. An operator enters and explicitly sends a response containing at least one
+   line break.
+2. Verify the customer sees each line separately, in the original order.
+3. Verify the operator history presents the same line breaks.
+
+Pass condition: message content remains plain text and intentional line breaks
+are not collapsed into spaces on either web surface.
 
 ## Execution record — 2026-08-10
 

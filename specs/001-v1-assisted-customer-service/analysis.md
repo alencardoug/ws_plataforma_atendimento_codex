@@ -270,3 +270,105 @@ No material spec/plan/tasks/code divergence remains for this refinement. The
 local database's historical synthetic operators remain active pending an
 explicit human choice of which account(s) to retain; no destructive cleanup was
 required to establish the single provisioning path.
+
+## 11. Post-acceptance refinement — multiline message rendering
+
+Review on 2026-08-11 found that the operator send flow already persisted and
+returned newline characters, but normal browser whitespace handling collapsed
+them visually. FR-036 now requires intentional line breaks to be preserved in
+both web histories. The OpenAPI text fields, plan, task T204, and acceptance
+protocol section K use the same plain-text-only constraint.
+
+The frontend shares `MessageBody` between the customer and operator histories;
+its `white-space: pre-wrap` rendering preserves newlines without interpreting
+message content as HTML. The component regression test verifies the literal
+newline and shared presentation class, while the existing Chrome E2E flow now
+also asserts newline content and computed rendering in both interfaces.
+
+Post-repair verification: frontend ESLint, TypeScript, Vitest (4 tests), and
+production build pass; the local frontend container was rebuilt and backend
+readiness is healthy. The credential-dependent Chrome E2E command could not be
+executed in this shell because `E2E_OPERATOR_EMAIL` and
+`E2E_OPERATOR_PASSWORD` were unavailable.
+
+## 12. Post-acceptance refinement — concise customer-ready AI drafts
+
+Review on 2026-08-11 found two independent causes of verbose drafts: the
+OpenAI adapter stored a version identifier without passing the corresponding
+versioned prompt content to the provider, and the deterministic provider echoed
+the first retrieval evidence/chunk as `draft_text`. FR-056 now defines the
+customer-ready draft boundary, and the plan, OpenAPI, acceptance protocol, and
+T205 cover the same constraint.
+
+The generation provider now receives the loaded prompt content and rejects empty
+`ANSWER` output. The prompt requires only a concise Brazilian-Portuguese
+response in `draft_text`; evidence, hit IDs, and retrieval metadata remain
+separate operator-only fields. A generic greeting may receive a natural greeting
+without evidence because it makes no organization-specific claim. The
+deterministic provider now models this contract instead of copying source content.
+
+Post-repair verification: Python syntax compilation passed; three deterministic
+provider tests passed in the rebuilt backend container, covering a greeting
+without evidence, absence of copied chunks, and use of the versioned OpenAI
+prompt. Ruff, mypy, and pytest are not installed in either available shell or
+the runtime container, so the full Python quality gate could not be executed
+there.
+
+## 13. Correction — generation completion budget
+
+The initial concise-draft refinement temporarily set
+`max_completion_tokens=300`. With a RAG request, `gpt-5-mini` consumed that
+entire budget as reasoning tokens and returned an empty completion with
+`finish_reason=length`; the empty JSON then failed the required `status`
+validation and surfaced as `AI_PROVIDER_UNAVAILABLE`. The artificial completion
+limit was removed. Concision is governed by the versioned prompt, not by a
+token ceiling.
+
+The prompt was further refined to require a valid JSON object and make
+`draft_text` exclusively the final concise customer response. Replaying the
+same failed conversation history and eight retrieved evidence records against
+the rebuilt backend returned `ANSWER` with a 376-character draft, four used
+retrieval hits, and no chunk marker in the draft. Backend readiness remained
+healthy.
+
+## 14. Post-acceptance refinement — retrieval-specific draft behavior
+
+The generation path previously treated all retrieved evidence as one generic
+LLM context, despite clinical evidence already carrying the expanded parent
+document. FR-057 through FR-059 now make the three requested paths explicit:
+the highest-ranked clinical child result produces the full parent document for
+explicit send, an administrative Q&A result is interpreted by the LLM in the
+context of the latest customer request, and no evidence permits only a brief
+general/clarifying response without unsupported clinical or organizational
+claims.
+
+The backend records the full parent draft as `clinical-parent-document` without
+calling the LLM, preserving the selected retrieval hit as provenance. For the
+Q&A and no-evidence paths, the LLM receives only Q&A evidence or no evidence,
+respectively. The operator UI identifies the first path with `Usar documento
+completo`, which inserts the entire parent text into the normal explicit-send
+box.
+
+Post-repair verification: Python compilation, frontend ESLint/TypeScript/Vitest
+(4 tests), production frontend build, and six deterministic generation strategy
+tests pass. The rebuilt backend/frontend stack is healthy. The latest retrieval
+set was inspected read-only and has clinical evidence at rank 1, so it follows
+the full-parent path as intended. Full Python Ruff/mypy/pytest gates remain
+unavailable in the supplied environments.
+
+## 15. Post-acceptance refinement — manual evidence inspection
+
+The manual-search request already sent the value from the `Busca manual` field
+to `/operator/knowledge/search`, but the operator UI rendered only each result
+title. That hid the returned Q&A answer or expanded clinical parent and made it
+appear that the field was not used. FR-073, the plan, acceptance protocol, and
+T207 now require the evidence content to be inspectable.
+
+The V1 UI now renders each manual result's title, full content, and matching
+clinical-child excerpt when present. This remains an evidence-only V1 workflow:
+it does not select evidence or alter the separate N2 draft-retrieval query. The
+operator-selected evidence workflow is recorded in the V2 roadmap.
+
+Post-repair verification: frontend ESLint, TypeScript, Vitest (5 tests), and
+production build pass; the frontend container was rebuilt. The complete
+credential-dependent E2E suite remains unavailable in this shell.

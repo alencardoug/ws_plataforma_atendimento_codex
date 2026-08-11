@@ -8,11 +8,11 @@ The coding agent should expand this into an implementation/test matrix during T0
 | Operator auth FR-010..011, FR-017 | T050-T054, T201-T203 | A/B/I/J |
 | Queue/capacity FR-012..016 | T060-T066 | B |
 | Mode/take-over FR-020..024 | T160-T165 | D/E |
-| Messaging FR-030..035 | T070-T074, T140-T144 | C/D/E/I |
+| Messaging FR-030..036 | T070-T074, T140-T144, T204 | C/D/E/I/K |
 | N1 search FR-040..042 | T105-T110 | E |
-| N2 drafts FR-050..055 | T120-T144 | C/D/G/H |
+| N2 drafts FR-050..059 | T120-T144, T205-T206 | C/D/G/H |
 | Ingestion FR-060..066 | T080-T091 | A/F |
-| Retrieval FR-070..074 | T100-T110 | F |
+| Retrieval FR-070..074 | T100-T110, T207 | E/F |
 | Grounding/abstention FR-080..084 | T120-T135 | G/H |
 | Citations FR-090..094 | T150-T156 | F/I |
 | Audit FR-100..104 | T030-T031, T170 | C/D/J |

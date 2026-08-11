@@ -1,8 +1,11 @@
 # Customer Care AI — Spec-Driven Development Repository
 
-Status: **V1 IMPLEMENTED — local acceptance gates completed**.
+Status: **V1 implemented; V2 specification cycle authorized**.
 
-This repository defines a single-tenant AI-assisted customer-service platform for a Cancer Center. The long-term product evolves from manual human service to governed AI autonomy, but the currently authorized implementation scope is **V1 only**.
+This repository defines a single-tenant AI-assisted customer-service platform
+for a Cancer Center. V1 is the executable baseline. The human has authorized
+the V2 specification cycle, but no V2 runtime behavior may be implemented
+before its own SDD artifacts and consistency analysis are complete.
 
 ## Inicialização local
 
@@ -98,8 +101,8 @@ Fluxo funcional recomendado:
 2. abra `/customer` em até seis abas e inicie uma conversa em cada uma;
 3. envie uma mensagem por aba;
 4. no operador, reivindique até quatro conversas — as demais permanecem na fila;
-5. em N2, gere um rascunho fundamentado, confira evidências, edite se necessário e envie explicitamente; o rascunho nunca é mostrado automaticamente ao cliente;
-6. use `Take over` para reduzir uma conversa N2 a N1 e continuar manualmente;
+5. em N2, gere um rascunho fundamentado, confira evidências, edite se necessário e envie explicitamente; o rascunho contém somente uma resposta curta e pronta para o cliente, enquanto as evidências permanecem separadas; o rascunho nunca é mostrado automaticamente ao cliente;
+6. use `Assumir controle` para reduzir uma conversa N2 a N1 e continuar manualmente;
 7. encerre a conversa pela área do operador.
 
 Em N1, o atendimento é manual; a busca assistiva retorna somente evidências quando `N1_ASSISTIVE_SEARCH_ENABLED=true`. Em N2, falhas de IA/RAG não impedem o envio manual. O roteiro completo da demonstração está em [`specs/001-v1-assisted-customer-service/acceptance.md`](specs/001-v1-assisted-customer-service/acceptance.md).
@@ -182,6 +185,7 @@ Anonymous customer session credentials are per-tab, not account credentials. A p
 ├── .specify/memory/constitution.md
 ├── AGENTS.md
 ├── CLAUDE.md
+├── CLAUDE_CODE_HANDOFF.md
 ├── PROJECT_STATE.md
 ├── PROMPT_START_V1.md
 ├── REQUIREMENTS.md
@@ -201,18 +205,25 @@ Anonymous customer session credentials are per-tab, not account credentials. A p
 ├── docs/
 ├── adr/
 ├── prompts/
-└── specs/001-v1-assisted-customer-service/
-    ├── spec.md
-    ├── plan.md
-    ├── tasks.md
-    ├── research.md
-    ├── data-model.md
-    ├── quickstart.md
-    ├── acceptance.md
-    ├── contracts/openapi.yaml
-    └── checklists/
+└── specs/
+    ├── 001-v1-assisted-customer-service/
+    │   ├── spec.md
+    │   ├── plan.md
+    │   ├── tasks.md
+    │   ├── research.md
+    │   ├── data-model.md
+    │   ├── quickstart.md
+    │   ├── acceptance.md
+    │   ├── contracts/openapi.yaml
+    │   └── checklists/
+    └── 002-v2-commercial-product-experience/
+        ├── spec.md
+        └── checklists/
 ```
 
 ## Agent instruction
 
-Implement **only** `specs/001-v1-assisted-customer-service/` until a human explicitly authorizes a subsequent feature/version.
+Treat `specs/001-v1-assisted-customer-service/` as the completed executable
+baseline. The human authorized the specification/clarification phase for
+`specs/002-v2-commercial-product-experience/`; follow its fresh SDD lifecycle
+before implementing any V2 runtime behavior.

@@ -1,9 +1,9 @@
 # Feature Specification: V1 Assisted Customer Service
 
 **Feature ID:** `001-v1-assisted-customer-service`  
-**Status:** Ready for implementation (repository-aware analyze pass complete)
+**Status:** Completed V1 baseline; post-acceptance refinements recorded
 **Created:** 2026-08-10  
-**Scope:** V1 only
+**Scope:** V1 only; closed to new product behavior
 
 ## 1. Problem statement
 
@@ -133,6 +133,15 @@ As an operator in N2, I want a grounded draft for the customer's latest unanswer
 5. Operator can inspect draft and evidence.
 6. A draft is never automatically converted to a customer-visible message.
 7. If AI/RAG fails, operator can still manually send a response.
+8. When the highest-ranked result is clinical parent-child evidence, the draft
+   contains the complete retrieved parent document and the operator can use it
+   unchanged as the final message.
+9. When the highest-ranked result is administrative Q&A, the LLM uses the
+   retrieved Q&A content to answer the customer's latest request directly;
+   retrieved content is not copied as operator commentary.
+10. With no retrieved evidence, the LLM may give a short general response or
+   request clarification, but it shall not assert unsupported clinical or
+   organization-specific facts.
 
 ### US7 [P1] — Operator accepts or edits and explicitly sends
 
@@ -275,6 +284,8 @@ As the system owner, I want critical facts recorded so future quality/governance
 - **FR-033:** Only explicit authenticated operator send shall create an operator customer-visible message.
 - **FR-034:** Final message may reference one source AI generation for provenance.
 - **FR-035:** Customer API shall never return internal AI draft text or internal evidence.
+- **FR-036:** Customer-visible message text shall preserve intentional line breaks
+  entered by a customer or operator when rendered in either web interface.
 
 ### N1 assistive search
 
@@ -290,6 +301,21 @@ As the system owner, I want critical facts recorded so future quality/governance
 - **FR-053:** Operator shall be able to accept/use, edit, regenerate, search evidence, and send.
 - **FR-054:** Regeneration shall create a new immutable generation with lineage.
 - **FR-055:** Effective N1 conversation after take-over shall reject normal N2 draft generation.
+- **FR-056:** An `ANSWER` draft shall contain only the customer-ready response in
+  clear, concise language. It shall not include preambles, operator
+  instructions, source/chunk excerpts, citation metadata, retrieval details,
+  or post-response commentary, except that the full clinical parent document is
+  the customer-ready response when required by FR-057. A simple greeting shall
+  receive a simple, natural greeting response.
+- **FR-057:** If the highest-ranked retrieval result is clinical parent-child
+  evidence, the system shall use the complete expanded parent document as the
+  draft text and make it available for explicit operator send unchanged.
+- **FR-058:** If the highest-ranked retrieval result is administrative Q&A, the
+  LLM shall use the retrieved Q&A answers to formulate a concise response that
+  addresses the latest customer request; it shall not expose retrieval details.
+- **FR-059:** If retrieval returns no evidence, the LLM may produce a concise
+  general response or clarification request, but shall abstain rather than make
+  an unsupported clinical or organization-specific claim.
 
 ### Knowledge ingestion
 
@@ -306,7 +332,9 @@ As the system owner, I want critical facts recorded so future quality/governance
 - **FR-070:** Administrative Q&A retrieval shall search flat vector records without parent expansion.
 - **FR-071:** Clinical retrieval shall vector-search child chunks and expand selected hits to parent context.
 - **FR-072:** Retrieval shall persist hit rank/score and hierarchy references sufficient for traceability.
-- **FR-073:** Operator shall be able to inspect retrieved evidence.
+- **FR-073:** Operator shall be able to inspect retrieved evidence, including
+  its full returned content and the matching clinical-child excerpt when
+  applicable.
 - **FR-074:** RAG shall not require a separate vector database from PostgreSQL/pgvector in V1.
 
 ### Grounding / abstention
