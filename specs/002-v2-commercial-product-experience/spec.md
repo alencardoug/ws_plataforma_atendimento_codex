@@ -85,6 +85,21 @@ the model may give a short general response or request clarification, but shall
 not invent the claim. Provider/RAG failure shall keep manual operator messaging
 available.
 
+### V2-6 — Dynamic-evidence safety correction (D-028)
+
+When selected or retrieved evidence has `dynamic_data_required=true`, the
+final response shall follow a developed chunk pattern whose variables are
+substituted from live database content; the LLM shall not compose or rewrite
+the response in this case — the resolved, substituted pattern is the final
+message. This closes the V1 finding that such evidence (e.g. entries whose
+`answer_markdown` names internal identifiers like `scheduling.available_offers`)
+could reach the LLM with only a prompt-level, not code-level, safeguard.
+
+This outcome is scoped to the correction mechanism only. It does not authorize
+appointment holds/reservations/confirmations, CPF/identity/payment handling,
+or autonomous scheduling — those remain excluded per §6 and `ROADMAP.md`'s
+separate "Dynamic appointment availability" future feature.
+
 ## 3. V1 baseline that V2 must preserve unless explicitly superseded
 
 - anonymous customer access is scoped server-side to one conversation;
@@ -135,7 +150,8 @@ The V2 data-model and API work must represent, at minimum:
 ## 6. Explicitly out of scope unless newly approved
 
 - dynamic appointment availability, appointment holds/reservations, payment,
-  scheduling, customer profile/CPF/password recovery;
+  scheduling, customer profile/CPF/password recovery — with the single narrow
+  exception of V2-6's dynamic-evidence safety correction, which is in scope;
 - autonomous AI-to-customer send or an AI ability to change policy;
 - real patient data;
 - a separate vector database, microservices, or a background-job platform
@@ -170,6 +186,14 @@ an approved resolution; it must not silently choose one.
 7. **Streaming:** The roadmap says streaming where beneficial. Is it in this V2
    package, and if so, which internal/operator surfaces may stream while the
    explicit human-send boundary remains intact?
+8. **Dynamic-evidence pattern mechanics (V2-6):** What authors/versions the
+   "developed chunk pattern" and its variables — a template field on the
+   existing Q&A entry, or a new construct? Which database tables/fields may a
+   variable read from, and is that read allowlisted per entry or per resolver?
+   What happens when the substitution source is unavailable, stale, or a
+   variable has no value — does the system abstain, fall back to manual, or
+   show a partial pattern? Does this apply only to entries currently flagged
+   `dynamic_data_required=true`, or to a broader class introduced by V2?
 
 ## 8. Required next artifacts
 

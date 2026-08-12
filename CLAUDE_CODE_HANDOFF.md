@@ -11,9 +11,10 @@ implementation before its SDD gates are satisfied.
    `specs/002-v2-commercial-product-experience/spec.md`.
 3. Read the whole V1 feature package and the root architecture/security/data/
    test/operations/decision documents.
-4. Inspect `git status` and `git diff` before editing. The current V1
-   post-acceptance changes are intentional and uncommitted. Preserve them;
-   never reset, checkout, or overwrite them as a shortcut.
+4. Inspect `git status` and `git diff` before editing. The V1 post-acceptance
+   changes described below are intentional and already committed at `c150e6c`;
+   the working tree is clean as of the 2026-08-12 independent closure review.
+   Never reset, checkout, or overwrite them as a shortcut.
 
 `CLAUDE.md` contains the repository-specific operating protocol.
 
@@ -54,9 +55,9 @@ decisions. Do not guess their behavior. Clarify them with the human, record the
 answers in V2 `spec.md`, then proceed through plan, tasks, contracts/data model,
 acceptance, and analysis.
 
-## Intentional V1 worktree changes to review
+## Intentional V1 changes (committed, gates reconfirmed)
 
-The current diff covers the following V1 corrections:
+Commit `c150e6c` covers the following V1 corrections:
 
 - newline-preserving message rendering in customer/operator histories;
 - label `Assumir controle` in place of `Take over`;
@@ -69,14 +70,22 @@ The current diff covers the following V1 corrections:
   excerpt, still without V2 selection/generation coupling;
 - regression coverage and synchronized V1 documentation.
 
-Read V1 `analysis.md` §§11–15 for the diagnosis and verification evidence.
+Read V1 `analysis.md` §§11–15 for the diagnosis and verification evidence, and
+§16 for the 2026-08-12 independent closure review that reran the previously
+outstanding gates: backend ruff/mypy/pytest, frontend lint/typecheck/Vitest/
+build, and the credential-backed E2E suite (`smoke_core`, `smoke_n2`,
+`smoke_concurrent_capacity`, `smoke_ingestion_changed`, `smoke_real_provider`)
+all pass. `smoke_resilience` needs a test-only update — see §16 — because the
+clinical-rank-one full-parent shortcut now bypasses the provider call its
+failure-injection technique relies on.
 
-Before committing those V1 changes, rerun the relevant gates where the
-environment allows them. The last refinement pass passed frontend ESLint,
-TypeScript, Vitest, production build, Python compilation, deterministic
-generation tests, and Compose readiness. Full backend lint/type/pytest and the
-credential-backed E2E run were unavailable at that time; run them when their
-tools/credentials are available. Do not claim a new full-gate result otherwise.
+That same review confirmed the `dynamic_data_required=true` finding named in
+`ROADMAP.md`/D-026 is still present (administrative evidence with literal
+internal identifiers can reach the LLM with only a prompt-level safeguard).
+The human decision on its correction is recorded in `DECISIONS.md` D-028: a
+deterministic template-substitution mechanism (resolver fills variables from
+the database into the chunk pattern; the LLM does not rewrite that response)
+is planned, with its execution entering V2 planning rather than V1 code.
 
 ## Suggested V2 sequence
 

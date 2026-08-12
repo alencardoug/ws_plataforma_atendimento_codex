@@ -13,16 +13,26 @@ Current scope. Anonymous web customer, operator, N1/N2, offline ingestion, dual 
 
 ### Future feature — Dynamic appointment availability
 
-This is intentionally separate from V2. Choose a feature ID and create its
-Spec Kit directory only when a human authorizes this scope. This entry records
-agreed intent but is not executable scope until its own specification, plan,
-tasks, and consistency analysis are approved.
+This is intentionally separate from V2, with one narrow exception (see below).
+Choose a feature ID and create its Spec Kit directory only when a human
+authorizes this scope. This entry records agreed intent but is not executable
+scope until its own specification, plan, tasks, and consistency analysis are
+approved.
 
 The cycle must begin with a safety correction: administrative evidence marked
 `dynamic_data_required=true` must never be passed through as a literal answer
 when its resolver is unavailable. It must produce a controlled abstention or a
 manual-service instruction without exposing internal table names, resolver
 names, placeholders, or implementation guidance.
+
+**Scope exception (D-028, human decision 2026-08-12):** the corrective
+mechanism itself — a deterministic chunk pattern whose variables are
+substituted from live database content, used verbatim as the final response
+with no LLM rewriting for `dynamic_data_required=true` evidence — is now
+planned within the V2 specification cycle rather than waiting for this
+separate feature's authorization. Everything else below (actual booking
+operations, resolver implementations, holds/reservations) remains deferred to
+this separate future feature and still requires its own Spec Kit package.
 
 Planned in scope:
 
@@ -65,7 +75,11 @@ runtime behavior before its SDD gates.
 - stronger operator workspace ergonomics;
 - hybrid push/pull routing baseline;
 - explicit runtime/admin configuration surface if justified;
-- channel abstraction hardened.
+- channel abstraction hardened;
+- `dynamic_data_required=true` safety correction (D-028): deterministic,
+  database-driven chunk-pattern substitution as the final response, with no
+  LLM rewrite, for administrative evidence flagged this way. Scoped to the
+  correction itself, not to appointment-booking operations.
 
 ## Era B — Trust
 

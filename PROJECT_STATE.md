@@ -30,11 +30,13 @@ E2E paths, capacity, security negatives, real-provider smoke, and the normal
 quality gates. Refer to `specs/001-v1-assisted-customer-service/acceptance.md`
 and `analysis.md` §9 for details.
 
-## Current uncommitted V1 refinements
+## V1 post-acceptance refinements (committed)
 
-The worktree intentionally contains post-acceptance refinements. Do not reset,
-checkout, or overwrite them while starting V2. Review them, run the applicable
-gates, and commit only on human instruction.
+The post-acceptance refinements are committed at `c150e6c` (2026-08-11); the
+working tree is clean. An earlier version of this section described them as
+uncommitted — that was stale from the moment it was written, since it was
+authored in the same commit that landed them. Corrected 2026-08-12 during the
+independent closure review below.
 
 They cover:
 
@@ -53,9 +55,33 @@ They cover:
 The refinements are recorded in V1 `analysis.md` §§11–15. Frontend lint,
 TypeScript, Vitest, and production build passed; Python compilation and the
 deterministic generation strategy tests passed; the Compose stack was healthy.
-The full Python lint/type/pytest tools and credential-backed E2E were not
-available in the final refinement environment, so rerun them before committing
-or declaring a new full-gate record.
+
+## Independent closure review — 2026-08-12
+
+A read-only closure review (`PROMPT_REVIEW_V1_CLAUDE.md`) verified the above
+refinements against the running code, then reran the previously-outstanding
+gates with human authorization. Full detail in V1 `analysis.md` §16.
+
+- Backend `ruff`, `mypy`, and `pytest` (13/13): pass.
+- Frontend ESLint, TypeScript, Vitest (5/5), production build: pass.
+- Credential-backed E2E against a rebuilt Compose stack with a real
+  `OPENAI_API_KEY`: `smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`,
+  `smoke_ingestion_changed`, and `smoke_real_provider` all pass.
+- `smoke_resilience` fails to exercise its intended assertion: the retrieval-
+  specific refinement above (clinical rank-one → full parent document) never
+  calls `configured_generation_provider()` for a triggering message whose top
+  evidence is clinical, so the test's provider-failure monkeypatch has nothing
+  to intercept. The underlying invariant (AI/RAG failure leaves manual service
+  available) is independently confirmed by code inspection of the `except`
+  branch in `app/customer_care/ai/router.py`, but this specific negative test
+  needs to be updated to a query/path that actually reaches the provider call.
+  Tracked as a small V1 test-only fix, not a product defect.
+- The `dynamic_data_required=true` finding (administrative evidence with
+  literal internal identifiers such as `scheduling.available_offers` reaching
+  the LLM with only a prompt-level, not code-level, safeguard) is confirmed
+  still present. The human decision on its correction is recorded in
+  `DECISIONS.md` D-028 and `ROADMAP.md`: the correction is planned, not
+  implemented in V1, and its execution enters V2 planning.
 
 ## V2 handoff
 

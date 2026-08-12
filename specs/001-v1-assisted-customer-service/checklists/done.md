@@ -16,6 +16,9 @@
 - [x] Docker Compose quickstart works from documented state.
 - [x] Spec Kit analyze/converge (or equivalents) report no material mismatch.
 
-V1 baseline acceptance was completed on 2026-08-10. The later uncommitted V1
-refinements recorded in `analysis.md` §§11–15 require their relevant gates to
-be rerun before a commit or deployment, but do not reopen V1 product scope.
+V1 baseline acceptance was completed on 2026-08-10. The later V1 refinements
+recorded in `analysis.md` §§11–15 are committed at `c150e6c`; do not reopen V1
+product scope. The independent closure review in `analysis.md` §16
+(2026-08-12) reran their outstanding gates: backend and frontend quality
+gates and the credential-backed E2E suite pass, except `smoke_resilience`,
+which needs a test-only update tracked there.

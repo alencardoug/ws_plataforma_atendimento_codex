@@ -372,3 +372,88 @@ operator-selected evidence workflow is recorded in the V2 roadmap.
 Post-repair verification: frontend ESLint, TypeScript, Vitest (5 tests), and
 production build pass; the frontend container was rebuilt. The complete
 credential-dependent E2E suite remains unavailable in this shell.
+
+## 16. Independent closure review and gate reconfirmation — 2026-08-12
+
+An independent, read-only closure review followed `PROMPT_REVIEW_V1_CLAUDE.md`
+in full: constitution → V1 spec/plan/tasks/acceptance/data-model/OpenAPI →
+this analysis → `PROJECT_STATE.md`/`SDD_MANIFEST.md` → root docs → code/tests
+→ git history (the working tree was already clean at `c150e6c`; there was no
+uncommitted diff to review, see the finding below).
+
+### Findings, classified A–D
+
+1. **`dynamic_data_required=true` evidence still reaches the LLM with literal
+   internal identifiers; no code-level gate exists (A, high).** The flag is
+   written on ingest (`app/customer_care/knowledge/ingest.py`) but read
+   nowhere else. `documents/qa/qa-catalog.jsonl` QA-011…037 contain
+   `answer_markdown` text naming backend internals (e.g.
+   `scheduling.available_offers`, `scheduling.holidays`); `rag/service.py`
+   and `ai/router.py` pass this evidence to `provider.generate()` unfiltered;
+   the only mitigation is a prompt instruction in `prompts/rag_answer.md`, not
+   a server-side check. Violates D-026 and constitution Article VII. Not
+   blocker-severity because the corpus is explicitly synthetic/demo data.
+   **Human decision (2026-08-12):** the correction is a deterministic chunk
+   pattern with variables substituted from the database, used verbatim as the
+   final response with no LLM rewrite for this case; its execution is planned
+   within V2 rather than as an immediate V1 patch. Recorded as D-028 in
+   `DECISIONS.md`, `ROADMAP.md`, and V2 `spec.md` V2-6/§6/§7.
+2. **`PROJECT_STATE.md`, `CLAUDE_CODE_HANDOFF.md`, and `checklists/done.md`
+   described already-committed work as "uncommitted" (B, medium).** All three
+   carried the same timestamp as `c150e6c`, the commit that *is* the
+   refinements they described as pending. Corrected 2026-08-12 in all three
+   files.
+3. **Full backend lint/type/pytest and the credential-backed E2E had not been
+   rerun since the AI-generation-affecting refinements (A/B, high) — now
+   closed.** See gate results below.
+4. **`smoke_resilience` no longer exercises its provider-failure assertion for
+   messages whose top-ranked evidence is clinical (B, medium).** The §14
+   refinement (clinical rank-one → full parent document) returns the parent
+   document via `full_parent_draft()` without ever calling
+   `configured_generation_provider()`. `smoke_resilience.py` simulates AI/RAG
+   failure by monkeypatching that provider function; against the fixed
+   synthetic conversation used by the smoke suite, retrieval ranks a clinical
+   document first, so the monkeypatch is never invoked and the test's `503
+   AI_PROVIDER_UNAVAILABLE` assertion fails on an unrelated `ANSWER` response.
+   Code inspection of the `except` branch in `ai/router.py` independently
+   confirms the underlying invariant (AI/RAG failure records a `FAILED`
+   generation and leaves manual send available) still holds — this is a test
+   coverage gap introduced by §14, not a regression of the invariant itself.
+   Disposition: update `smoke_resilience.py` to trigger the failure on a
+   query/path that reaches the provider call (e.g. an administrative or
+   no-evidence query), or add a second dedicated negative test for that path.
+   Not yet applied as of this entry.
+
+### Gate reconfirmation results
+
+- Backend: `ruff check` clean; `mypy` clean (35 source files); `pytest -q`
+  13/13 passed (Python 3.12.1, matching the Dockerfile's pinned interpreter).
+- Frontend: ESLint clean; `tsc --noEmit` clean; Vitest 5/5 passed; production
+  build succeeded.
+- Compose stack rebuilt (`docker compose up -d --build`); `alembic upgrade
+  head` confirmed already current; ingestion re-run confirmed idempotent
+  (`{"embedded": 0, "inserted": 0, "skipped": 143}`, matching the 57 clinical
+  parents + 86 Q&A entries from the original acceptance count).
+- Credential-backed E2E against the live stack with a real `OPENAI_API_KEY`,
+  using a synthetic seeded operator (`review.smoke@example.com`, provisioned
+  via `python -m customer_care.auth.seed_operator`, per the documented V1
+  provisioning path): `smoke_core` (six sessions, four active, capacity
+  rejection, IDOR rejection, manual send), `smoke_n2` (retrieval, internal
+  draft, explicit send, citation policy, take-over, against a real
+  OpenAI-generated draft), `smoke_concurrent_capacity` (4×200/2×409,
+  reproducing the original acceptance record), `smoke_ingestion_changed`
+  (idempotent unchanged run plus one-record re-embedding), and
+  `smoke_real_provider` (real OpenAI adapter integration) all passed.
+  `smoke_resilience` failed as described in Finding 4 above — a test coverage
+  gap, not a confirmed invariant violation. Demo interaction data was reset to
+  a clean baseline between independent smoke scripts and after the run,
+  consistent with the documented demo-reset procedure in `OPERATIONS.md`.
+
+### Verdict
+
+**CONDITIONAL GO.** All explicit-send, audit append-only, no-hidden-reasoning,
+citation exposure, anonymous-token, capacity, and AI/RAG-fallback invariants
+are confirmed by code, test, and now live E2E evidence. Two items remain open
+before full closure: applying the D-028 correction (planned for V2, not V1)
+and updating `smoke_resilience.py` to restore its provider-failure coverage
+(a small V1 test-only fix, not yet applied).

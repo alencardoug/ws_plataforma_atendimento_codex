@@ -14,7 +14,11 @@ Read and obey `AGENTS.md` first.
   confirmed. The human authorization already covers proceeding in that order.
   The V1 runtime remains the executable baseline in the meantime.
 - Dynamic appointment availability is a separate future feature, not the V2
-  package, unless a later human decision explicitly combines the scopes.
+  package, unless a later human decision explicitly combines the scopes. The
+  human made exactly one such narrow combination on 2026-08-12 (D-028): the
+  `dynamic_data_required=true` safety correction (deterministic, database-
+  driven chunk-pattern substitution, no LLM rewrite) is planned within V2.
+  Appointment-booking operations remain excluded from V2 as before.
 
 Read in this order:
 
