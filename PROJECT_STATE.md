@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-11
+Last updated: 2026-08-13
 
 ## Lifecycle and authority
 
@@ -67,21 +67,24 @@ gates with human authorization. Full detail in V1 `analysis.md` §16.
 - Credential-backed E2E against a rebuilt Compose stack with a real
   `OPENAI_API_KEY`: `smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`,
   `smoke_ingestion_changed`, and `smoke_real_provider` all pass.
-- `smoke_resilience` fails to exercise its intended assertion: the retrieval-
-  specific refinement above (clinical rank-one → full parent document) never
-  calls `configured_generation_provider()` for a triggering message whose top
-  evidence is clinical, so the test's provider-failure monkeypatch has nothing
-  to intercept. The underlying invariant (AI/RAG failure leaves manual service
-  available) is independently confirmed by code inspection of the `except`
-  branch in `app/customer_care/ai/router.py`, but this specific negative test
-  needs to be updated to a query/path that actually reaches the provider call.
-  Tracked as a small V1 test-only fix, not a product defect.
+- `smoke_resilience` initially failed to exercise its intended assertion: the
+  retrieval-specific refinement above (clinical rank-one → full parent
+  document) never calls `configured_generation_provider()` for a triggering
+  message whose top evidence is clinical, so the test's provider-failure
+  monkeypatch had nothing to intercept. **Fixed 2026-08-13** (`analysis.md`
+  §17): the test now also patches `full_parent_draft` to `None` so it reaches
+  the provider call deterministically, independent of retrieval ranking.
+  Reconfirmed passing, along with the rest of the smoke suite.
 - The `dynamic_data_required=true` finding (administrative evidence with
   literal internal identifiers such as `scheduling.available_offers` reaching
   the LLM with only a prompt-level, not code-level, safeguard) is confirmed
   still present. The human decision on its correction is recorded in
   `DECISIONS.md` D-028 and `ROADMAP.md`: the correction is planned, not
-  implemented in V1, and its execution enters V2 planning.
+  implemented in V1, and its execution enters V2 planning. This is authorized
+  future scope, not an open V1 defect, so it does not block V1 closure.
+
+**V1 closure verdict: GO** (`analysis.md` §17, 2026-08-13). Both items open at
+the 2026-08-12 CONDITIONAL GO are resolved.
 
 ## V2 handoff
 
@@ -101,10 +104,12 @@ or code can be honestly produced.
 
 ## Immediate next action for Claude Code
 
-1. Read `AGENTS.md`, the constitution, this file, `CLAUDE_CODE_HANDOFF.md`,
-   the V2 draft spec, complete V1 package, and current Git diff.
-2. Preserve the V1 worktree; verify/commit it only with human authorization.
-3. Clarify the open V2 decisions and update V2 `spec.md` as their canonical
-   resolution.
-4. Create V2 plan/tasks/contracts/data model/acceptance, run cross-artifact
+V1 is closed (GO, 2026-08-13); its worktree is committed and pushed. Next:
+
+1. Clarify the 8 open decisions in V2 `spec.md` §7 (evidence defaults,
+   multiple/mixed selections, clinical send vs. generation, message-context
+   default, regeneration behavior, token UX/lifecycle, streaming, and the
+   D-028 dynamic-evidence pattern mechanics) with the human and record the
+   answers there as their canonical resolution.
+2. Create V2 plan/tasks/contracts/data model/acceptance, run cross-artifact
    analysis, and then implement V2 in dependency order.

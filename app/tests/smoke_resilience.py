@@ -59,6 +59,10 @@ def run() -> None:
     def unavailable_provider():
         raise RuntimeError("synthetic provider outage")
 
+    # Force the provider path regardless of retrieval ranking: a clinical
+    # top-1 hit would otherwise take the full-parent-document shortcut and
+    # never call configured_generation_provider(), defeating this simulation.
+    ai_router.full_parent_draft = lambda evidence: None
     ai_router.configured_generation_provider = unavailable_provider
     failed_draft = client.post(
         f"/api/v1/operator/conversations/{conversation_id}/drafts",

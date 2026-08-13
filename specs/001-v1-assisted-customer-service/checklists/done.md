@@ -20,5 +20,5 @@ V1 baseline acceptance was completed on 2026-08-10. The later V1 refinements
 recorded in `analysis.md` §§11–15 are committed at `c150e6c`; do not reopen V1
 product scope. The independent closure review in `analysis.md` §16
 (2026-08-12) reran their outstanding gates: backend and frontend quality
-gates and the credential-backed E2E suite pass, except `smoke_resilience`,
-which needs a test-only update tracked there.
+gates and the credential-backed E2E suite pass; `smoke_resilience` was fixed
+and reconfirmed in §17 (2026-08-13). V1 closure verdict: GO.

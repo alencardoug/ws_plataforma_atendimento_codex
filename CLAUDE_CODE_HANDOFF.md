@@ -70,14 +70,14 @@ Commit `c150e6c` covers the following V1 corrections:
   excerpt, still without V2 selection/generation coupling;
 - regression coverage and synchronized V1 documentation.
 
-Read V1 `analysis.md` §§11–15 for the diagnosis and verification evidence, and
+Read V1 `analysis.md` §§11–15 for the diagnosis and verification evidence,
 §16 for the 2026-08-12 independent closure review that reran the previously
-outstanding gates: backend ruff/mypy/pytest, frontend lint/typecheck/Vitest/
-build, and the credential-backed E2E suite (`smoke_core`, `smoke_n2`,
-`smoke_concurrent_capacity`, `smoke_ingestion_changed`, `smoke_real_provider`)
-all pass. `smoke_resilience` needs a test-only update — see §16 — because the
-clinical-rank-one full-parent shortcut now bypasses the provider call its
-failure-injection technique relies on.
+outstanding gates (backend ruff/mypy/pytest, frontend lint/typecheck/Vitest/
+build, and the full credential-backed E2E suite all pass), and §17 for the
+2026-08-13 fix to `smoke_resilience.py` (the clinical-rank-one full-parent
+shortcut was bypassing the provider call its failure-injection technique
+relied on; fixed by also patching `full_parent_draft`). **V1 closure verdict:
+GO.**
 
 That same review confirmed the `dynamic_data_required=true` finding named in
 `ROADMAP.md`/D-026 is still present (administrative evidence with literal

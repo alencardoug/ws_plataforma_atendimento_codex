@@ -449,7 +449,7 @@ uncommitted diff to review, see the finding below).
   a clean baseline between independent smoke scripts and after the run,
   consistent with the documented demo-reset procedure in `OPERATIONS.md`.
 
-### Verdict
+### Verdict (2026-08-12)
 
 **CONDITIONAL GO.** All explicit-send, audit append-only, no-hidden-reasoning,
 citation exposure, anonymous-token, capacity, and AI/RAG-fallback invariants
@@ -457,3 +457,44 @@ are confirmed by code, test, and now live E2E evidence. Two items remain open
 before full closure: applying the D-028 correction (planned for V2, not V1)
 and updating `smoke_resilience.py` to restore its provider-failure coverage
 (a small V1 test-only fix, not yet applied).
+
+## 17. `smoke_resilience.py` fix — 2026-08-13
+
+Closed Finding 4 from §16. The first attempted fix changed the triggering
+message's wording to avoid ranking a clinical document first, but vector
+similarity against the corpus was not reliable enough to guarantee that
+deterministically (a retry with an administrative-sounding sentence still
+ranked an unrelated clinical document first, since none of the candidates
+scored a close match). The applied fix instead removes the dependency on
+retrieval ranking entirely: `smoke_resilience.py` now also monkeypatches
+`ai_router.full_parent_draft` to return `None` for the duration of the
+provider-failure check, alongside the existing
+`configured_generation_provider` patch, so the test deterministically reaches
+the provider call regardless of what evidence ranks first.
+
+Verification after rebuilding the backend image:
+
+- `smoke_resilience` passes: `resilience_smoke_ok: N1 search flag, N1 manual
+  send, provider failure, manual fallback`.
+- Backend `ruff`/`pytest` (13/13) rerun clean after the change.
+- Full smoke suite rerun in sequence against the rebuilt image:
+  `smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`, and
+  `smoke_real_provider` all pass unchanged.
+- `smoke_ingestion_changed` initially failed (`first["embedded"] == 656`)
+  because it and the production ingestion CLI use different embedding
+  providers (deterministic-test vs. real OpenAI) against the same shared
+  knowledge tables; alternating between them makes each treat the corpus as
+  needing a full re-embed relative to its own provider. This is pre-existing
+  behavior unrelated to the `smoke_resilience.py` change — confirmed by
+  restoring the corpus with the real-provider ingest CLI, after which
+  `smoke_ingestion_changed` passed cleanly on its own. The corpus was
+  restored to real OpenAI embeddings afterward (`{"embedded": 656, ...
+  "skipped": 57}`) and demo interaction data reset to a clean baseline.
+
+### Verdict (2026-08-13)
+
+**GO.** Both items open at the 2026-08-12 CONDITIONAL GO are resolved:
+`smoke_resilience.py` is fixed and reconfirmed, and D-028 is recorded with an
+explicit human decision that its execution belongs to V2 planning rather than
+V1 (V1 does not carry an unresolved defect — the correction is authorized
+future scope, not a closure blocker). V1 is closed.
