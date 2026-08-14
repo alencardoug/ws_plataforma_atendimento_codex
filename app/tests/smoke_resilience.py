@@ -67,7 +67,7 @@ def run() -> None:
     failed_draft = client.post(
         f"/api/v1/operator/conversations/{conversation_id}/drafts",
         headers=operator_headers,
-        json={"triggering_message_id": customer_message.json()["id"]},
+        json={"selected_message_ids": [customer_message.json()["id"]]},
     )
     assert failed_draft.status_code == 503 and failed_draft.json()["code"] == "AI_PROVIDER_UNAVAILABLE", failed_draft.text
     manual_after_failure = client.post(

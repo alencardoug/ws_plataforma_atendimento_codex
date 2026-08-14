@@ -1,8 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { App, ManualEvidence, MessageBody } from "./main";
+import { App, CustomerPage, ManualEvidence, MessageBody, OperatorPage } from "./main";
+
+afterEach(() => {
+  sessionStorage.clear();
+  vi.unstubAllGlobals();
+});
 
 describe("V1 routes", () => {
   it("renders the anonymous customer surface", () => {
@@ -36,5 +41,120 @@ describe("V1 routes", () => {
     expect(screen.getByText("Conteúdo completo do documento-pai.")).toBeInTheDocument();
     expect(screen.getByText("Trecho que corresponde à busca.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Usar/ })).toBeNull();
+  });
+
+  it("offers a single select action per evidence item when onSelect is provided (V2-3)", () => {
+    const onSelect = vi.fn();
+    render(<ManualEvidence evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "ADMIN_QA", rank: 1, title: "Pergunta administrativa", content: "Resposta aprovada." }} onSelect={onSelect} />);
+
+    const button = screen.getByRole("button", { name: "Selecionar" });
+    fireEvent.click(button);
+
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("displays the conversation token continuously and copies it on request (V2-2)", async () => {
+    sessionStorage.setItem("conversation_id", "conv-1");
+    sessionStorage.setItem("conversation_token", "SUB3B4GC");
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: "conv-1", status: "WAITING", messages: [] }),
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+
+    expect(await screen.findByText("SUB3B4GC")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /mostrar|revelar/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Copiar" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("SUB3B4GC"));
+    expect(await screen.findByRole("button", { name: "Copiado!" })).toBeInTheDocument();
+  });
+
+  it("defaults message selection to the trailing customer run and lets the operator clear it (V2-4)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const conversationDetail = {
+      id: "conv-1",
+      status: "ACTIVE",
+      effective_mode: "N2",
+      messages: [
+        { id: "op-1", author_type: "OPERATOR", body: "Olá, como posso ajudar?" },
+        { id: "cust-1", author_type: "CUSTOMER", body: "Tenho uma dúvida" },
+        { id: "cust-2", author_type: "CUSTOMER", body: "sobre horários" },
+        { id: "cust-3", author_type: "CUSTOMER", body: "de sábado" },
+      ],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-1", status: "ACTIVE", effective_mode: "N2" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-1")) {
+          return { ok: true, json: async () => conversationDetail };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+
+    fireEvent.click(await screen.findByRole("button", { name: /ACTIVE/ }));
+
+    const checkboxes = await screen.findAllByRole("checkbox") as HTMLInputElement[];
+    expect(checkboxes).toHaveLength(4);
+    expect(checkboxes.map((box) => box.checked)).toEqual([false, true, true, true]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Desmarcar conversas" }));
+    await waitFor(() => expect(checkboxes.every((box) => !box.checked)).toBe(true));
+    expect(screen.getByRole("button", { name: "Gerar rascunho" })).toBeDisabled();
+
+    fireEvent.click(checkboxes[1]);
+    expect(screen.getByRole("button", { name: "Gerar rascunho" })).not.toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Regenerar" })).toBeNull();
+  });
+
+  it("shows a live typing indicator and surfaces an automatically-generated draft (V2-7)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const conversationDetail = {
+      id: "conv-1",
+      status: "ACTIVE",
+      effective_mode: "N2",
+      is_customer_typing: true,
+      messages: [{ id: "cust-1", author_type: "CUSTOMER", body: "Olá" }],
+      latest_generation: { id: "gen-1", status: "ANSWER", draft_text: "Resposta automática sintética.", evidence: [], trigger: "AUTOMATIC" },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-1", status: "ACTIVE", effective_mode: "N2" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-1")) {
+          return { ok: true, json: async () => conversationDetail };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /ACTIVE/ }));
+
+    expect(await screen.findByText("Cliente está digitando…")).toBeInTheDocument();
+    expect(await screen.findByText("Resposta automática sintética.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Usar sugestão" })).toBeInTheDocument();
   });
 });

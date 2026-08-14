@@ -36,6 +36,9 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_customer_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_customer_typing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    auto_draft_covers_through_message_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.messages.id"))
 
 
 class ConversationAssignment(Base):
@@ -172,7 +175,7 @@ class AIGeneration(Base):
     __table_args__ = {"schema": "customer_service"}
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"))
-    triggering_message_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.messages.id"))
+    triggering_message_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.messages.id"))
     retrieval_run_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.retrieval_runs.id"))
     prior_generation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
     operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
@@ -186,6 +189,47 @@ class AIGeneration(Base):
     output_tokens: Mapped[int | None] = mapped_column(Integer)
     duration_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    trigger: Mapped[str] = mapped_column(String)
+    manual_search_text: Mapped[str | None] = mapped_column(Text)
+    dynamic_pattern_used: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MessageSelection(Base):
+    __tablename__ = "message_selections"
+    __table_args__ = (UniqueConstraint("ai_generation_id", "message_id"), {"schema": "customer_service"})
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ai_generation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
+    message_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.messages.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class QADynamicBinding(Base):
+    __tablename__ = "qa_dynamic_bindings"
+    __table_args__ = {"schema": "content"}
+    qa_id: Mapped[str] = mapped_column(ForeignKey("content.qa_entries.qa_id"), primary_key=True)
+    source_table: Mapped[str] = mapped_column(Text)
+    filter: Mapped[dict] = mapped_column(JSONB, default=dict)
+    output_columns: Mapped[list] = mapped_column(JSONB)
+    row_limit: Mapped[int] = mapped_column(Integer, default=4)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class DynamicFixtureRow(Base):
+    """V2-6 mechanism-demonstration fixture only — proves the resolver/
+    allowlist mechanism against a real table. Not a production dynamic-data
+    source; no production Q&A entry is bound to it. A real source (e.g. for
+    a future dynamic-appointment-availability feature) would be its own
+    table, registered in knowledge/dynamic_binding.py's allowlist only when
+    that separate feature is authorized (spec.md §6, ROADMAP.md)."""
+
+    __tablename__ = "knowledge_dynamic_fixture"
+    __table_args__ = {"schema": "content"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    category: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    label: Mapped[str] = mapped_column(Text)
+    ordinal: Mapped[int] = mapped_column(Integer)
 
 
 class AIGenerationSource(Base):

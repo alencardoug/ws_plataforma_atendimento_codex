@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import func, select, text
 
+from customer_care.ai.router import evaluate_automatic_trigger, is_customer_typing, latest_generation_dict
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id, customer_projection
 from customer_care.infrastructure.models import (
@@ -62,7 +63,8 @@ def list_conversations(
 @router.get("/conversations/{conversation_id}")
 def operator_conversation_detail(conversation_id: UUID, operator: CurrentOperator, session: DbSession) -> dict:
     conversation = require_assignment(session, conversation_id, operator.id)
-    return {**summary(conversation), **customer_projection(session, conversation)}
+    evaluate_automatic_trigger(session, conversation)
+    return {**summary(conversation), **customer_projection(session, conversation), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/claim")
@@ -81,7 +83,7 @@ def claim(conversation_id: UUID, operator: CurrentOperator, session: DbSession, 
     conversation.status = "ACTIVE"
     record_event(session, "conversation.claimed", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"active_count_after": active_count + 1})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/release", response_model=ConversationSummaryOut)
@@ -122,7 +124,7 @@ def take_over(conversation_id: UUID, operator: CurrentOperator, session: DbSessi
     conversation.taken_over_at = datetime.now(UTC)
     record_event(session, "conversation.taken_over", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"from_mode": "N2", "to_mode": "N1"})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=OperatorMessageOut, status_code=201)

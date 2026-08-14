@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     ai_embedding_dimension: int = Field(default=1536, ge=1)
     api_root_path: str = "/api/v1"
     log_level: str = "INFO"
+    anonymous_token_rate_limit_max_failures: int = Field(default=30, ge=1)
+    anonymous_token_rate_limit_window_seconds: float = Field(default=60.0, gt=0)
+    anonymous_token_rate_limit_base_lockout_seconds: float = Field(default=60.0, gt=0)
+    anonymous_token_rate_limit_max_lockout_seconds: float = Field(default=900.0, gt=0)
 
 
 @lru_cache

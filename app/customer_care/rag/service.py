@@ -89,3 +89,20 @@ def retrieve(
 
 def evidence_dict(item: Evidence) -> dict:
     return item.__dict__
+
+
+def load_evidence(session: Session, retrieval_hit_id: UUID) -> Evidence | None:
+    """Reconstruct the Evidence for an already-persisted RetrievalHit (V2-3)."""
+    hit = session.get(RetrievalHit, retrieval_hit_id)
+    if not hit:
+        return None
+    if hit.matched_kind == "ADMIN_QA":
+        qa = session.get(QAEntry, hit.matched_qa_id) if hit.matched_qa_id else None
+        if not qa:
+            return None
+        return Evidence(hit.id, "ADMIN_QA", hit.rank, hit.score, qa.question, None, qa.answer_markdown, None, False)
+    chunk = session.get(KnowledgeChunk, hit.matched_chunk_id) if hit.matched_chunk_id else None
+    parent = session.get(KnowledgeDocument, hit.expanded_parent_document_id) if hit.expanded_parent_document_id else None
+    if not chunk or not parent:
+        return None
+    return Evidence(hit.id, "CLINICAL", hit.rank, hit.score, parent.title, chunk.heading, parent.content_markdown or chunk.content_markdown, chunk.content_markdown, parent.customer_citation_allowed)

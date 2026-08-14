@@ -4,9 +4,14 @@ import secrets
 
 from customer_care.shared.settings import get_settings
 
+# Uppercase letters and digits, excluding visually ambiguous characters
+# (0/O, 1/I, L) — plan.md §3.1. 31 symbols, 8 characters: ~4.9e11 combinations.
+TOKEN_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+TOKEN_LENGTH = 8
+
 
 def issue_conversation_token() -> tuple[str, str]:
-    raw = secrets.token_urlsafe(32)
+    raw = "".join(secrets.choice(TOKEN_ALPHABET) for _ in range(TOKEN_LENGTH))
     return raw, digest_conversation_token(raw)
 
 

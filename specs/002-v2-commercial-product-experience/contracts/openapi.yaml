@@ -102,8 +102,11 @@ paths:
         box has focus and non-empty content. Updates
         last_customer_typing_at and last_customer_activity_at; extends the
         8-second automatic-draft debounce window and drives the operator's
-        live "is typing" indicator. No request body. Rate-limited with a
-        higher allowance than other public endpoints (plan.md §13.1).
+        live "is typing" indicator. No request body. Shares the same
+        per-source token-validation rate limiter as other /public/* routes
+        (plan.md §13.1); no separate higher-allowance limiter was needed
+        since that limiter only counts failed validations — a correct
+        token's frequent heartbeats never count against it.
       security:
         - customerConversationToken: []
       responses:
@@ -894,11 +897,15 @@ components:
           default: ''
     SelectEvidenceRequest:
       type: object
+      required: [conversation_id]
       properties:
         conversation_id:
-          type: [string, 'null']
+          type: string
           format: uuid
-          description: Present when this selection is made within a conversation context.
+          description: >-
+            Required: an AIGeneration always belongs to a conversation, so
+            evidence selection must happen within one (unlike
+            /operator/knowledge/search, which may be conversation-less).
     AIGeneration:
       type: object
       required:

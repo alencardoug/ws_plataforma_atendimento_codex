@@ -236,9 +236,11 @@ cover this feature instead of adding new infrastructure):
 - `POST /public/conversations/{id}/typing` — a cheap heartbeat the customer
   client calls (debounced client-side to roughly every 2–3s) while the
   message box has focus and non-empty content. Updates
-  `last_customer_typing_at` and `last_customer_activity_at`. Rate-limited
-  like other public endpoints (§13.1) but with a higher allowance since it is
-  expected to be frequent.
+  `last_customer_typing_at` and `last_customer_activity_at`. Shares the same
+  per-source token-validation limiter as other `/public/*` routes (§13.1);
+  no separate higher-allowance limiter is needed since that limiter only
+  penalizes failed validations — frequent heartbeats from a correct token
+  never count against it.
 - Every customer message send also updates `last_customer_activity_at`
   (already effectively "now" at insert time — no extra write).
 - **The trigger check is lazy**, evaluated as a side effect of the existing
@@ -295,8 +297,17 @@ For each returned row, substitute `{{variable_name}}` per the
 `output_columns` mapping into the pattern text; if `row_limit > 1`, the
 plan's default rendering repeats the pattern once per row (the V1 demo
 content's "up to four offers" phrasing already anticipates a multi-row
-answer) and joins with a plan-defined separator — `tasks.md`/`data-model.md`
-should pin the exact multi-row template syntax before implementation.
+answer) and joins with a plan-defined separator. **Pinned during
+implementation (tasks.md T073):** each row renders the full pattern
+independently, joined with a blank line (`"\n\n"`).
+
+**Implementation note:** the allowlist and resolver are proven against one
+clearly-labeled, non-scheduling-flavored fixture table
+(`content.knowledge_dynamic_fixture`) — no production Q&A entry is bound to
+it. Every existing `dynamic_data_required=true` demo entry remains
+unconfigured, which is the correct closure per §9.4: an unconfigured entry
+and a configured-but-failing one fall back identically. See tasks.md Phase 7
+for the full scope rationale.
 
 ### 9.3 Failure and fallback
 
@@ -390,7 +401,11 @@ introduced for V2, consistent with V1's precedent.
   `/operator/knowledge/clinical-documents[/{id}]`,
   `/operator/knowledge/clinical-documents/{id}/chunks[/{chunk_id}]`.
 - Removed: `POST /operator/drafts/{generation_id}/regenerate` (§7.1).
-- `OperatorConversationDetail`: adds `is_customer_typing`.
+- `OperatorConversationDetail`: adds `is_customer_typing`; `latest_generation`
+  (already present in the schema, inherited from V1) is now actually
+  populated — V1 declared but never implemented it, which V2 cannot leave
+  as-is once an `AUTOMATIC` generation needs a way to reach the operator's
+  browser with no direct API response of its own.
 - `AIGeneration`: adds `trigger` and `dynamic_pattern_used`.
 - Token schema note: `access_token` documented as the new short format;
   no field renamed.
@@ -403,11 +418,18 @@ Rate limit on the `/public/*` token-authenticated routes and on
 `/public/conversations/{id}` lookups specifically: a sliding-window counter
 keyed by source IP (and, where available, a secondary key such as a
 per-client fingerprint header) rejecting with `429` beyond a configured
-threshold (plan default: 5 failed token validations per IP per minute, then
+threshold (plan default: 30 failed token validations per IP per minute, then
 exponential backoff up to a capped lockout window — exact numbers belong in
-`tasks.md`/`data-model.md` as configuration, not hardcoded). Successful
-validations do not count against the limiter. This is required acceptance
-evidence (spec.md §5 item 8), with a negative test proving lockout engages.
+`tasks.md`/`data-model.md` as configuration, not hardcoded). Raised from an
+initial 5 (human decision, 2026-08-14): with an 8-character/31-symbol token
+(~4.9×10^11 combinations, `plan.md` §3.1), 30 failed attempts changes an
+attacker's success odds negligibly, while 5 proved too easy to hit from
+normal use (a customer mistyping/retrying a few times, or routine manual
+testing) — the token's own entropy is the primary defense; this limiter is a
+backstop against sustained automated guessing, not the first line of
+defense. Successful validations do not count against the limiter. This is
+required acceptance evidence (spec.md §5 item 8), with a negative test
+proving lockout engages.
 
 ### 13.2 Server-side enforcement carried over from V1
 

@@ -30,7 +30,7 @@ def run() -> None:
     draft = client.post(
         f"/api/v1/operator/conversations/{conversation_id}/drafts",
         headers=operator_headers,
-        json={"triggering_message_id": question.json()["id"]},
+        json={"selected_message_ids": [question.json()["id"]]},
     )
     assert draft.status_code == 201, draft.text
     generated = draft.json()

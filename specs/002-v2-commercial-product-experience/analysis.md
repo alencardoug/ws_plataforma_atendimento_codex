@@ -117,10 +117,14 @@ none are outstanding.
   acceptable deferral (it's a rendering detail, not a behavior or security
   question), but `tasks.md` T073 must actually resolve it before Phase 7 is
   considered done — flagged here so it isn't silently skipped.
-- **Rate-limit thresholds** (`plan.md` §13.1: "5 per IP per minute" example)
-  are explicitly marked as a starting default, not a final decision;
-  `tasks.md` T024 makes them configuration, not a hardcoded constant, which
-  is the correct way to leave this open without blocking implementation.
+- **Rate-limit thresholds** (`plan.md` §13.1: originally a "5 per IP per
+  minute" example) were explicitly marked as a starting default, not a final
+  decision; `tasks.md` T024 made them configuration, not a hardcoded
+  constant, which is what allowed this to be revised without a code change.
+  **Resolved 2026-08-14**, same day, after Phase 2 implementation: the
+  human found 5 too easily hit during normal use/testing and raised it to
+  30, which `plan.md` §13.1 now documents with the entropy-based rationale
+  for why this doesn't meaningfully weaken the mitigation.
 - **`checklists/traceability.md`'s "Executable evidence" table** is
   currently placeholders (`*(new test module, per T0xx)*`) because no V2
   code exists yet — this must be filled in with real file paths during
