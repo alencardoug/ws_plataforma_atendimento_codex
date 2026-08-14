@@ -36,10 +36,10 @@ explicit copy action. The token shall not be put into a URL, ordinary logs,
 audit payloads, analytics, or another conversation's UI. The backend continues
 to persist only its secure digest.
 
-The token format changes from V1's long random string to a **short 6–8
-character code, uppercase letters and digits, excluding visually ambiguous
-characters** (`0`/`O`, `1`/`I`/`L`, and similarly confusable pairs the plan
-finalizes). It exists purely for the customer's own record-keeping (e.g.
+The token format changes from V1's long random string to a **short 8-character
+code, uppercase letters and digits, excluding visually ambiguous
+characters** (`0`/`O`, `1`/`I`/`L`; `plan.md` §3.1 pins the exact 31-symbol
+alphabet). It exists purely for the customer's own record-keeping (e.g.
 reading it back to a support contact) — copying or displaying it does not
 create a customer account, a cross-session recovery workflow, or any way to
 resume/reopen a conversation. This is an explicit, deliberate scope boundary,

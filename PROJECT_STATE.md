@@ -104,15 +104,16 @@ or code can be honestly produced.
 
 ## Immediate next action for Claude Code
 
-V1 is closed (GO, 2026-08-13); its worktree is committed and pushed. V2
-`spec.md` clarification is complete (2026-08-14): all 8 open decisions are
-resolved and captured as V2-2 through V2-8, including a new scope item
-(V2-8, knowledge-base CRUD) that surfaced during clarification. Next:
+V1 is closed (GO, 2026-08-13); its worktree is committed and pushed. V2's
+full pre-implementation artifact set is complete (2026-08-14): `spec.md`
+(clarified, 8 decisions resolved as V2-2..V2-8), `plan.md`, `tasks.md`
+(T000-T131), `data-model.md`, `contracts/openapi.yaml`, `acceptance.md`,
+and `checklists/{requirements,security,traceability}.md`. `analysis.md`
+records the cross-artifact convergence review: 9 findings (mostly wrong
+internal section cross-references and two small schema-consistency gaps),
+all repaired, no outstanding contradiction.
 
-1. Create V2 `plan.md` (architecture, data migration, API, UI, accessibility,
-   security, audit, error/fallback, rollout — including the V2-2 token
-   brute-force mitigation, the V2-6/V2-8 knowledge CRUD and dynamic-pattern
-   wiring, and the V2-7 typing-debounce mechanism), then `tasks.md`,
-   `data-model.md`/`contracts/openapi.yaml`, `acceptance.md`, and checklists.
-2. Run cross-artifact analysis, repair contradictions, and only then
-   implement V2 in dependency order, rerunning all affected gates.
+V2 production code has not been written. Next: begin `tasks.md` Phase 0 (SDD
+gates) and implement in dependency order starting with Phase 1 (migrations),
+rerunning all affected gates as each phase completes, per `tasks.md`'s
+dependency summary.

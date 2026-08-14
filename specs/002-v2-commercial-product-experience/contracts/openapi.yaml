@@ -1,0 +1,1108 @@
+openapi: 3.1.0
+info:
+  title: Customer Care AI V2 API
+  version: 2.0.0
+  description: >-
+    V2 contract, superseding specs/001-v1-assisted-customer-service's
+    contracts/openapi.yaml. AI generation remains internal; no endpoint
+    directly publishes an AI generation to the customer. Every V1 safety
+    invariant (explicit operator send, server-side citation/authorization
+    enforcement, append-only audit, no chain-of-thought persistence) is
+    unchanged; see plan.md §12 for the summary of what changed and why.
+servers:
+  - url: http://localhost:8000/api/v1
+paths:
+  /public/conversations:
+    post:
+      tags: [Public Customer]
+      summary: Create anonymous conversation
+      description: >-
+        access_token is now an 8-character code from a 31-symbol alphabet
+        (uppercase letters and digits, excluding 0/O, 1/I, L) — see plan.md
+        §3.1/§4. It is returned once, for the customer's own record-keeping;
+        it does not enable session recovery from another tab/device.
+      security: []
+      responses:
+        '201':
+          description: Conversation created; raw access token is returned once.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateConversationResponse'
+  /public/conversations/{conversation_id}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags: [Public Customer]
+      summary: Read token-bound conversation
+      security:
+        - customerConversationToken: []
+      responses:
+        '200':
+          description: Customer-safe conversation projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerConversation'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    post:
+      tags: [Public Customer]
+      summary: Close token-bound conversation
+      security:
+        - customerConversationToken: []
+      responses:
+        '200':
+          description: Closed conversation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerConversation'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /public/conversations/{conversation_id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Public Customer]
+      summary: Send customer message
+      description: >-
+        Persists message without requiring synchronous AI generation. Also
+        updates last_customer_activity_at (plan.md §3.2), which participates
+        in the V2-7 automatic-draft debounce.
+      security:
+        - customerConversationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendCustomerMessageRequest'
+      responses:
+        '201':
+          description: Customer message persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerMessage'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /public/conversations/{conversation_id}/typing:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Public Customer]
+      summary: Customer typing-activity heartbeat (V2-7)
+      description: >-
+        Called by the customer client roughly every 2-3s while the message
+        box has focus and non-empty content. Updates
+        last_customer_typing_at and last_customer_activity_at; extends the
+        8-second automatic-draft debounce window and drives the operator's
+        live "is typing" indicator. No request body. Rate-limited with a
+        higher allowance than other public endpoints (plan.md §13.1).
+      security:
+        - customerConversationToken: []
+      responses:
+        '204':
+          description: Heartbeat recorded
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+  /auth/operator/login:
+    post:
+      tags: [Operator Auth]
+      summary: Operator login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorLoginRequest'
+      responses:
+        '200':
+          description: Authenticated operator token/session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorLoginResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /operator/me:
+    get:
+      tags: [Operator]
+      summary: Current operator
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Operator identity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Operator'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /operator/runtime-config:
+    get:
+      tags: [Operator]
+      summary: Read V2 runtime mode/capacity configuration
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Read-only operator-visible configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeConfig'
+  /operator/conversations:
+    get:
+      tags: [Operator]
+      summary: List waiting and/or own active conversations
+      security:
+        - operatorBearer: []
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [waiting, active, all]
+            default: all
+      responses:
+        '200':
+          description: Operator conversation summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OperatorConversationSummary'
+  /operator/conversations/{conversation_id}:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    get:
+      tags: [Operator]
+      summary: Read operator conversation detail
+      description: >-
+        Polling this endpoint (already the V1 real-time strategy, ~2s
+        interval) is also the tick that lazily evaluates the V2-7 automatic
+        8-second draft trigger — see plan.md §7.2. No dedicated
+        "check trigger" endpoint exists.
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: >-
+            Internal operator projection including visible AI/evidence
+            metadata and the live is_customer_typing signal.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationDetail'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/conversations/{conversation_id}/claim:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Claim waiting conversation
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Conversation activated/assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationDetail'
+        '409':
+          description: Capacity exceeded or conversation no longer claimable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /operator/conversations/{conversation_id}/release:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Release active conversation back to waiting queue
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Released
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationSummary'
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operator/conversations/{conversation_id}/close:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Close assigned conversation
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationSummary'
+  /operator/conversations/{conversation_id}/take-over:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Reduce effective N2 conversation to N1 until close
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TakeOverRequest'
+      responses:
+        '200':
+          description: Effective mode changed to N1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorConversationDetail'
+        '409': { $ref: '#/components/responses/Conflict' }
+  /operator/conversations/{conversation_id}/messages:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator]
+      summary: Explicitly send final customer-visible operator message
+      description: >-
+        Unchanged from V1: the only operation that creates a customer-visible
+        operator message. An AI generation may be referenced as provenance
+        but is never sent directly, regardless of which V2-7/V2-3 path
+        produced it.
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendOperatorMessageRequest'
+      responses:
+        '201':
+          description: Final message sent/persisted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorMessage'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/conversations/{conversation_id}/drafts:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Operator AI]
+      summary: Generate internal grounded draft in effective N2 ("Gerar rascunho")
+      description: >-
+        V2 change from V1: request takes selected_message_ids[] and
+        manual_search_text instead of a single triggering_message_id
+        (V2-4/V2-7, plan.md §6-§7.1). Re-invoking this endpoint against a
+        changed selection is how the operator "regenerates" — there is no
+        separate regenerate endpoint in V2 (see removed
+        /operator/drafts/{generation_id}/regenerate below).
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateDraftRequest'
+      responses:
+        '201':
+          description: Internal draft generated or abstained
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGeneration'
+        '409':
+          description: Conversation is N1/taken-over
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: >-
+            selected_message_ids references a message outside this
+            conversation, or both selected_message_ids and
+            manual_search_text are empty (V2-4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /operator/knowledge/search:
+    post:
+      tags: [Operator AI]
+      summary: Manual evidence search
+      description: >-
+        Unchanged from V1: returns evidence only. In effective/global N1 this
+        requires the assistive search flag. Selecting one returned item is a
+        separate call — see /operator/knowledge/evidence/{retrieval_hit_id}/select.
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KnowledgeSearchRequest'
+      responses:
+        '200':
+          description: Internal evidence results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KnowledgeSearchResponse'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /operator/knowledge/evidence/{retrieval_hit_id}/select:
+    parameters:
+      - $ref: '#/components/parameters/RetrievalHitId'
+    post:
+      tags: [Operator AI]
+      summary: Select exactly one evidence item ("Buscar evidências", V2-3)
+      description: >-
+        Given a retrieval_hit_id from a prior /operator/knowledge/search
+        call, deterministically produces the V2-3 outcome: a clinical child
+        yields its complete parent document (no LLM call); an administrative
+        Q&A yields either a resolved dynamic pattern (if the entry has a
+        binding, V2-6) or an LLM-composed concise answer scoped to this one
+        hit. Fully independent of selected_message_ids (V2-4) — this
+        endpoint never reads or writes conversation-message selections.
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelectEvidenceRequest'
+      responses:
+        '201':
+          description: Internal generation produced from the single selected item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGeneration'
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /operator/knowledge/qa:
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: List administrative Q&A entries (V2-8)
+      security:
+        - operatorBearer: []
+      parameters:
+        - name: include_inactive
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Q&A entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/QAEntry' }
+    post:
+      tags: [Operator Knowledge CRUD]
+      summary: Create administrative Q&A entry (V2-8)
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQAEntryRequest'
+      responses:
+        '201':
+          description: Created; re-embedded if content requires it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QAEntry'
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/knowledge/qa/{qa_id}:
+    parameters:
+      - $ref: '#/components/parameters/QaId'
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: Read Q&A entry (V2-8)
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Q&A entry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QAEntry' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Operator Knowledge CRUD]
+      summary: Update Q&A entry (V2-8)
+      description: >-
+        Content-hash comparison re-embeds only if answer_markdown/question
+        actually changed (reuses ingestion's existing idempotency logic,
+        plan.md §10).
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateQAEntryRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QAEntry' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Operator Knowledge CRUD]
+      summary: Deactivate Q&A entry (V2-8)
+      description: Soft delete only (is_active = false); no hard delete.
+      security:
+        - operatorBearer: []
+      responses:
+        '204':
+          description: Deactivated
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/knowledge/clinical-documents:
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: List clinical parent documents (V2-8)
+      security:
+        - operatorBearer: []
+      parameters:
+        - name: include_inactive
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Clinical documents
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ClinicalDocument' }
+    post:
+      tags: [Operator Knowledge CRUD]
+      summary: Create clinical parent document (V2-8)
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClinicalDocumentRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClinicalDocument' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/knowledge/clinical-documents/{document_id}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: Read clinical parent document (V2-8)
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Clinical document
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClinicalDocument' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [Operator Knowledge CRUD]
+      summary: Update clinical parent document (V2-8)
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClinicalDocumentRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClinicalDocument' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Operator Knowledge CRUD]
+      summary: Deactivate clinical parent document (V2-8)
+      description: Soft delete only (is_active = false); no hard delete.
+      security:
+        - operatorBearer: []
+      responses:
+        '204':
+          description: Deactivated
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/knowledge/clinical-documents/{document_id}/chunks:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: List a clinical document's child chunks (V2-8)
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Child chunks
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ClinicalChunk' }
+    post:
+      tags: [Operator Knowledge CRUD]
+      summary: Create a child chunk under this parent (V2-8)
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateClinicalChunkRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClinicalChunk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/knowledge/clinical-documents/{document_id}/chunks/{chunk_id}:
+    parameters:
+      - $ref: '#/components/parameters/DocumentId'
+      - $ref: '#/components/parameters/ChunkId'
+    patch:
+      tags: [Operator Knowledge CRUD]
+      summary: Update a child chunk (V2-8)
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateClinicalChunkRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ClinicalChunk' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Operator Knowledge CRUD]
+      summary: Deactivate a child chunk (V2-8)
+      description: Soft delete only (is_active = false); no hard delete.
+      security:
+        - operatorBearer: []
+      responses:
+        '204':
+          description: Deactivated
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  securitySchemes:
+    customerConversationToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-conversation-token
+    operatorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT-or-session-token
+  parameters:
+    ConversationId:
+      name: conversation_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RetrievalHitId:
+      name: retrieval_hit_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    QaId:
+      name: qa_id
+      in: path
+      required: true
+      schema: { type: string }
+    DocumentId:
+      name: document_id
+      in: path
+      required: true
+      schema: { type: string }
+    ChunkId:
+      name: chunk_id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: Authenticated credential is not authorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Domain state conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ValidationError:
+      description: Invalid request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ServiceUnavailable:
+      description: AI/RAG provider dependency unavailable; manual service may remain available
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    TooManyRequests:
+      description: >-
+        Token-validation or typing-heartbeat rate limit exceeded (V2-2/V2-7,
+        plan.md §13.1). Response includes a code identifying which limiter
+        engaged.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code: { type: string }
+        message: { type: string }
+        request_id: { type: [string, 'null'] }
+    CreateConversationResponse:
+      type: object
+      required: [conversation, access_token]
+      properties:
+        conversation:
+          $ref: '#/components/schemas/CustomerConversation'
+        access_token:
+          type: string
+          minLength: 8
+          maxLength: 8
+          pattern: '^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{8}$'
+          description: >-
+            Returned once. Short record-keeping code (plan.md §3.1); frontend
+            stores it in this tab's sessionStorage and displays it
+            continuously (V2-2). Not a recovery/resume mechanism.
+    CustomerConversation:
+      type: object
+      required: [id, status, messages, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/CustomerVisibleMessage' }
+        created_at: { type: string, format: date-time }
+        closed_at: { type: [string, 'null'], format: date-time }
+    CustomerVisibleMessage:
+      oneOf:
+        - $ref: '#/components/schemas/CustomerMessage'
+        - $ref: '#/components/schemas/OperatorMessage'
+    CustomerMessage:
+      type: object
+      required: [id, author_type, body, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        author_type: { type: string, const: CUSTOMER }
+        body:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: Plain text; line breaks are preserved in message rendering.
+        created_at: { type: string, format: date-time }
+    OperatorMessage:
+      type: object
+      required: [id, author_type, body, citations, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        author_type: { type: string, const: OPERATOR }
+        body:
+          type: string
+          description: Plain text; line breaks are preserved in message rendering.
+        citations:
+          type: array
+          items: { $ref: '#/components/schemas/CustomerCitation' }
+        created_at: { type: string, format: date-time }
+    CustomerCitation:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        section: { type: [string, 'null'] }
+        url: { type: [string, 'null'], format: uri }
+    SendCustomerMessageRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 8000
+          description: Plain text; line breaks are preserved in message rendering.
+    OperatorLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 8 }
+    OperatorLoginResponse:
+      type: object
+      required: [access_token, operator]
+      properties:
+        access_token: { type: string }
+        operator: { $ref: '#/components/schemas/Operator' }
+    Operator:
+      type: object
+      required: [id, email, display_name]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        display_name: { type: string }
+    RuntimeConfig:
+      type: object
+      required: [global_maturity_mode, n1_assistive_search_enabled, max_active_conversations]
+      properties:
+        global_maturity_mode: { $ref: '#/components/schemas/MaturityMode' }
+        n1_assistive_search_enabled: { type: boolean }
+        max_active_conversations: { type: integer, minimum: 1 }
+    ConversationStatus:
+      type: string
+      enum: [WAITING, ACTIVE, CLOSED]
+    MaturityMode:
+      type: string
+      enum: [N1, N2]
+    OperatorConversationSummary:
+      type: object
+      required: [id, status, effective_mode, created_at, last_message_at]
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ConversationStatus' }
+        effective_mode: { $ref: '#/components/schemas/MaturityMode' }
+        created_at: { type: string, format: date-time }
+        last_message_at: { type: [string, 'null'], format: date-time }
+        unread_customer_messages: { type: integer, minimum: 0 }
+    OperatorConversationDetail:
+      allOf:
+        - $ref: '#/components/schemas/OperatorConversationSummary'
+        - type: object
+          required: [messages, is_customer_typing]
+          properties:
+            messages:
+              type: array
+              items: { $ref: '#/components/schemas/CustomerVisibleMessage' }
+            latest_generation:
+              oneOf:
+                - $ref: '#/components/schemas/AIGeneration'
+                - type: 'null'
+            is_customer_typing:
+              type: boolean
+              description: >-
+                Derived from last_customer_typing_at within a short grace
+                window (plan.md §7.2). Not itself persisted state.
+    TakeOverRequest:
+      type: object
+      properties:
+        reason:
+          type: [string, 'null']
+          maxLength: 500
+    SendOperatorMessageRequest:
+      type: object
+      required: [body]
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 12000
+          description: Plain text; line breaks are preserved in message rendering.
+        source_generation_id: { type: [string, 'null'], format: uuid }
+        citation_retrieval_hit_ids:
+          type: array
+          items: { type: string, format: uuid }
+          default: []
+    GenerateDraftRequest:
+      type: object
+      description: >-
+        V2 change from V1's single triggering_message_id (V2-4/V2-7,
+        plan.md §6). At least one of selected_message_ids or
+        manual_search_text must be non-empty; the server rejects (422)
+        otherwise.
+      properties:
+        selected_message_ids:
+          type: array
+          items: { type: string, format: uuid }
+          default: []
+          description: Must all belong to this conversation; server-validated.
+        manual_search_text:
+          type: string
+          maxLength: 4000
+          default: ''
+    SelectEvidenceRequest:
+      type: object
+      properties:
+        conversation_id:
+          type: [string, 'null']
+          format: uuid
+          description: Present when this selection is made within a conversation context.
+    AIGeneration:
+      type: object
+      required:
+        - id
+        - conversation_id
+        - status
+        - draft_text
+        - evidence
+        - trigger
+        - dynamic_pattern_used
+        - created_at
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        triggering_message_id: { type: [string, 'null'], format: uuid }
+        prior_generation_id: { type: [string, 'null'], format: uuid }
+        trigger:
+          type: string
+          enum: [AUTOMATIC, MANUAL_DRAFT, MANUAL_EVIDENCE]
+          description: Which V2-7/V2-3 path produced this generation (plan.md §3.3).
+        status:
+          type: string
+          enum: [ANSWER, ABSTAIN]
+        draft_text:
+          type: string
+          description: >-
+            For ANSWER, only the concise customer-ready reply, OR the
+            complete clinical parent document (parent-child retrieval), OR a
+            resolved V2-6 dynamic pattern (when dynamic_pattern_used is
+            true). Never preambles, operator instructions, evidence/chunk
+            text, or retrieval/citation metadata.
+        dynamic_pattern_used:
+          type: boolean
+          description: True only when draft_text is a resolved V2-6 pattern, not LLM output.
+        reason_code:
+          type: [string, 'null']
+          enum: [INSUFFICIENT_EVIDENCE, CONFLICTING_EVIDENCE, OUT_OF_SCOPE, RETRIEVAL_FAILURE, DYNAMIC_DATA_UNAVAILABLE, null]
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/InternalEvidence' }
+        selected_message_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Snapshot of message_selections for this generation (empty for MANUAL_EVIDENCE).
+        model: { type: string }
+        prompt_version: { type: string }
+        duration_ms: { type: [integer, 'null'] }
+        created_at: { type: string, format: date-time }
+    KnowledgeSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1, maxLength: 4000 }
+        conversation_id: { type: [string, 'null'], format: uuid }
+        top_k: { type: integer, minimum: 1, maximum: 20, default: 8 }
+    KnowledgeSearchResponse:
+      type: object
+      required: [retrieval_run_id, evidence]
+      properties:
+        retrieval_run_id: { type: string, format: uuid }
+        evidence:
+          type: array
+          items: { $ref: '#/components/schemas/InternalEvidence' }
+    InternalEvidence:
+      type: object
+      required:
+        - retrieval_hit_id
+        - knowledge_type
+        - rank
+        - score
+        - title
+        - content
+        - customer_citation_allowed
+      properties:
+        retrieval_hit_id: { type: string, format: uuid }
+        knowledge_type:
+          type: string
+          enum: [ADMIN_QA, CLINICAL]
+        rank: { type: integer, minimum: 1 }
+        score: { type: number }
+        title: { type: string }
+        section: { type: [string, 'null'] }
+        content: { type: string }
+        matched_child_excerpt: { type: [string, 'null'] }
+        customer_citation_allowed: { type: boolean }
+        has_dynamic_binding:
+          type: boolean
+          description: True when this ADMIN_QA entry has a V2-6 qa_dynamic_bindings row.
+    QADynamicBinding:
+      type: object
+      required: [source_table, output_columns]
+      properties:
+        source_table:
+          type: string
+          description: Must match a server-side allowlist entry (plan.md §9.2); rejected otherwise.
+        filter:
+          type: object
+          additionalProperties: { type: string }
+          description: >-
+            Static equality filter, e.g. specialty=Cardiologia,
+            availability=positive.
+        output_columns:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [column, variable_name]
+            properties:
+              column: { type: string }
+              variable_name: { type: string }
+        row_limit: { type: integer, minimum: 1, maximum: 20, default: 4 }
+    QAEntry:
+      type: object
+      required: [qa_id, category, question, answer_markdown, customer_citation_allowed, is_active]
+      properties:
+        qa_id: { type: string }
+        category: { type: string }
+        question: { type: string, minLength: 1 }
+        answer_markdown:
+          type: string
+          minLength: 1
+          description: >-
+            May contain {{variable_name}} placeholders when dynamic_binding
+            is present.
+        customer_citation_allowed: { type: boolean, default: false }
+        is_active: { type: boolean }
+        dynamic_binding:
+          oneOf:
+            - $ref: '#/components/schemas/QADynamicBinding'
+            - type: 'null'
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateQAEntryRequest:
+      type: object
+      required: [category, question, answer_markdown]
+      properties:
+        category: { type: string }
+        question: { type: string, minLength: 1 }
+        answer_markdown: { type: string, minLength: 1 }
+        customer_citation_allowed: { type: boolean, default: false }
+        dynamic_binding:
+          oneOf:
+            - $ref: '#/components/schemas/QADynamicBinding'
+            - type: 'null'
+    UpdateQAEntryRequest:
+      type: object
+      properties:
+        category: { type: [string, 'null'] }
+        question: { type: [string, 'null'], minLength: 1 }
+        answer_markdown: { type: [string, 'null'], minLength: 1 }
+        customer_citation_allowed: { type: [boolean, 'null'] }
+        dynamic_binding:
+          oneOf:
+            - $ref: '#/components/schemas/QADynamicBinding'
+            - type: 'null'
+    ClinicalDocument:
+      type: object
+      required: [document_id, title, content_markdown, customer_citation_allowed, is_active]
+      properties:
+        document_id: { type: string }
+        title: { type: string, minLength: 1 }
+        version: { type: [string, 'null'] }
+        content_markdown: { type: string, minLength: 1 }
+        customer_citation_allowed: { type: boolean, default: true }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateClinicalDocumentRequest:
+      type: object
+      required: [title, content_markdown]
+      properties:
+        title: { type: string, minLength: 1 }
+        version: { type: [string, 'null'] }
+        content_markdown: { type: string, minLength: 1 }
+        customer_citation_allowed: { type: boolean, default: true }
+    UpdateClinicalDocumentRequest:
+      type: object
+      properties:
+        title: { type: [string, 'null'], minLength: 1 }
+        version: { type: [string, 'null'] }
+        content_markdown: { type: [string, 'null'], minLength: 1 }
+        customer_citation_allowed: { type: [boolean, 'null'] }
+    ClinicalChunk:
+      type: object
+      required: [chunk_id, parent_document_id, ordinal, content_markdown, is_active]
+      properties:
+        chunk_id: { type: string }
+        parent_document_id: { type: string }
+        ordinal: { type: integer, minimum: 0 }
+        heading: { type: [string, 'null'] }
+        content_markdown: { type: string, minLength: 1 }
+        is_active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateClinicalChunkRequest:
+      type: object
+      required: [ordinal, content_markdown]
+      properties:
+        ordinal: { type: integer, minimum: 0 }
+        heading: { type: [string, 'null'] }
+        content_markdown: { type: string, minLength: 1 }
+    UpdateClinicalChunkRequest:
+      type: object
+      properties:
+        ordinal: { type: [integer, 'null'], minimum: 0 }
+        heading: { type: [string, 'null'] }
+        content_markdown: { type: [string, 'null'], minLength: 1 }
