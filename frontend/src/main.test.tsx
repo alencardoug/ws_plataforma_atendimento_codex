@@ -108,7 +108,7 @@ describe("V1 routes", () => {
 
     render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
 
-    fireEvent.click(await screen.findByRole("button", { name: /ACTIVE/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
 
     const checkboxes = await screen.findAllByRole("checkbox") as HTMLInputElement[];
     expect(checkboxes).toHaveLength(4);
@@ -151,7 +151,7 @@ describe("V1 routes", () => {
     );
 
     render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
-    fireEvent.click(await screen.findByRole("button", { name: /ACTIVE/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
 
     expect(await screen.findByText("Cliente está digitando…")).toBeInTheDocument();
     expect(await screen.findByText("Resposta automática sintética.")).toBeInTheDocument();
@@ -190,5 +190,115 @@ describe("V1 routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Adicionar pergunta e resposta" }));
 
     expect(await screen.findByText("Nova pergunta")).toBeInTheDocument();
+  });
+
+  it("shows empty states instead of a bare blank panel (V2-1)", async () => {
+    const conversation = { id: "conv-1", status: "ACTIVE", messages: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/public/conversations") && init?.method === "POST") {
+          return { ok: true, json: async () => ({ conversation, access_token: "SUB3B4GC" }) };
+        }
+        if (url.endsWith("/public/conversations/conv-1")) {
+          return { ok: true, json: async () => conversation };
+        }
+        throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+      }),
+    );
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Iniciar conversa" }));
+
+    expect(await screen.findByText("Nenhuma mensagem ainda. Escreva abaixo para começar.")).toBeInTheDocument();
+  });
+
+  it("shows an empty queue state when there are no conversations (V2-1)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) return { ok: true, json: async () => [] };
+        if (url.endsWith("/operator/runtime-config")) return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+
+    expect(await screen.findByText("Nenhuma conversa no momento.")).toBeInTheDocument();
+  });
+
+  it("never offers a control the backend would reject for a closed or N1 conversation (V2-1/T104)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const closedConversation = {
+      id: "conv-closed",
+      status: "CLOSED",
+      effective_mode: "N2",
+      messages: [{ id: "cust-1", author_type: "CUSTOMER", body: "Olá" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-closed", status: "CLOSED", effective_mode: "N2" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-closed")) {
+          return { ok: true, json: async () => closedConversation };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /Encerrada/ }));
+
+    expect(await screen.findByText("Esta conversa está encerrada.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Enviar" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gerar rascunho" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Assumir controle" })).toBeNull();
+  });
+
+  it("omits the evidence-selection action in N1-assistive search, since the backend requires N2 (V2-1/T104)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const n1Conversation = {
+      id: "conv-n1",
+      status: "ACTIVE",
+      effective_mode: "N1",
+      messages: [{ id: "cust-1", author_type: "CUSTOMER", body: "Olá" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-n1", status: "ACTIVE", effective_mode: "N1" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-n1")) {
+          return { ok: true, json: async () => n1Conversation };
+        }
+        if (url.endsWith("/operator/knowledge/search") && init?.method === "POST") {
+          return { ok: true, json: async () => ({ evidence: [{ retrieval_hit_id: "hit-1", knowledge_type: "ADMIN_QA", rank: 1, title: "Pergunta administrativa", content: "Resposta aprovada." }] }) };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
+
+    fireEvent.change(await screen.findByLabelText("Busca manual"), { target: { value: "horário" } });
+    fireEvent.click(screen.getByRole("button", { name: "Buscar evidências" }));
+
+    expect(await screen.findByText("Pergunta administrativa")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Selecionar" })).toBeNull();
   });
 });

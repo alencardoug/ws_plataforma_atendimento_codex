@@ -459,29 +459,82 @@ also pass. **Passed.**
 
 ## Phase 9 — Professional UX redesign [V2-1]
 
-- [ ] **T100 [V2-1]** Define the V2 design system (color/typography/spacing
+- [x] **T100 [V2-1]** Define the V2 design system (color/typography/spacing
   tokens, component states) and document it for reuse across both surfaces.
   Use [accamargo.org.br](https://accamargo.org.br)'s UX patterns (tone,
   information hierarchy, professionalism level) as a reference point per
   `spec.md` V2-1 — do not copy its branding, logo, color identity, or
   content; this is a synthetic demo product with no affiliation to that
-  organization.
-- [ ] **T101 [V2-1] [P]** Redesign the customer SPA (start, message list,
+  organization. Documented in `plan.md` §11.3, implemented as CSS custom
+  properties in `frontend/src/styles.css`. Automated fetch of the
+  reference site returned HTTP 403 during implementation (bot-blocked),
+  so the tokens were not derived from its markup — see §11.3 for the
+  pattern-level (not markup-level) reasoning that stands in for it.
+- [x] **T101 [V2-1] [P]** Redesign the customer SPA (start, message list,
   send, status, token header, close) to the new design system, including
-  empty/loading/error states.
-- [ ] **T102 [V2-1] [P]** Redesign the operator SPA, retaining the three-pane
+  empty/loading/error states. `CustomerPage` in `main.tsx`: `.card`
+  shell, `StatusBadge`, an empty-state message when there are no
+  messages yet, a loading state before the first conversation fetch
+  resolves, and the reply textarea/button disabled once the
+  conversation is `CLOSED`.
+- [x] **T102 [V2-1] [P]** Redesign the operator SPA, retaining the three-pane
   functional layout (`[ waiting/active list ] [ conversation ] [ AI/evidence
   panel ]`) with the new design system and this feature's new controls
   (checkboxes, "desmarcar conversas", "Gerar rascunho"/"Buscar evidências",
   "Usar sugestão", typing indicator, knowledge-CRUD entry point).
-- [ ] **T103 [V2-1]** Ensure all redesigned/new controls are keyboard-usable
-  and semantically labeled.
-- [ ] **T104 [V2-1]** Ensure the UI never exposes a control the backend would
+  `OperatorPage`/`KnowledgeAdminPage` in `main.tsx`: `StatusBadge` on
+  every queue item, empty-state text for an empty queue/message list,
+  a "conversation encerrada" state that replaces the reply form, and
+  card/list styling reused for the knowledge-CRUD screen (`main.tsx`,
+  `styles.css`).
+- [x] **T103 [V2-1]** Ensure all redesigned/new controls are keyboard-usable
+  and semantically labeled. Every text input/textarea now has an
+  `htmlFor`-linked `<label>` (previously several were unlabeled or
+  relied on implicit wrapping); `:focus-visible` gets an explicit
+  focus ring (`--focus-ring` token) on every interactive element;
+  status is always conveyed by a `<span class="badge">` carrying its
+  own visible text label, never by color alone.
+- [x] **T104 [V2-1]** Ensure the UI never exposes a control the backend would
   reject for the current effective mode/feature flag — backend remains
-  authoritative regardless of what the UI shows.
-- [ ] **T105 [V2-1]** Add frontend regression coverage for the redesigned
+  authoritative regardless of what the UI shows. Auditing this
+  surfaced two real gaps, both fixed in `main.tsx`: (1) "Gerar
+  rascunho"/"Assumir controle" were gated on `effective_mode === "N2"`
+  only, but the backend (`ai/router.py` `draft()`, `select_evidence()`;
+  `operator_workspace/router.py` `take_over()`) also requires
+  `status === "ACTIVE"` — introduced `aiEligible = status === "ACTIVE"
+  && effective_mode === "N2"` and used it for both controls plus the
+  manual-search-evidence "Selecionar" action (`select_evidence` has the
+  same N2+ACTIVE requirement, but manual search itself is legitimately
+  available in N1-assistive mode as read-only, so the fix scopes
+  `onSelect` to `aiEligible` without hiding the search results
+  themselves); (2) the operator reply form/"Encerrar conversa" had no
+  `status === "ACTIVE"` guard, but `send_operator_message` 409s on a
+  non-active conversation — a closed conversation opened from the
+  queue for historical review now shows "Esta conversa está encerrada."
+  instead of a form that would fail on submit.
+- [x] **T105 [V2-1]** Add frontend regression coverage for the redesigned
   flows appropriate to the existing test stack (component/unit level; E2E
-  coverage is Phase 11).
+  coverage is Phase 11). Four new Vitest cases in `main.test.tsx`: the
+  customer empty-message state, the operator empty-queue state, the
+  closed-conversation control-hiding behavior from T104's fix #2, and
+  the N1-assistive-search omitting "Selecionar" from T104's fix #1.
+  Additionally (not new coverage, but existing coverage the redesign's
+  text changes broke): `e2e/v1.spec.ts`'s two V1 acceptance scenarios
+  asserted on the raw status enum (`"WAITING"`, `/^ACTIVE/`) that the
+  new `StatusBadge` no longer renders verbatim (it renders the
+  translated label, e.g. "Aguardando"/"Em atendimento"). Updated the
+  matchers to match and reran both scenarios (N2 and N1, the latter
+  with `GLOBAL_MATURITY_MODE=N1`/`N1_ASSISTIVE_SEARCH_ENABLED=false`)
+  against the rebuilt `frontend` Docker image with real Chrome via
+  Playwright — both pass.
+
+**Gate:** `ruff`/`mypy`/`pytest` unaffected (Phase 9 is frontend-only, no
+backend files changed). Frontend `tsc --noEmit`, `eslint`, `vitest`
+(14/14), `vite build` all pass. Manually verified in a real browser via
+screenshots of `/customer`, `/operator` (empty and with an open
+N2 conversation through to a generated draft), and `/operator/knowledge`.
+Both `e2e/v1.spec.ts` Playwright acceptance scenarios (N2 and N1) pass
+against the rebuilt frontend image. **Passed.**
 
 ## Phase 10 — Audit and observability
 

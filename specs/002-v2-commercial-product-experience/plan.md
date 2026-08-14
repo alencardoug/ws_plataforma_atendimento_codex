@@ -391,7 +391,51 @@ Extends V1's three-pane layout. New elements:
 Real-time strategy stays polling-based (§7.2); no WebSocket/SSE is
 introduced for V2, consistent with V1's precedent.
 
-## 12. API contract changes (summary; `contracts/openapi.yaml` is canonical)
+### 11.3 Design system (V2-1, T100)
+
+Automated fetch of `accamargo.org.br` returned HTTP 403 (bot-blocked) during
+implementation, so this design system was **not** built by inspecting that
+site's markup, and copies none of its assets — consistent with `spec.md`
+V2-1's requirement not to reproduce branding/content regardless. The
+reference is applied at the level `spec.md` actually asks for: the
+generally-recognized tone/hierarchy/professionalism conventions of a
+serious oncology-care institutional web presence, applied to this
+synthetic demo:
+
+- **Tone** — calm and reassuring, not clinical-cold or consumer-playful.
+  No bright saturated accents, no urgency-driven UI (no red badges/alerts
+  except genuine error states), generous whitespace over dense packing.
+- **Hierarchy** — a single clear H1 per screen, card-grouped sections with
+  their own heading, status conveyed by a labeled badge (text + shape, not
+  color alone) rather than ambient background-color shifts.
+- **Professionalism** — a muted, low-saturation palette (slate/teal), a
+  restrained type scale, and consistent spacing rhythm rather than varied
+  ad hoc margins.
+
+Tokens (implemented as CSS custom properties in `frontend/src/styles.css`):
+
+| Token group | Values |
+| --- | --- |
+| Color — surface | `--surface-page` (#f4f6f9), `--surface-card` (#ffffff), `--surface-sunken` (#eef1f6) |
+| Color — text | `--text-primary` (#172033), `--text-muted` (#5b6474) |
+| Color — brand | `--brand-600` (#0f6e6a) primary actions, `--brand-700` (#0b544f) hover/active |
+| Color — semantic | `--danger-600` (#b3261e), `--warning-600` (#8a5a00), `--success-600` (#1e7a3d) |
+| Color — border | `--border-subtle` (#dce2ec), `--border-strong` (#b7c0cf) |
+| Typography | system-ui stack; scale `--font-size-h1` 1.75rem, `--font-size-h2` 1.25rem, `--font-size-body` 1rem, `--font-size-small` 0.85rem; `--line-height-body` 1.5 |
+| Spacing (4px base) | `--space-1` .25rem … `--space-8` 2rem |
+| Radius | `--radius-sm` .375rem, `--radius-md` .625rem, `--radius-lg` 1rem |
+| Shadow | `--shadow-card` a single soft low-elevation shadow, no heavier elevation levels |
+| Focus | `--focus-ring` a 2px `--brand-600` outline with 2px offset, applied via `:focus-visible` only |
+
+Component states covered by shared classes: default, `:hover`,
+`:focus-visible`, `[disabled]`, `.is-loading` (skeleton/pulse, no layout
+shift), `.is-empty` (empty-state message + call-to-action, never a bare
+blank panel), and `.field-error`/`role="alert"` for validation/API errors.
+Status is always a `<span class="badge badge-*">` carrying its own text
+label (`Aguardando`, `Em atendimento`, `Encerrada`), never color alone,
+per WCAG 1.4.1.
+
+
 
 - `GenerateDraftRequest`: `triggering_message_id` → `selected_message_ids[]`
   + `manual_search_text`.

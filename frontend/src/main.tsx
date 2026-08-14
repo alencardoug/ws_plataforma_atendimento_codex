@@ -1,6 +1,6 @@
 import React, { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Link, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import "./styles.css";
 
 const API = "/api/v1";
@@ -97,8 +97,14 @@ export function MessageBody({ body }: { body: string }) {
   return <p className="message-body">{body}</p>;
 }
 
+const STATUS_LABEL: Record<ConversationStatus, string> = { WAITING: "Aguardando", ACTIVE: "Em atendimento", CLOSED: "Encerrada" };
+
+function StatusBadge({ status }: { status: ConversationStatus }) {
+  return <span className={`badge badge-${status.toLowerCase()}`}>{STATUS_LABEL[status]}</span>;
+}
+
 export function ManualEvidence({ evidence, onSelect }: { evidence: Evidence; onSelect?: () => void }) {
-  return <article className="manual-evidence"><strong>{evidence.title}</strong>{evidence.section && <small>Seção: {evidence.section}</small>}<MessageBody body={evidence.content} />{evidence.matched_child_excerpt && <><small>Trecho encontrado</small><MessageBody body={evidence.matched_child_excerpt} /></>}{onSelect && <button type="button" onClick={onSelect}>Selecionar</button>}</article>;
+  return <article className="evidence-item"><strong>{evidence.title}</strong>{evidence.section && <small>Seção: {evidence.section}</small>}<MessageBody body={evidence.content} />{evidence.matched_child_excerpt && <><small>Trecho encontrado</small><MessageBody body={evidence.matched_child_excerpt} /></>}{onSelect && <button type="button" onClick={onSelect}>Selecionar</button>}</article>;
 }
 
 export function CustomerPage() {
@@ -174,10 +180,42 @@ export function CustomerPage() {
   };
 
   if (!id) {
-    return <main><h1>Atendimento</h1><p>Converse anonimamente com nossa equipe.</p><button onClick={() => void start().catch((caught) => setError(errorMessage(caught)))}>Iniciar conversa</button>{error && <p role="alert">{error}</p>}</main>;
+    return <main>
+      <div className="card stack">
+        <h1>Atendimento</h1>
+        <p>Converse anonimamente com nossa equipe. Um código de acompanhamento será exibido assim que a conversa iniciar.</p>
+        <button onClick={() => void start().catch((caught) => setError(errorMessage(caught)))}>Iniciar conversa</button>
+        {error && <p role="alert">{error}</p>}
+      </div>
+    </main>;
   }
 
-  return <main><h1>Atendimento</h1><p>Status: <strong>{conversation?.status || "carregando"}</strong></p><p className="conversation-token" aria-label="Código desta conversa">Código da conversa: <strong>{token}</strong> <button type="button" onClick={() => void copyToken()}>{tokenCopied ? "Copiado!" : "Copiar"}</button></p><section className="messages" aria-live="polite">{conversation?.messages.map((message) => <article key={message.id} className={message.author_type.toLowerCase()}><strong>{message.author_type === "CUSTOMER" ? "Você" : "Atendente"}</strong><MessageBody body={message.body} />{message.citations?.map((citation) => <small key={`${citation.title}-${citation.section || ""}`}>Fonte: {citation.title}{citation.section ? ` — ${citation.section}` : ""}</small>)}</article>)}</section><form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><label>Mensagem<textarea value={text} onChange={(event) => setText(event.target.value)} required /></label><button disabled={conversation?.status === "CLOSED"}>Enviar</button></form>{conversation?.status !== "CLOSED" && <button onClick={() => void close().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}{error && <p role="alert">{error}</p>}</main>;
+  return <main>
+    <div className="card stack">
+      <div className="stack" style={{ gap: "var(--space-3)" }}>
+        <h1>Atendimento</h1>
+        {conversation ? <StatusBadge status={conversation.status} /> : <p className="is-loading">Carregando conversa…</p>}
+        <p className="conversation-token" aria-label="Código desta conversa">
+          Código da conversa: <strong>{token}</strong>
+          <button type="button" className="btn-secondary" onClick={() => void copyToken()}>{tokenCopied ? "Copiado!" : "Copiar"}</button>
+        </p>
+      </div>
+      <section className="messages" aria-live="polite" aria-label="Mensagens da conversa">
+        {conversation && conversation.messages.length === 0 && <p className="empty-state">Nenhuma mensagem ainda. Escreva abaixo para começar.</p>}
+        {conversation?.messages.map((message) => <article key={message.id} className={`message ${message.author_type.toLowerCase()}`}>
+          <span className="message-author">{message.author_type === "CUSTOMER" ? "Você" : "Atendente"}</span>
+          <MessageBody body={message.body} />
+          {message.citations?.map((citation) => <small key={`${citation.title}-${citation.section || ""}`} className="message-citation">Fonte: {citation.title}{citation.section ? ` — ${citation.section}` : ""}</small>)}
+        </article>)}
+      </section>
+      <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}>
+        <label htmlFor="customer-message">Mensagem<textarea id="customer-message" value={text} onChange={(event) => setText(event.target.value)} required disabled={conversation?.status === "CLOSED"} /></label>
+        <button disabled={conversation?.status === "CLOSED"}>Enviar</button>
+      </form>
+      {conversation?.status !== "CLOSED" && <button type="button" className="btn-ghost" onClick={() => void close().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}
+      {error && <p role="alert">{error}</p>}
+    </div>
+  </main>;
 }
 
 export function OperatorPage() {
@@ -312,12 +350,82 @@ export function OperatorPage() {
   };
 
   if (!token) {
-    return <main><h1>Espaço do operador</h1><form onSubmit={(event) => void login(event).catch((caught) => setError(errorMessage(caught)))}><label>E-mail<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Senha<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><button>Entrar</button></form>{error && <p role="alert">{error}</p>}</main>;
+    return <main>
+      <div className="card stack">
+        <h1>Espaço do operador</h1>
+        <form onSubmit={(event) => void login(event).catch((caught) => setError(errorMessage(caught)))}>
+          <label htmlFor="operator-email">E-mail<input id="operator-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
+          <label htmlFor="operator-password">Senha<input id="operator-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+          <button>Entrar</button>
+        </form>
+        {error && <p role="alert">{error}</p>}
+      </div>
+    </main>;
   }
 
+  const aiEligible = selected?.status === "ACTIVE" && selected.effective_mode === "N2";
   const searchAvailable = selected?.effective_mode === "N2" || runtimeConfig?.n1_assistive_search_enabled;
   const useDraftLabel = draft?.evidence.find((item) => item.rank === 1)?.knowledge_type === "CLINICAL" ? "Usar documento completo" : "Usar sugestão";
-  return <main className="workspace"><aside><h2>Fila</h2>{items.map((conversation) => <div key={conversation.id}><button onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}>{conversation.status} · {conversation.effective_mode} · {conversation.id.slice(0, 8)}</button></div>)}</aside><section><h1>Conversa {selected?.effective_mode}</h1>{selected?.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}{selected && <button type="button" onClick={clearMessageSelection}>Desmarcar conversas</button>}{selected?.messages.map((message) => <article key={message.id}><label><input type="checkbox" checked={selectedMessageIds.has(message.id)} onChange={() => toggleMessageSelection(message.id)} aria-label={`Incluir mensagem de ${message.author_type === "CUSTOMER" ? "cliente" : "operador"} no contexto`} /><strong>{message.author_type}</strong></label><MessageBody body={message.body} /></article>)}{selected && <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><textarea value={text} onChange={(event) => setText(event.target.value)} required /><button>Enviar</button></form>}{selected && <button onClick={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}</section><aside><h2>IA / Evidências</h2>{selected?.effective_mode === "N2" && <button disabled={!canGenerate} onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>}{selected?.effective_mode === "N2" && <button onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>}{selected && searchAvailable && <form onSubmit={(event) => void search(event).catch((caught) => setError(errorMessage(caught)))}><label>Busca manual<input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} required /></label><button>Buscar evidências</button></form>}{selected?.effective_mode === "N1" && !searchAvailable && <p>Busca assistiva N1 desabilitada.</p>}{draft && <div><p>{draft.status}</p><p>{draft.draft_text}</p><button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button>{draft.evidence.map((item) => <small key={item.retrieval_hit_id}>{item.title}</small>)}</div>}{searchEvidence.map((item) => <ManualEvidence key={item.retrieval_hit_id} evidence={item} onSelect={() => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught)))} />)}{error && <p role="alert">{error}</p>}</aside></main>;
+  return <main className="workspace">
+    <aside className="card" aria-label="Fila de conversas">
+      <h2>Fila</h2>
+      {items.length === 0 && <p className="empty-state">Nenhuma conversa no momento.</p>}
+      {items.map((conversation) => <button
+        key={conversation.id}
+        type="button"
+        className="queue-item"
+        aria-current={conversation.id === selectedId ? "true" : undefined}
+        onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}
+      >
+        <StatusBadge status={conversation.status} />{" "}
+        <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>
+      </button>)}
+    </aside>
+    <section className="card">
+      {selected ? <>
+        <h1>Conversa {selected.effective_mode}</h1>
+        {selected.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}
+        <button type="button" className="btn-ghost" onClick={clearMessageSelection}>Desmarcar conversas</button>
+        <div className="messages">
+          {selected.messages.length === 0 && <p className="empty-state">Sem mensagens nesta conversa ainda.</p>}
+          {selected.messages.map((message) => <article key={message.id} className={`message ${message.author_type.toLowerCase()}`}>
+            <label className="message-select">
+              <input type="checkbox" checked={selectedMessageIds.has(message.id)} onChange={() => toggleMessageSelection(message.id)} aria-label={`Incluir mensagem de ${message.author_type === "CUSTOMER" ? "cliente" : "operador"} no contexto`} />
+              <span className="message-author">{message.author_type === "CUSTOMER" ? "Cliente" : "Operador"}</span>
+            </label>
+            <MessageBody body={message.body} />
+          </article>)}
+        </div>
+        {selected.status === "ACTIVE" ? <>
+          <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}>
+            <label htmlFor="operator-reply">Resposta<textarea id="operator-reply" value={text} onChange={(event) => setText(event.target.value)} required /></label>
+            <button>Enviar</button>
+          </form>
+          <button type="button" className="btn-ghost" onClick={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>
+        </> : <p className="is-loading">Esta conversa está encerrada.</p>}
+      </> : <p className="empty-state">Selecione uma conversa na fila para começar.</p>}
+    </section>
+    <aside className="card" aria-label="IA e evidências">
+      <h2>IA / Evidências</h2>
+      {aiEligible && <div className="stack" style={{ gap: "var(--space-2)" }}>
+        <button disabled={!canGenerate} onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>
+        <button type="button" className="btn-secondary" onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>
+      </div>}
+      {selected && searchAvailable && <form onSubmit={(event) => void search(event).catch((caught) => setError(errorMessage(caught)))}>
+        <label htmlFor="manual-search">Busca manual<input id="manual-search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} required /></label>
+        <button type="submit" className="btn-secondary">Buscar evidências</button>
+      </form>}
+      {selected?.effective_mode === "N1" && !searchAvailable && <p className="is-loading">Busca assistiva N1 desabilitada.</p>}
+      {draft && <div className="draft-panel">
+        <span className={`badge badge-${draft.status === "ANSWER" ? "active" : "closed"}`}>{draft.status}</span>
+        <MessageBody body={draft.draft_text} />
+        <button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button>
+        {draft.evidence.map((item) => <small key={item.retrieval_hit_id} className="message-citation">{item.title}</small>)}
+      </div>}
+      {searchEvidence.map((item) => <ManualEvidence key={item.retrieval_hit_id} evidence={item} onSelect={aiEligible ? () => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught))) : undefined} />)}
+      {error && <p role="alert">{error}</p>}
+    </aside>
+  </main>;
 }
 
 interface QADynamicBindingData {
@@ -358,6 +466,7 @@ export function KnowledgeAdminPage() {
   const [qaItems, setQaItems] = useState<QAItem[]>([]);
   const [documents, setDocuments] = useState<ClinicalDocumentItem[]>([]);
   const [chunksByDocument, setChunksByDocument] = useState<Record<string, ClinicalChunkItem[]>>({});
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
   const [qaCategory, setQaCategory] = useState("");
@@ -374,6 +483,7 @@ export function KnowledgeAdminPage() {
     if (!token) return;
     setQaItems(await api<QAItem[]>("/operator/knowledge/qa", {}, token));
     setDocuments(await api<ClinicalDocumentItem[]>("/operator/knowledge/clinical-documents", {}, token));
+    setLoaded(true);
   }, [token]);
 
   useEffect(() => {
@@ -420,48 +530,57 @@ export function KnowledgeAdminPage() {
   };
 
   if (!token) {
-    return <main><h1>Registros de conhecimento</h1><p>Faça login como operador para gerenciar registros.</p><Link to="/operator">Ir para o login do operador</Link></main>;
+    return <main>
+      <div className="card stack">
+        <h1>Registros de conhecimento</h1>
+        <p>Faça login como operador para gerenciar registros.</p>
+        <Link to="/operator">Ir para o login do operador</Link>
+      </div>
+    </main>;
   }
 
-  return <main className="knowledge-admin">
+  return <main className="knowledge-admin stack">
     <h1>Registros de conhecimento</h1>
     {error && <p role="alert">{error}</p>}
-    <section>
+    <section className="card">
       <h2>Perguntas e respostas</h2>
       <form onSubmit={(event) => void createQA(event).catch((caught) => setError(errorMessage(caught)))}>
-        <label>Categoria<input value={qaCategory} onChange={(event) => setQaCategory(event.target.value)} required /></label>
-        <label>Pergunta<input value={qaQuestion} onChange={(event) => setQaQuestion(event.target.value)} required /></label>
-        <label>Resposta<textarea value={qaAnswer} onChange={(event) => setQaAnswer(event.target.value)} required /></label>
+        <label htmlFor="qa-category">Categoria<input id="qa-category" value={qaCategory} onChange={(event) => setQaCategory(event.target.value)} required /></label>
+        <label htmlFor="qa-question">Pergunta<input id="qa-question" value={qaQuestion} onChange={(event) => setQaQuestion(event.target.value)} required /></label>
+        <label htmlFor="qa-answer">Resposta<textarea id="qa-answer" value={qaAnswer} onChange={(event) => setQaAnswer(event.target.value)} required /></label>
         <fieldset>
           <legend>Vínculo dinâmico (opcional)</legend>
-          <label>Tabela<input value={qaBindingTable} onChange={(event) => setQaBindingTable(event.target.value)} /></label>
-          <label>Filtro (JSON)<input value={qaBindingFilter} onChange={(event) => setQaBindingFilter(event.target.value)} /></label>
-          <label>Colunas de saída (JSON)<input value={qaBindingColumns} onChange={(event) => setQaBindingColumns(event.target.value)} /></label>
+          <label htmlFor="qa-binding-table">Tabela<input id="qa-binding-table" value={qaBindingTable} onChange={(event) => setQaBindingTable(event.target.value)} /></label>
+          <label htmlFor="qa-binding-filter">Filtro (JSON)<input id="qa-binding-filter" value={qaBindingFilter} onChange={(event) => setQaBindingFilter(event.target.value)} /></label>
+          <label htmlFor="qa-binding-columns">Colunas de saída (JSON)<input id="qa-binding-columns" value={qaBindingColumns} onChange={(event) => setQaBindingColumns(event.target.value)} /></label>
         </fieldset>
         <button>Adicionar pergunta e resposta</button>
       </form>
+      {!loaded && <p className="is-loading">Carregando registros…</p>}
+      {loaded && qaItems.length === 0 && <p className="empty-state">Nenhuma pergunta e resposta cadastrada ainda.</p>}
       <ul>
         {qaItems.map((item) => <li key={item.qa_id}>
           <strong>{item.question}</strong>
           <MessageBody body={item.answer_markdown} />
           {item.dynamic_binding && <small>Vínculo dinâmico: {item.dynamic_binding.source_table}</small>}
-          <button type="button" onClick={() => void deactivateQA(item.qa_id).catch((caught) => setError(errorMessage(caught)))}>Desativar</button>
+          <button type="button" className="btn-danger" onClick={() => void deactivateQA(item.qa_id).catch((caught) => setError(errorMessage(caught)))}>Desativar</button>
         </li>)}
       </ul>
     </section>
-    <section>
+    <section className="card">
       <h2>Documentos clínicos</h2>
       <form onSubmit={(event) => void createDocument(event).catch((caught) => setError(errorMessage(caught)))}>
-        <label>Título<input value={docTitle} onChange={(event) => setDocTitle(event.target.value)} required /></label>
-        <label>Conteúdo<textarea value={docContent} onChange={(event) => setDocContent(event.target.value)} required /></label>
+        <label htmlFor="doc-title">Título<input id="doc-title" value={docTitle} onChange={(event) => setDocTitle(event.target.value)} required /></label>
+        <label htmlFor="doc-content">Conteúdo<textarea id="doc-content" value={docContent} onChange={(event) => setDocContent(event.target.value)} required /></label>
         <button>Adicionar documento</button>
       </form>
+      {loaded && documents.length === 0 && <p className="empty-state">Nenhum documento clínico cadastrado ainda.</p>}
       <ul>
         {documents.map((document) => <li key={document.document_id}>
           <strong>{document.title}</strong>
           <MessageBody body={document.content_markdown} />
-          <button type="button" onClick={() => void loadChunks(document.document_id).catch((caught) => setError(errorMessage(caught)))}>Ver seções</button>
-          <button type="button" onClick={() => void deactivateDocument(document.document_id).catch((caught) => setError(errorMessage(caught)))}>Desativar</button>
+          <button type="button" className="btn-secondary" onClick={() => void loadChunks(document.document_id).catch((caught) => setError(errorMessage(caught)))}>Ver seções</button>
+          <button type="button" className="btn-danger" onClick={() => void deactivateDocument(document.document_id).catch((caught) => setError(errorMessage(caught)))}>Desativar</button>
           {chunksByDocument[document.document_id] && <ul>{chunksByDocument[document.document_id].map((chunk) => <li key={chunk.chunk_id}>{chunk.heading}: <MessageBody body={chunk.content_markdown} /></li>)}</ul>}
         </li>)}
       </ul>
@@ -469,8 +588,16 @@ export function KnowledgeAdminPage() {
   </main>;
 }
 
+function navLinkClassName({ isActive }: { isActive: boolean }): string {
+  return isActive ? "active" : "";
+}
+
 export function App() {
-  return <><nav aria-label="Navegação principal"><Link to="/customer">Cliente</Link><Link to="/operator">Operador</Link><Link to="/operator/knowledge">Registros</Link></nav><Routes><Route path="/customer" element={<CustomerPage />} /><Route path="/operator" element={<OperatorPage />} /><Route path="/operator/knowledge" element={<KnowledgeAdminPage />} /><Route path="*" element={<Navigate to="/customer" replace />} /></Routes></>;
+  return <><nav className="app-nav" aria-label="Navegação principal">
+    <NavLink to="/customer" className={navLinkClassName}>Cliente</NavLink>
+    <NavLink to="/operator" className={navLinkClassName}>Operador</NavLink>
+    <NavLink to="/operator/knowledge" className={navLinkClassName}>Registros</NavLink>
+  </nav><Routes><Route path="/customer" element={<CustomerPage />} /><Route path="/operator" element={<OperatorPage />} /><Route path="/operator/knowledge" element={<KnowledgeAdminPage />} /><Route path="*" element={<Navigate to="/customer" replace />} /></Routes></>;
 }
 
 const root = document.getElementById("root");

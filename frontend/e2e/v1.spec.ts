@@ -23,7 +23,7 @@ test("six independent customers, capacity, hidden N2 draft, explicit send and ta
       customerPages.push(page);
       await page.goto("/customer");
       await page.getByRole("button", { name: "Iniciar conversa" }).click();
-      await expect(page.getByText("WAITING", { exact: true })).toBeVisible();
+      await expect(page.getByText("Aguardando", { exact: true })).toBeVisible();
       const session = await page.evaluate(() => ({
         id: sessionStorage.getItem("conversation_id") || "",
         token: sessionStorage.getItem("conversation_token") || "",
@@ -47,19 +47,19 @@ test("six independent customers, capacity, hidden N2 draft, explicit send and ta
     await operator.getByLabel("Senha").fill(operatorPassword);
     await operator.getByRole("button", { name: "Entrar" }).click();
     await expect(operator.getByRole("heading", { name: "Fila" })).toBeVisible();
-    await expect(operator.getByRole("button", { name: /^WAITING/ })).toHaveCount(6);
+    await expect(operator.getByRole("button", { name: /^Aguardando/ })).toHaveCount(6);
 
     for (let index = 0; index < 4; index += 1) {
-      await operator.getByRole("button", { name: /^WAITING/ }).first().click();
-      await expect(operator.getByRole("button", { name: /^ACTIVE/ })).toHaveCount(index + 1);
+      await operator.getByRole("button", { name: /^Aguardando/ }).first().click();
+      await expect(operator.getByRole("button", { name: /^Em atendimento/ })).toHaveCount(index + 1);
     }
-    await expect(operator.getByRole("button", { name: /^WAITING/ })).toHaveCount(2);
-    await operator.getByRole("button", { name: /^WAITING/ }).first().click();
+    await expect(operator.getByRole("button", { name: /^Aguardando/ })).toHaveCount(2);
+    await operator.getByRole("button", { name: /^Aguardando/ }).first().click();
     await expect(operator.getByRole("alert")).toContainText("capacity", { ignoreCase: true });
-    await expect(operator.getByRole("button", { name: /^ACTIVE/ })).toHaveCount(4);
-    await expect(operator.getByRole("button", { name: /^WAITING/ })).toHaveCount(2);
+    await expect(operator.getByRole("button", { name: /^Em atendimento/ })).toHaveCount(4);
+    await expect(operator.getByRole("button", { name: /^Aguardando/ })).toHaveCount(2);
 
-    const firstActiveButton = operator.getByRole("button", { name: /^ACTIVE/ }).first();
+    const firstActiveButton = operator.getByRole("button", { name: /^Em atendimento/ }).first();
     const firstActiveLabel = await firstActiveButton.textContent();
     const selectedSessionIndex = sessions.findIndex((session) => firstActiveLabel?.includes(session.id.slice(0, 8)));
     expect(selectedSessionIndex).toBeGreaterThanOrEqual(0);
@@ -81,7 +81,7 @@ test("six independent customers, capacity, hidden N2 draft, explicit send and ta
     expect(await operatorReply.textContent()).toBe(multilineReply);
     expect(await customerReply.textContent()).toBe(multilineReply);
 
-    await operator.getByRole("button", { name: /^ACTIVE/ }).nth(1).click();
+    await operator.getByRole("button", { name: /^Em atendimento/ }).nth(1).click();
     await operator.getByRole("button", { name: "Assumir controle" }).click();
     await expect(operator.getByRole("heading", { name: "Conversa N1" })).toBeVisible();
     await expect(operator.getByRole("button", { name: "Gerar rascunho" })).toHaveCount(0);
@@ -106,7 +106,7 @@ test("N1 hides AI controls and preserves manual service when search is disabled"
     await operator.getByLabel("E-mail").fill(operatorEmail);
     await operator.getByLabel("Senha").fill(operatorPassword);
     await operator.getByRole("button", { name: "Entrar" }).click();
-    await operator.getByRole("button", { name: /^WAITING · N1/ }).click();
+    await operator.getByRole("button", { name: /^Aguardando N1/ }).click();
     await expect(operator.getByRole("heading", { name: "Conversa N1" })).toBeVisible();
     await expect(operator.getByRole("button", { name: "Gerar rascunho" })).toHaveCount(0);
     await expect(operator.getByText("Busca assistiva N1 desabilitada.")).toBeVisible();
