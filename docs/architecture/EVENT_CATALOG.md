@@ -11,6 +11,7 @@ V2 changes are marked inline; see `specs/002-v2-commercial-product-experience/pl
 | `conversation.released` | conversation_id, operator_id |
 | `conversation.closed` | conversation_id, actor_type, actor_id? |
 | `conversation.taken_over` | conversation_id, operator_id, from_mode=N2, to_mode=N1, reason? |
+| ~~`conversation.typing_heartbeat`~~ | **Deliberately not audited** (V2-7) — the customer typing-heartbeat endpoint (`POST /public/conversations/{id}/typing`, roughly every 2.5s while the customer has non-empty draft text) fires too frequently to be a meaningful audit fact and carries no product-facing decision of its own; it only updates `last_customer_typing_at`/`last_customer_activity_at` and may trigger `ai.draft_generated` (which *is* audited) as a side effect. This is an explicit scope boundary, not an oversight — see `plan.md` §14. |
 | `message.customer_received` | conversation_id, message_id, length |
 | `message.operator_sent` | conversation_id, message_id, operator_id, source_generation_id?, modified_from_draft? |
 | `rag.search_started` | conversation_id, retrieval_run_id, trigger_message_id |
@@ -27,8 +28,18 @@ V2 changes are marked inline; see `specs/002-v2-commercial-product-experience/pl
 | `knowledge.ingestion_started` | ingestion_run_id, source_type |
 | `knowledge.ingestion_completed` | ingestion_run_id, inserted, updated, embedded, skipped |
 | `knowledge.ingestion_failed` | ingestion_run_id, error_class |
+| **`knowledge.qa_created`** (V2-8) | qa_id, operator_id |
+| **`knowledge.qa_updated`** (V2-8) | qa_id, operator_id |
+| **`knowledge.qa_deactivated`** (V2-8) | qa_id, operator_id |
+| **`knowledge.clinical_document_created`** (V2-8) | document_id, operator_id |
+| **`knowledge.clinical_document_updated`** (V2-8) | document_id, operator_id |
+| **`knowledge.clinical_document_deactivated`** (V2-8) | document_id, operator_id |
+| **`knowledge.clinical_chunk_created`** (V2-8) | chunk_id, document_id, operator_id |
+| **`knowledge.clinical_chunk_updated`** (V2-8) | chunk_id, document_id, operator_id |
+| **`knowledge.clinical_chunk_deactivated`** (V2-8) | chunk_id, document_id, operator_id |
 | `auth.login_succeeded` | operator_id, request_id |
 | `auth.login_failed` | normalized identifier fingerprint?; never password |
+| **`anonymous_access.token_validation_rate_limited`** (V2-2) | correlation_id — emitted when a source IP is currently locked out (`plan.md` §13.1); deliberately carries no client IP, attempted token, or attempted `conversation_id` in the payload (the attempted `conversation_id` may not correspond to a real conversation, so it is never used as this event's FK-constrained `conversation_id` column either) |
 
 ## Event properties
 

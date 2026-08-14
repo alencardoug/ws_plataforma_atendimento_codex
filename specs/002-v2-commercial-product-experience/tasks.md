@@ -538,19 +538,51 @@ against the rebuilt frontend image. **Passed.**
 
 ## Phase 10 — Audit and observability
 
-- [ ] **T110** Add the new event types from `plan.md` §14 to
+- [x] **T110** Add the new event types from `plan.md` §14 to
   `docs/architecture/EVENT_CATALOG.md`: `ai.draft_generated`'s new `trigger`
   payload field, `ai.dynamic_pattern_resolved`,
   `ai.dynamic_pattern_fallback`, the `knowledge.*` CRUD events, and
-  `anonymous_access.token_validation_rate_limited`.
-- [ ] **T111** Verify every new event type is actually emitted by its
-  corresponding flow (cross-check against Phases 2–8).
-- [ ] **T112** Document that `conversation.typing_heartbeat` is deliberately
+  `anonymous_access.token_validation_rate_limited`. All were already in
+  the catalog from earlier phases except the `knowledge.*` CRUD events
+  and `anonymous_access.token_validation_rate_limited`, both added now.
+- [x] **T111** Verify every new event type is actually emitted by its
+  corresponding flow (cross-check against Phases 2–8). Grepped every
+  `record_event(...)` call site against the catalog. Found one real gap:
+  **`anonymous_access.token_validation_rate_limited` was planned in
+  `plan.md` §14 but never implemented** — `token_bound_conversation` in
+  `anonymous_access/router.py` called `enforce_not_locked_out` but never
+  recorded an audit event on the 429 it raises. Fixed: it now catches
+  that `HTTPException` and records the event (with no payload — see
+  T113) before re-raising, deliberately leaving `conversation_id` null
+  rather than trusting the route's path parameter (which may not
+  correspond to a real conversation and would violate that column's FK
+  constraint). Added `tests/smoke_v2_token_rate_limit.py` to prove the
+  event fires on lockout, that both a wrong and a since-correct token
+  are rejected identically while locked out, and that neither the
+  attempted token nor a fabricated `conversation_id` leaks into the
+  audit row. All other `knowledge.*`, `ai.dynamic_pattern_*`, and
+  `ai.draft_generated`'s `trigger` field were already correctly wired
+  from Phases 2–8.
+- [x] **T112** Document that `conversation.typing_heartbeat` is deliberately
   not audited (too frequent, no product-facing decision) as an explicit
-  exception, not an oversight.
-- [ ] **T113** Confirm no new audit payload or log line carries full message
+  exception, not an oversight. Added as an explicit strikethrough entry
+  in `EVENT_CATALOG.md` next to the other `conversation.*` events,
+  rather than a silent absence.
+- [x] **T113** Confirm no new audit payload or log line carries full message
   bodies, raw tokens, or dynamic-pattern diagnostic detail at a
-  customer-reachable or INFO-log level.
+  customer-reachable or INFO-log level. Reviewed every V2
+  `record_event(...)` payload (all carry only IDs) and the app's only
+  `logging.info` call site (`shared/http.py`: method/path/status/
+  duration/request_id, unchanged by V2). No payload or log line carries
+  a message body, a raw/hashed token, or the dynamic-pattern `cause`
+  string outside the audit table itself (which is not customer-
+  reachable and not INFO-logged).
+
+**Gate:** `ruff`/`mypy`/`pytest` (21/21) pass. Full E2E smoke suite
+(`smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`, `smoke_resilience`,
+`smoke_real_provider`, `smoke_v2_dynamic_pattern`, `smoke_v2_knowledge_crud`,
+`smoke_v2_automatic_trigger`, and the new `smoke_v2_token_rate_limit`) all
+pass against the rebuilt backend image. **Passed.**
 
 ## Phase 11 — Acceptance automation and DONE
 

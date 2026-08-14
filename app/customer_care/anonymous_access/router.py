@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select
 
@@ -30,7 +30,12 @@ def token_bound_conversation(
         raise api_error(401, "UNAUTHORIZED", "Conversation token required")
     settings = get_settings()
     client_key = request.client.host if request.client else "unknown"
-    enforce_not_locked_out("token_validation", client_key)
+    try:
+        enforce_not_locked_out("token_validation", client_key)
+    except HTTPException:
+        record_event(session, "anonymous_access.token_validation_rate_limited", "CUSTOMER", correlation_id=request.state.request_id)
+        session.commit()
+        raise
     digest = digest_conversation_token(credentials.credentials)
     conversation = session.scalar(select(Conversation).where(Conversation.id == conversation_id, Conversation.anonymous_token_digest == digest))
     record_attempt(
