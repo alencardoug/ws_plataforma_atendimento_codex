@@ -1,8 +1,8 @@
 # Feature Specification: V2 Commercial Product Experience
 
 **Feature ID:** `002-v2-commercial-product-experience`
-**Status:** Discovery draft — clarification, planning, tasks, analysis, and
-acceptance coverage required before implementation
+**Status:** Clarification complete (2026-08-14) — planning, tasks, analysis,
+and acceptance coverage required before implementation
 **Authorized for specification:** 2026-08-11
 **Scope:** V2 commercial experience only
 
@@ -31,42 +31,68 @@ authorize unrelated new business workflows.
 ### V2-2 — Customer-visible conversation token
 
 The customer interface shall display the raw access token for that customer's
-own active conversation and offer an explicit copy action. The token shall not
-be put into a URL, ordinary logs, audit payloads, analytics, or another
-conversation's UI. The backend continues to persist only its secure digest.
+own active conversation continuously (no reveal/hide action) and offer an
+explicit copy action. The token shall not be put into a URL, ordinary logs,
+audit payloads, analytics, or another conversation's UI. The backend continues
+to persist only its secure digest.
 
-The V2 specification/plan must define safe copy feedback, reveal/masking
-behavior, token lifetime/recovery semantics, and negative authorization/logging
-tests. Displaying a token does not create a customer account or cross-session
-recovery feature.
+The token format changes from V1's long random string to a **short 6–8
+character code, uppercase letters and digits, excluding visually ambiguous
+characters** (`0`/`O`, `1`/`I`/`L`, and similarly confusable pairs the plan
+finalizes). It exists purely for the customer's own record-keeping (e.g.
+reading it back to a support contact) — copying or displaying it does not
+create a customer account, a cross-session recovery workflow, or any way to
+resume/reopen a conversation. This is an explicit, deliberate scope boundary,
+not an oversight.
 
-### V2-3 — Operator-selected manual evidence
+Because a short code has meaningfully less entropy than V1's token, `plan.md`
+**must** define brute-force mitigation for the anonymous-conversation-access
+endpoint that validates it (rate limiting and/or lockout per token attempt,
+by source and/or by conversation), and the negative tests proving it. This is
+a required part of the V2-2 acceptance evidence, not an optional hardening
+item.
 
-Manual evidence search shall visibly use the query typed by the operator and
-return inspectable administrative Q&A records and clinical child chunks. Each
-returned item shall be selectable before draft generation.
+### V2-3 — Operator-selected manual evidence ("Buscar evidências")
 
-For selected evidence:
+A distinct **"Buscar evidências"** action searches the knowledge chunks using
+the operator's manual-search query and returns inspectable administrative
+Q&A records and clinical child chunks. Exactly one returned item is
+selectable at a time — no multi-select of chunks.
+
+Selecting an item triggers the outcome automatically, with no separate
+confirmation step:
 
 - selecting a clinical child makes its complete parent document available for
-  the normal explicit operator-send workflow;
+  the normal explicit operator-send workflow. This is the *only* outcome for
+  clinical evidence in this action — there is no alternate LLM-composed short
+  reply grounded in a clinical document, here or anywhere else in V2;
 - selecting administrative Q&A supplies its approved Q&A content to the LLM,
   which produces a concise answer focused on the customer's request rather than
   reproducing chunks, source labels, instructions, or retrieval metadata;
-- the system records the selected evidence IDs, their source type, clinical
+- the system records the selected evidence ID, its source type, clinical
   parent expansion when used, generation provenance, and any final explicit
   operator send in durable, append-only traceability.
 
-The V2 design must make the difference between selecting a source to send in
-full and using a source as LLM grounding unambiguous to the operator.
+"Buscar evidências" is fully independent of "Gerar rascunho" (V2-7): it does
+not combine with selected conversation-message context (V2-4) and does not
+use automatic chunk selection. The two actions happen to read the same
+manual-search text box as a convenience; they do not share a pipeline.
 
 ### V2-4 — Operator-selected conversation context
 
 Every customer and operator message displayed in the operator conversation
-view shall have a checkbox. The operator can select which messages are supplied
-to draft generation. The generation trace shall durably record exactly the
-selected message IDs and their ordering/reference, without persisting model
-chain-of-thought.
+view shall have a checkbox. By default, only the latest consecutive run of
+customer messages since the last operator reply comes pre-selected; the
+operator can check/uncheck any message, and a **"desmarcar conversas"**
+control clears every conversation-message selection at once. The generation
+trace shall durably record exactly the selected message IDs and their
+ordering/reference, without persisting model chain-of-thought.
+
+If no conversation message is selected, only the manual-search text box
+content is used as input to generation. If neither any conversation message
+is selected nor the manual-search box has content, "Gerar rascunho" (V2-7)
+and "Buscar evidências" (V2-3) must not generate anything — both actions stay
+inert/blocked in that state.
 
 The draft must remain focused on the selected customer request and use only the
 selected conversation context plus the selected/authorized evidence defined by
@@ -99,6 +125,82 @@ This outcome is scoped to the correction mechanism only. It does not authorize
 appointment holds/reservations/confirmations, CPF/identity/payment handling,
 or autonomous scheduling — those remain excluded per §6 and `ROADMAP.md`'s
 separate "Dynamic appointment availability" future feature.
+
+**Mechanics:**
+
+- The chunk pattern and its variables are authored **manually** by whoever
+  maintains the knowledge base, through the V2-8 knowledge-management screen.
+  A variable's name corresponds to a column name in a structured PostgreSQL
+  table (e.g. a scheduling-availability table with columns for medical
+  specialty, date, time, doctor, and availability status). Resolving a
+  pattern means querying that table filtered by the relevant columns (e.g.
+  specialty + positive availability) and substituting the returned column
+  values into the pattern's variables.
+- Wiring a specific Q&A entry to its source table/filter/columns is an
+  explicit, per-entry configuration — it is not inferred or generic. A Q&A
+  entry can be flagged `dynamic_data_required=true` without yet having this
+  wiring configured.
+- **An entry flagged `dynamic_data_required=true` that has no wiring
+  configured yet, or whose configured lookup fails (connection error, missing
+  table/column, no matching row, stale/unavailable data), always falls back
+  to manual service — it never returns a literal or partially-substituted
+  pattern to the customer.** The specific cause (e.g. "column
+  `nome_do_medico` not found in table X", "no row matched the filter") is
+  recorded for the **operator/audit trail only**, with the same detail as the
+  example above. Consistent with V1's citation-exposure boundary, this
+  diagnostic detail — table names, column names, query specifics — must never
+  reach the customer; the customer-facing fallback stays a safe, generic
+  manual-service message.
+- This mechanism applies only to Q&A entries explicitly flagged
+  `dynamic_data_required=true` with this configuration; it is not a general
+  templating feature for other Q&A content.
+
+### V2-7 — Draft generation triggers: automatic and manual ("Gerar rascunho")
+
+Two triggers reach the same smart RAG+LLM generation, with *automatic* chunk
+selection by the system (unlike V2-3's manually selected single chunk). There
+is no token-by-token streaming of generated text anywhere in V2 — the draft
+appears complete once generated, same as V1.
+
+- **Automatic/instant, debounced by an 8-second inactivity window:** the
+  customer client sends a live "is typing" signal while the message box has
+  focus/content — not just on message send. The automatic trigger fires only
+  after 8 seconds pass with no typing activity and no new message. Sending a
+  message does not by itself fire generation if the customer keeps typing
+  within the window; several consecutive customer messages sent within
+  successive windows accumulate into one batched trigger over all of them
+  (e.g. 4 messages sent within a typing burst, then 8s idle → one generation
+  over those 4; 2 more messages then 8s idle again → one generation over the
+  latest 6, per V2-4's "consecutive run since the last operator reply"
+  default). This intentionally reduces the number of automatic generation
+  calls compared to firing on every message. The "is typing" state is also
+  shown to the operator as a live indicator in the conversation view. The
+  operator reviews the eventual result via **"Usar sugestão"** to accept/send
+  it.
+- **Manual ("Gerar rascunho")**: the operator explicitly triggers generation
+  using whatever is currently selected — checked conversation messages (V2-4)
+  plus the manual-search text box content (which may be empty).
+
+"Gerar rascunho" always regenerates against the current selection state.
+There is no separate "Regenerar" action: changing the selection and
+re-invoking "Gerar rascunho" already produces a fresh draft, so a dedicated
+regenerate control would be redundant.
+
+Both triggers produce the same kind of internal `AIGeneration` draft, subject
+to the same explicit-operator-send boundary as V1 (§3). "Gerar rascunho" is
+unrelated to "Buscar evidências" (V2-3) — independent actions that happen to
+share the manual-search text box, not a combined pipeline.
+
+### V2-8 — Knowledge-base CRUD ("registros" screen)
+
+V2 needs an authenticated screen for full CRUD (create, read, update, delete)
+on both administrative Q&A entries and clinical parent/child documents,
+including authoring/editing the V2-6 dynamic-pattern wiring on a Q&A entry.
+It reuses the existing operator credentials/authentication — no new role is
+introduced. `plan.md` must define how this interacts with the existing
+offline ingestion path (`customer_care.knowledge.ingest`), including
+re-embedding on create/update and audit coverage for these CRUD operations,
+consistent with the constitution's traceability requirements.
 
 ## 3. V1 baseline that V2 must preserve unless explicitly superseded
 
@@ -146,6 +248,20 @@ The V2 data-model and API work must represent, at minimum:
    source metadata.
 7. RAG/provider failure and insufficient evidence still leave manual operator
    response available.
+8. Repeated invalid token attempts against the anonymous-access endpoint are
+   rate-limited/locked out; the token character set excludes visually
+   ambiguous characters.
+9. An automatic draft is not generated while the customer is actively typing
+   or sending consecutive messages; it fires only after 8 seconds of
+   inactivity, over the accumulated messages since the last operator reply,
+   and the operator sees a live "customer is typing" indicator.
+10. A `dynamic_data_required=true` entry with no configured table/column
+    wiring, or whose lookup fails, always falls back to manual service with a
+    generic customer-facing message; the specific cause is visible only in
+    operator/audit views, never to the customer.
+11. An authenticated operator can create, read, update, and deactivate/delete
+    both Q&A entries (including their V2-6 dynamic-pattern wiring) and
+    clinical parent/child documents, with durable audit coverage.
 
 ## 6. Explicitly out of scope unless newly approved
 
@@ -160,40 +276,25 @@ The V2 data-model and API work must represent, at minimum:
 
 ## 7. Decisions that must be clarified before planning/code
 
-These are material behavior choices. Claude Code must ask the human or record
-an approved resolution; it must not silently choose one.
+All material behavior choices identified during discovery are resolved as of
+2026-08-14 and captured above:
 
-1. **Evidence defaults and precedence:** Must draft generation use only
-   operator-selected evidence, keep V1 automatic retrieval as a fallback, or
-   combine both? If both are present, what is their displayed ordering and
-   provenance meaning?
-2. **Multiple/mixed selections:** If the operator selects more than one clinical
-   child, or clinical and Q&A items together, what draft/send result is desired?
-   May multiple full parent documents be inserted/sent, and in what order?
-3. **Clinical send versus generation:** Is a selected clinical parent always a
-   direct full-document candidate, or may the operator request an LLM-composed
-   short message grounded in it as a distinct action?
-4. **Message-context default and eligibility:** Are all messages initially
-   selected, only the latest unanswered customer message, or none? Must every
-   generation include one selected customer message? Can operator messages be
-   used without a selected customer request?
-5. **Regeneration behavior:** Does regeneration preserve the selected messages
-   and evidence exactly, allow editing them, or create a new explicit selection
-   snapshot each time?
-6. **Token UX/lifecycle:** Is the token displayed continuously or behind a
-   reveal action? Does copying it enable any recovery/resume workflow, or is it
-   informational only within the original tab/session?
-7. **Streaming:** The roadmap says streaming where beneficial. Is it in this V2
-   package, and if so, which internal/operator surfaces may stream while the
-   explicit human-send boundary remains intact?
-8. **Dynamic-evidence pattern mechanics (V2-6):** What authors/versions the
-   "developed chunk pattern" and its variables — a template field on the
-   existing Q&A entry, or a new construct? Which database tables/fields may a
-   variable read from, and is that read allowlisted per entry or per resolver?
-   What happens when the substitution source is unavailable, stale, or a
-   variable has no value — does the system abstain, fall back to manual, or
-   show a partial pattern? Does this apply only to entries currently flagged
-   `dynamic_data_required=true`, or to a broader class introduced by V2?
+- evidence defaults/precedence, multiple/mixed selections, clinical send
+  versus generation, message-context default/eligibility, and regeneration
+  behavior — V2-3, V2-4, V2-7 (no separate "Regenerar" action; re-invoking
+  "Gerar rascunho" against the current selection serves that purpose);
+- token UX/lifecycle and format — V2-2 (always visible, short code, no
+  recovery semantics, required brute-force mitigation);
+- streaming — V2-7 (none; the 8-second typing-debounced automatic trigger is
+  the relevant mechanism instead);
+- dynamic-evidence pattern mechanics — V2-6 (manually authored, column-named
+  variables against a structured table; unconfigured/failed lookups fall back
+  to manual with an operator/audit-only detailed cause);
+- a new scope item surfaced during clarification — V2-8, knowledge-base CRUD.
+
+If a new material behavior choice surfaces during `plan.md`/`tasks.md`
+authoring, record it here (or in a dedicated `clarifications` note) and
+resolve it with the human before proceeding, per the same rule.
 
 ## 8. Required next artifacts
 

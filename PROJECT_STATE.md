@@ -104,12 +104,15 @@ or code can be honestly produced.
 
 ## Immediate next action for Claude Code
 
-V1 is closed (GO, 2026-08-13); its worktree is committed and pushed. Next:
+V1 is closed (GO, 2026-08-13); its worktree is committed and pushed. V2
+`spec.md` clarification is complete (2026-08-14): all 8 open decisions are
+resolved and captured as V2-2 through V2-8, including a new scope item
+(V2-8, knowledge-base CRUD) that surfaced during clarification. Next:
 
-1. Clarify the 8 open decisions in V2 `spec.md` §7 (evidence defaults,
-   multiple/mixed selections, clinical send vs. generation, message-context
-   default, regeneration behavior, token UX/lifecycle, streaming, and the
-   D-028 dynamic-evidence pattern mechanics) with the human and record the
-   answers there as their canonical resolution.
-2. Create V2 plan/tasks/contracts/data model/acceptance, run cross-artifact
-   analysis, and then implement V2 in dependency order.
+1. Create V2 `plan.md` (architecture, data migration, API, UI, accessibility,
+   security, audit, error/fallback, rollout — including the V2-2 token
+   brute-force mitigation, the V2-6/V2-8 knowledge CRUD and dynamic-pattern
+   wiring, and the V2-7 typing-debounce mechanism), then `tasks.md`,
+   `data-model.md`/`contracts/openapi.yaml`, `acceptance.md`, and checklists.
+2. Run cross-artifact analysis, repair contradictions, and only then
+   implement V2 in dependency order, rerunning all affected gates.
