@@ -28,6 +28,16 @@ responsive behavior, empty/loading/error states, keyboard behavior, and the
 acceptance evidence for the redesigned flows. This outcome does not by itself
 authorize unrelated new business workflows.
 
+Design reference (human input, 2026-08-14): the UX patterns of
+[accamargo.org.br](https://accamargo.org.br) (A.C.Camargo Cancer Center) are
+a useful reference point for tone, information hierarchy, and professionalism
+level for a real oncology-care web presence. This is a pattern/inspiration
+reference only — the V2 design system must not copy or reproduce that
+organization's branding, logo, color identity, or content, and must not
+create any impression that this synthetic demo product is affiliated with or
+endorsed by A.C.Camargo. `plan.md`'s design-system definition should record
+which specific patterns (if any) were drawn from this reference.
+
 ### V2-2 — Customer-visible conversation token
 
 The customer interface shall display the raw access token for that customer's

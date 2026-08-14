@@ -254,6 +254,11 @@ model.
 
 - [ ] **T100 [V2-1]** Define the V2 design system (color/typography/spacing
   tokens, component states) and document it for reuse across both surfaces.
+  Use [accamargo.org.br](https://accamargo.org.br)'s UX patterns (tone,
+  information hierarchy, professionalism level) as a reference point per
+  `spec.md` V2-1 — do not copy its branding, logo, color identity, or
+  content; this is a synthetic demo product with no affiliation to that
+  organization.
 - [ ] **T101 [V2-1] [P]** Redesign the customer SPA (start, message list,
   send, status, token header, close) to the new design system, including
   empty/loading/error states.

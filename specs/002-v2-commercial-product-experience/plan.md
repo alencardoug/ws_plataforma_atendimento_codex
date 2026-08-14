@@ -353,7 +353,10 @@ constitution's traceability article.
 Builds on V1's customer SPA (§12 "Customer" subsection of V1's plan) with:
 
 - professional visual redesign (V2-1) — design system, responsive/empty/
-  loading/error states are `tasks.md`-level detail, not re-specified here;
+  loading/error states are `tasks.md`-level detail, not re-specified here.
+  `accamargo.org.br` is a UX-pattern reference point per `spec.md` V2-1
+  (tone/hierarchy/professionalism, not branding/content) — see `tasks.md`
+  T100;
 - always-visible token header with copy action (V2-2);
 - a typing heartbeat call wired to the message input's change events,
   debounced client-side (§7.2).
