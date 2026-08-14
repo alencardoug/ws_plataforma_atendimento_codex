@@ -19,6 +19,30 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.strip().encode()).hexdigest()
 
 
+def qa_content_hash(question: str, answer: str) -> str:
+    return digest(f"{question}\n{answer}")
+
+
+def chunk_content_hash(heading: str, content: str) -> str:
+    return digest(f"{heading}\n{content}")
+
+
+def needs_reembedding(record: QAEntry | KnowledgeChunk, content_hash: str, provider: EmbeddingProvider) -> bool:
+    return record.content_hash != content_hash or record.embedding_model != provider.model
+
+
+def apply_embedding(record: QAEntry | KnowledgeChunk, provider: EmbeddingProvider, content_hash: str, vector: list[float]) -> None:
+    """Shared by the batch ingest CLI and V2-8's CRUD service (plan.md §10) —
+    the only place embedding metadata fields are set, so both paths stay
+    consistent by construction rather than by convention."""
+    record.content_hash = content_hash
+    record.embedding = vector
+    record.embedding_provider = provider.name
+    record.embedding_model = provider.model
+    record.embedding_dimension = provider.dimension
+    record.embedded_at = datetime.now(UTC)
+
+
 def parse_parent(path: Path, expected_id: str) -> tuple[dict[str, str], str, list[tuple[str, str]]]:
     raw = path.read_text(encoding="utf-8")
     match = FRONT_MATTER.match(raw)
@@ -103,9 +127,9 @@ def ingest(corpus_root: Path, provider: EmbeddingProvider) -> dict[str, int]:
                     counts["skipped"] += 1
                 for ordinal, (heading, content) in enumerate(sections, 1):
                     chunk_id = f"{source['document_id']}-C{ordinal:02d}"
-                    content_hash = digest(f"{heading}\n{content}")
+                    content_hash = chunk_content_hash(heading, content)
                     chunk = session.get(KnowledgeChunk, chunk_id)
-                    needs_embedding = not chunk or chunk.content_hash != content_hash or chunk.embedding_model != provider.model
+                    needs_embedding = not chunk or needs_reembedding(chunk, content_hash, provider)
                     vector = embedding_cache[f"{heading}\n{content}"] if needs_embedding else None
                     if not chunk:
                         chunk = KnowledgeChunk(chunk_id=chunk_id, parent_document_id=source["document_id"], ordinal=ordinal, heading=heading, content_markdown=content, retrieval_intents=[], symptoms=[], urgency="emergencia" if heading == "Quando procurar emergência" else "contato_no_mesmo_dia" if heading == "Quando falar com a equipe no mesmo dia" else "educativo", metadata_json={**source["metadata"], "section": heading})
@@ -119,17 +143,13 @@ def ingest(corpus_root: Path, provider: EmbeddingProvider) -> dict[str, int]:
                         chunk.updated_at = datetime.now(UTC)
                         counts["updated"] += 1
                     if needs_embedding:
-                        chunk.content_hash = content_hash
-                        chunk.embedding = vector
-                        chunk.embedding_provider = provider.name
-                        chunk.embedding_model = provider.model
-                        chunk.embedding_dimension = provider.dimension
-                        chunk.embedded_at = datetime.now(UTC)
+                        assert vector is not None
+                        apply_embedding(chunk, provider, content_hash, vector)
                         counts["embedded"] += 1
             for source in qa_sources:
-                content_hash = digest(f"{source['question']}\n{source['answer']}")
+                content_hash = qa_content_hash(source["question"], source["answer"])
                 qa = session.get(QAEntry, source["qa_id"])
-                needs_embedding = not qa or qa.content_hash != content_hash or qa.embedding_model != provider.model
+                needs_embedding = not qa or needs_reembedding(qa, content_hash, provider)
                 vector = embedding_cache[f"{source['question']}\n{source['answer']}"] if needs_embedding else None
                 if not qa:
                     qa = QAEntry(qa_id=source["qa_id"], category=source["category"], question=source["question"], answer_markdown=source["answer"], retrieval_intents=[], dynamic_data_required=source["dynamic_data_required"], dynamic_resolver=source["dynamic_resolver"], metadata_json=source["metadata"], customer_citation_allowed=False)
@@ -145,12 +165,8 @@ def ingest(corpus_root: Path, provider: EmbeddingProvider) -> dict[str, int]:
                     qa.updated_at = datetime.now(UTC)
                     counts["updated"] += 1
                 if needs_embedding:
-                    qa.content_hash = content_hash
-                    qa.embedding = vector
-                    qa.embedding_provider = provider.name
-                    qa.embedding_model = provider.model
-                    qa.embedding_dimension = provider.dimension
-                    qa.embedded_at = datetime.now(UTC)
+                    assert vector is not None
+                    apply_embedding(qa, provider, content_hash, vector)
                     counts["embedded"] += 1
                 else:
                     counts["skipped"] += 1

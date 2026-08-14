@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { App, CustomerPage, ManualEvidence, MessageBody, OperatorPage } from "./main";
+import { App, CustomerPage, KnowledgeAdminPage, ManualEvidence, MessageBody, OperatorPage } from "./main";
 
 afterEach(() => {
   sessionStorage.clear();
@@ -156,5 +156,39 @@ describe("V1 routes", () => {
     expect(await screen.findByText("Cliente está digitando…")).toBeInTheDocument();
     expect(await screen.findByText("Resposta automática sintética.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Usar sugestão" })).toBeInTheDocument();
+  });
+
+  it("lists knowledge records and creates a new Q&A entry (V2-8)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    let qaItems = [{ qa_id: "qa-1", category: "geral", question: "Pergunta existente", answer_markdown: "Resposta existente.", is_active: true, dynamic_binding: null }];
+    const createdQa = { qa_id: "qa-2", category: "geral", question: "Nova pergunta", answer_markdown: "Nova resposta.", is_active: true, dynamic_binding: null };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/operator/knowledge/qa") && (!init || init.method === undefined)) {
+          return { ok: true, json: async () => qaItems };
+        }
+        if (url.endsWith("/operator/knowledge/qa") && init?.method === "POST") {
+          qaItems = [...qaItems, createdQa];
+          return { ok: true, json: async () => createdQa };
+        }
+        if (url.endsWith("/operator/knowledge/clinical-documents") && (!init || init.method === undefined)) {
+          return { ok: true, json: async () => [] };
+        }
+        throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator/knowledge"]}><KnowledgeAdminPage /></MemoryRouter>);
+
+    expect(await screen.findByText("Pergunta existente")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Categoria"), { target: { value: "geral" } });
+    fireEvent.change(screen.getByLabelText("Pergunta"), { target: { value: "Nova pergunta" } });
+    fireEvent.change(screen.getByLabelText("Resposta"), { target: { value: "Nova resposta." } });
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar pergunta e resposta" }));
+
+    expect(await screen.findByText("Nova pergunta")).toBeInTheDocument();
   });
 });

@@ -320,8 +320,157 @@ export function OperatorPage() {
   return <main className="workspace"><aside><h2>Fila</h2>{items.map((conversation) => <div key={conversation.id}><button onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}>{conversation.status} · {conversation.effective_mode} · {conversation.id.slice(0, 8)}</button></div>)}</aside><section><h1>Conversa {selected?.effective_mode}</h1>{selected?.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}{selected && <button type="button" onClick={clearMessageSelection}>Desmarcar conversas</button>}{selected?.messages.map((message) => <article key={message.id}><label><input type="checkbox" checked={selectedMessageIds.has(message.id)} onChange={() => toggleMessageSelection(message.id)} aria-label={`Incluir mensagem de ${message.author_type === "CUSTOMER" ? "cliente" : "operador"} no contexto`} /><strong>{message.author_type}</strong></label><MessageBody body={message.body} /></article>)}{selected && <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}><textarea value={text} onChange={(event) => setText(event.target.value)} required /><button>Enviar</button></form>}{selected && <button onClick={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}</section><aside><h2>IA / Evidências</h2>{selected?.effective_mode === "N2" && <button disabled={!canGenerate} onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>}{selected?.effective_mode === "N2" && <button onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>}{selected && searchAvailable && <form onSubmit={(event) => void search(event).catch((caught) => setError(errorMessage(caught)))}><label>Busca manual<input value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} required /></label><button>Buscar evidências</button></form>}{selected?.effective_mode === "N1" && !searchAvailable && <p>Busca assistiva N1 desabilitada.</p>}{draft && <div><p>{draft.status}</p><p>{draft.draft_text}</p><button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button>{draft.evidence.map((item) => <small key={item.retrieval_hit_id}>{item.title}</small>)}</div>}{searchEvidence.map((item) => <ManualEvidence key={item.retrieval_hit_id} evidence={item} onSelect={() => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught)))} />)}{error && <p role="alert">{error}</p>}</aside></main>;
 }
 
+interface QADynamicBindingData {
+  source_table: string;
+  filter: Record<string, string>;
+  output_columns: { column: string; variable_name: string }[];
+  row_limit: number;
+}
+
+interface QAItem {
+  qa_id: string;
+  category: string;
+  question: string;
+  answer_markdown: string;
+  is_active: boolean;
+  dynamic_binding: QADynamicBindingData | null;
+}
+
+interface ClinicalDocumentItem {
+  document_id: string;
+  title: string;
+  content_markdown: string;
+  is_active: boolean;
+}
+
+interface ClinicalChunkItem {
+  chunk_id: string;
+  heading: string | null;
+  content_markdown: string;
+}
+
+// V2-8: knowledge-base CRUD screen, reachable from operator navigation,
+// separate from the conversation workspace. Reuses the operator's existing
+// session — no new role. Minimal functional version; the full visual
+// redesign is Phase 9's job (V2-1), same as the rest of this SPA so far.
+export function KnowledgeAdminPage() {
+  const [token] = useState(() => sessionStorage.getItem("operator_token") || "");
+  const [qaItems, setQaItems] = useState<QAItem[]>([]);
+  const [documents, setDocuments] = useState<ClinicalDocumentItem[]>([]);
+  const [chunksByDocument, setChunksByDocument] = useState<Record<string, ClinicalChunkItem[]>>({});
+  const [error, setError] = useState("");
+
+  const [qaCategory, setQaCategory] = useState("");
+  const [qaQuestion, setQaQuestion] = useState("");
+  const [qaAnswer, setQaAnswer] = useState("");
+  const [qaBindingTable, setQaBindingTable] = useState("");
+  const [qaBindingFilter, setQaBindingFilter] = useState("{}");
+  const [qaBindingColumns, setQaBindingColumns] = useState("[]");
+
+  const [docTitle, setDocTitle] = useState("");
+  const [docContent, setDocContent] = useState("");
+
+  const loadAll = useCallback(async () => {
+    if (!token) return;
+    setQaItems(await api<QAItem[]>("/operator/knowledge/qa", {}, token));
+    setDocuments(await api<ClinicalDocumentItem[]>("/operator/knowledge/clinical-documents", {}, token));
+  }, [token]);
+
+  useEffect(() => {
+    const initial = window.setTimeout(() => void loadAll().catch((caught) => setError(errorMessage(caught))), 0);
+    return () => window.clearTimeout(initial);
+  }, [loadAll]);
+
+  const loadChunks = async (documentId: string) => {
+    const chunks = await api<ClinicalChunkItem[]>(`/operator/knowledge/clinical-documents/${documentId}/chunks`, {}, token);
+    setChunksByDocument((current) => ({ ...current, [documentId]: chunks }));
+  };
+
+  const createQA = async (event: FormEvent) => {
+    event.preventDefault();
+    const dynamic_binding = qaBindingTable.trim()
+      ? { source_table: qaBindingTable, filter: JSON.parse(qaBindingFilter || "{}"), output_columns: JSON.parse(qaBindingColumns || "[]"), row_limit: 4 }
+      : null;
+    await api("/operator/knowledge/qa", { method: "POST", body: JSON.stringify({ category: qaCategory, question: qaQuestion, answer_markdown: qaAnswer, dynamic_binding }) }, token);
+    setQaCategory("");
+    setQaQuestion("");
+    setQaAnswer("");
+    setQaBindingTable("");
+    setQaBindingFilter("{}");
+    setQaBindingColumns("[]");
+    await loadAll();
+  };
+
+  const deactivateQA = async (qaId: string) => {
+    await api(`/operator/knowledge/qa/${qaId}`, { method: "DELETE" }, token);
+    await loadAll();
+  };
+
+  const createDocument = async (event: FormEvent) => {
+    event.preventDefault();
+    await api("/operator/knowledge/clinical-documents", { method: "POST", body: JSON.stringify({ title: docTitle, content_markdown: docContent }) }, token);
+    setDocTitle("");
+    setDocContent("");
+    await loadAll();
+  };
+
+  const deactivateDocument = async (documentId: string) => {
+    await api(`/operator/knowledge/clinical-documents/${documentId}`, { method: "DELETE" }, token);
+    await loadAll();
+  };
+
+  if (!token) {
+    return <main><h1>Registros de conhecimento</h1><p>Faça login como operador para gerenciar registros.</p><Link to="/operator">Ir para o login do operador</Link></main>;
+  }
+
+  return <main className="knowledge-admin">
+    <h1>Registros de conhecimento</h1>
+    {error && <p role="alert">{error}</p>}
+    <section>
+      <h2>Perguntas e respostas</h2>
+      <form onSubmit={(event) => void createQA(event).catch((caught) => setError(errorMessage(caught)))}>
+        <label>Categoria<input value={qaCategory} onChange={(event) => setQaCategory(event.target.value)} required /></label>
+        <label>Pergunta<input value={qaQuestion} onChange={(event) => setQaQuestion(event.target.value)} required /></label>
+        <label>Resposta<textarea value={qaAnswer} onChange={(event) => setQaAnswer(event.target.value)} required /></label>
+        <fieldset>
+          <legend>Vínculo dinâmico (opcional)</legend>
+          <label>Tabela<input value={qaBindingTable} onChange={(event) => setQaBindingTable(event.target.value)} /></label>
+          <label>Filtro (JSON)<input value={qaBindingFilter} onChange={(event) => setQaBindingFilter(event.target.value)} /></label>
+          <label>Colunas de saída (JSON)<input value={qaBindingColumns} onChange={(event) => setQaBindingColumns(event.target.value)} /></label>
+        </fieldset>
+        <button>Adicionar pergunta e resposta</button>
+      </form>
+      <ul>
+        {qaItems.map((item) => <li key={item.qa_id}>
+          <strong>{item.question}</strong>
+          <MessageBody body={item.answer_markdown} />
+          {item.dynamic_binding && <small>Vínculo dinâmico: {item.dynamic_binding.source_table}</small>}
+          <button type="button" onClick={() => void deactivateQA(item.qa_id).catch((caught) => setError(errorMessage(caught)))}>Desativar</button>
+        </li>)}
+      </ul>
+    </section>
+    <section>
+      <h2>Documentos clínicos</h2>
+      <form onSubmit={(event) => void createDocument(event).catch((caught) => setError(errorMessage(caught)))}>
+        <label>Título<input value={docTitle} onChange={(event) => setDocTitle(event.target.value)} required /></label>
+        <label>Conteúdo<textarea value={docContent} onChange={(event) => setDocContent(event.target.value)} required /></label>
+        <button>Adicionar documento</button>
+      </form>
+      <ul>
+        {documents.map((document) => <li key={document.document_id}>
+          <strong>{document.title}</strong>
+          <MessageBody body={document.content_markdown} />
+          <button type="button" onClick={() => void loadChunks(document.document_id).catch((caught) => setError(errorMessage(caught)))}>Ver seções</button>
+          <button type="button" onClick={() => void deactivateDocument(document.document_id).catch((caught) => setError(errorMessage(caught)))}>Desativar</button>
+          {chunksByDocument[document.document_id] && <ul>{chunksByDocument[document.document_id].map((chunk) => <li key={chunk.chunk_id}>{chunk.heading}: <MessageBody body={chunk.content_markdown} /></li>)}</ul>}
+        </li>)}
+      </ul>
+    </section>
+  </main>;
+}
+
 export function App() {
-  return <><nav aria-label="Navegação principal"><Link to="/customer">Cliente</Link><Link to="/operator">Operador</Link></nav><Routes><Route path="/customer" element={<CustomerPage />} /><Route path="/operator" element={<OperatorPage />} /><Route path="*" element={<Navigate to="/customer" replace />} /></Routes></>;
+  return <><nav aria-label="Navegação principal"><Link to="/customer">Cliente</Link><Link to="/operator">Operador</Link><Link to="/operator/knowledge">Registros</Link></nav><Routes><Route path="/customer" element={<CustomerPage />} /><Route path="/operator" element={<OperatorPage />} /><Route path="/operator/knowledge" element={<KnowledgeAdminPage />} /><Route path="*" element={<Navigate to="/customer" replace />} /></Routes></>;
 }
 
 const root = document.getElementById("root");

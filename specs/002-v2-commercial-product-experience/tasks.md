@@ -224,9 +224,12 @@ field. **Passed.**
   LLM history is the conversation's single latest `CUSTOMER` message (if
   any), not empty and not the full conversation — giving the LLM a request
   to focus on without coupling to V2-4's checkbox state.
-- [ ] **T053 [V2-3]** Administrative Q&A branch with a dynamic binding: defer
-  to the Phase 7 resolver (`knowledge/dynamic_binding.py`); implement once
-  Phase 7 lands. *(Still pending — Phase 7 not yet implemented.)*
+- [x] **T053 [V2-3]** Administrative Q&A branch with a dynamic binding: defer
+  to the Phase 7 resolver (`knowledge/dynamic_binding.py`). Closed once
+  Phase 7 landed: `select_evidence()` in `ai/router.py` calls
+  `dynamic_pattern_result()` for its single hit exactly as
+  `generate_draft()` does, so the deterministic substitution/fallback
+  behavior is shared, not reimplemented.
 - [x] **T054 [V2-3]** Add a test proving this endpoint never reads or writes
   `message_selections` — full independence from V2-4's context selection.
   `smoke_n2.py`: asserts `selected_message_ids == []` on both branches'
@@ -247,8 +250,9 @@ field. **Passed.**
 
 **Gate:** `ruff`/`mypy`/`pytest` (21/21), frontend
 `lint`/`typecheck`/`vitest` (8/8)/`build`, and the full E2E smoke suite all
-pass. T053 (dynamic-binding branch) intentionally remains open pending
-Phase 7. **Passed** (T050-T052, T054-T057).
+pass. T053 (dynamic-binding branch) was intentionally left open pending
+Phase 7 at the time this phase closed, then closed retroactively once
+Phase 7 landed (see T053 above). **Passed** (T050-T057).
 
 ## Phase 6 — Typing heartbeat and automatic debounce trigger [V2-7 automatic]
 
@@ -389,34 +393,69 @@ boundary unambiguous — with no production data pointed at it.
 Depends on Phase 1 (`qa_dynamic_bindings`) and reuses Phase 7's binding
 model.
 
-- [ ] **T080 [V2-8]** Implement Q&A CRUD service (create/read/update/
+- [x] **T080 [V2-8]** Implement Q&A CRUD service (create/read/update/
   deactivate) including nested create/update of its `qa_dynamic_bindings`
-  row.
-- [ ] **T081 [V2-8]** Implement clinical parent-document CRUD service.
-- [ ] **T082 [V2-8]** Implement clinical child-chunk CRUD service, nested
-  under its parent.
-- [ ] **T083 [V2-8]** Implement the endpoints in `plan.md` §10 under
+  row. `customer_care/knowledge/router.py`'s `qa_dict`/`upsert_binding` plus
+  the `POST/GET/PATCH/DELETE /operator/knowledge/qa[/{id}]` handlers;
+  server-generated IDs (`qa-{uuid4().hex[:12]}`).
+- [x] **T081 [V2-8]** Implement clinical parent-document CRUD service.
+  `document_dict` + `/operator/knowledge/clinical-documents[/{id}]`
+  handlers; creation fills the V1-legacy-required fields
+  (`document_type`, `audience`, `language`, `responsible_physician`,
+  `status`, dates, `patient_markdown_path=f"crud:{document_id}"`) with
+  fixed defaults since the CRUD form only captures title/content.
+- [x] **T082 [V2-8]** Implement clinical child-chunk CRUD service, nested
+  under its parent. `chunk_dict` +
+  `/operator/knowledge/clinical-documents/{id}/chunks[/{chunk_id}]`;
+  IDs are `{document_id}-C{ordinal:02d}`; duplicate ordinal within the
+  same document returns `422`.
+- [x] **T083 [V2-8]** Implement the endpoints in `plan.md` §10 under
   `/operator/knowledge/qa` and `/operator/knowledge/clinical-documents`
-  (+ nested `/chunks`), `operatorBearer`-secured, no new role.
-- [ ] **T084 [V2-8]** Wire create/update to `customer_care.knowledge.ingest`'s
+  (+ nested `/chunks`), `operatorBearer`-secured, no new role. Router
+  registered in `bootstrap.py` as `knowledge_crud_router`.
+- [x] **T084 [V2-8]** Wire create/update to `customer_care.knowledge.ingest`'s
   existing content-hash/re-embed logic by calling it, not reimplementing it.
-- [ ] **T085 [V2-8]** Implement "delete" as `is_active = false` (soft
+  Shared `qa_content_hash`/`chunk_content_hash`/`needs_reembedding`/
+  `apply_embedding` helpers added to `ingest.py` and reused by both the
+  batch ingest loops and the CRUD router.
+- [x] **T085 [V2-8]** Implement "delete" as `is_active = false` (soft
   delete), consistent with the existing column on all three content tables.
-- [ ] **T086 [V2-8]** Emit an audit event for every CRUD mutation
+  Deactivated records are excluded from the default list endpoints but
+  remain fetchable by ID (`is_active: false` in the response).
+- [x] **T086 [V2-8]** Emit an audit event for every CRUD mutation
   (`knowledge.qa_created/updated/deactivated`,
   `knowledge.clinical_document_created/updated/deactivated`,
-  `knowledge.clinical_chunk_created/updated/deactivated`).
-- [ ] **T087 [V2-8] [P]** Operator UI: knowledge CRUD screen (Q&A + clinical
+  `knowledge.clinical_chunk_created/updated/deactivated`). Verified by
+  `smoke_v2_knowledge_crud.py`'s audit-event-type assertion.
+- [x] **T087 [V2-8] [P]** Operator UI: knowledge CRUD screen (Q&A + clinical
   parent/child), reachable from operator navigation, separate from the
-  conversation workspace.
-- [ ] **T088 [V2-8] [P]** Operator UI: dynamic-binding editor (table, filter,
+  conversation workspace. `KnowledgeAdminPage` in `frontend/src/main.tsx`,
+  routed at `/operator/knowledge`, linked from the main nav ("Registros").
+- [x] **T088 [V2-8] [P]** Operator UI: dynamic-binding editor (table, filter,
   output-column mapping) embedded in the Q&A entry form.
-- [ ] **T089 [V2-8]** Add authorization tests (existing operator credentials
+  `KnowledgeAdminPage`'s "Vínculo dinâmico" fieldset (table/filter-JSON/
+  output-columns-JSON inputs) submitted as the Q&A creation's
+  `dynamic_binding` field.
+- [x] **T089 [V2-8]** Add authorization tests (existing operator credentials
   work; no anonymous/customer-token path reaches these endpoints).
-- [ ] **T090 [V2-8]** Add tests: re-embed triggers only when content hash
+  `smoke_v2_knowledge_crud.py`: anonymous request and customer-token
+  request both assert `401`.
+- [x] **T090 [V2-8]** Add tests: re-embed triggers only when content hash
   actually changes (idempotency preserved), and soft-deleted records stop
   appearing in retrieval/search without breaking existing FK references from
   historical `ai_generation_sources`/`message_citations`.
+  `smoke_v2_knowledge_crud.py`: no-op `PATCH` leaves `embedded_at`
+  unchanged, a real content change updates it; deactivated Q&A is absent
+  from the default listing while still `GET`-able by ID (soft delete
+  preserves the FK target for historical generations/citations).
+
+**Gate:** `ruff`/`mypy` (customer_care package)/`pytest` (21/21) and the
+full E2E smoke suite (`smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`,
+`smoke_resilience`, `smoke_real_provider`, `smoke_v2_automatic_trigger`,
+`smoke_v2_dynamic_pattern`, `smoke_v2_knowledge_crud`) all pass against the
+rebuilt backend image. Frontend gates (`tsc --noEmit`, `eslint`, `vitest`
+10/10 including a new `KnowledgeAdminPage` list/create test, `vite build`)
+also pass. **Passed.**
 
 ## Phase 9 — Professional UX redesign [V2-1]
 
