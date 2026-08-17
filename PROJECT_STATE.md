@@ -156,11 +156,37 @@ of a convergence pass: it catches drift between "what the spec/plan says
 must exist" and "what got built," which passing build-time tests alone
 cannot catch by construction.
 
+## Production deployment — DONE (2026-08-17)
+
+Decided (D-029) to prioritize deploying the completed V1+V2 system ahead of
+starting V3. Live at:
+
+- Frontend: `https://customer-care-prod.web.app` (Firebase Hosting, automatic
+  TLS, `/api/**` rewrite to Cloud Run).
+- Backend: Cloud Run service `customer-care-backend`, region `us-east1`
+  (GCP Always Free tier is region-restricted; chosen as the eligible region
+  closest to the majority-Brazil target audience), `min-instances=0`.
+- Database: Neon serverless Postgres, region `us-east-1` (N. Virginia),
+  Postgres 17 (matched to local dev), pgvector enabled, migrated and fully
+  ingested (713 records, 656 real embeddings).
+- Data remains synthetic/demo only — infrastructure change, not a
+  Constitution Article VI change.
+
+Full runbook, cost expectations, and the real gotchas hit during this first
+deploy (extra GCP APIs needed beyond the obvious three, a persistently-403ing
+`firebase projects:addfirebase` CLI call worked around via the Firebase
+Console) are in `DEPLOYMENT.md`'s "Production deployment" section — read that
+before attempting a second deploy or tearing this one down.
+
 ## Immediate next action for Claude Code
 
-V1 remains closed (GO, 2026-08-13) and V2 is now DONE (2026-08-17); both
-are committed and pushed. There is no open implementation work in either
-package. `ROADMAP.md`/`DECISIONS.md` govern what (if anything) comes next
-— e.g. dynamic appointment availability remains a separate, not-yet
+V1 remains closed (GO, 2026-08-13), V2 is DONE (2026-08-17), and the
+production deployment above is live and verified end-to-end. There is no
+open implementation work in any of the three. The human is currently running
+`teste_humano.md`'s manual test/RAG-evaluation plan (originally written
+against local Docker Compose; now also applicable against the production
+URL above). `ROADMAP.md`/`DECISIONS.md` govern what comes next once that
+finishes — most likely the V3 ("Measured N2") specification cycle, not yet
+started. Dynamic appointment availability remains a separate, not-yet
 -authorized future feature (D-026), distinct from V2's `dynamic_data_required`
 safety correction (D-028) which V2 Phase 7 already closed.
