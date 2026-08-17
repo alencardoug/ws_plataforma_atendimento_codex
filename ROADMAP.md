@@ -1,9 +1,12 @@
 # Product Roadmap
 
 This roadmap preserves the long-term product vision. It is **not executable
-scope**. The human authorized the V2 specification cycle on 2026-08-11, but
-V2 production behavior still requires its own completed Spec Kit flow before
-implementation. All other entries remain roadmap only.
+scope** for any entry not already implemented. The human authorized the V2
+specification cycle on 2026-08-11; **V2 is now DONE (2026-08-17)** — see
+`PROJECT_STATE.md` and `specs/002-v2-commercial-product-experience/`. All
+other entries (including the separate future "Dynamic appointment
+availability" feature below, which is not part of completed V2) remain
+roadmap only until their own Spec Kit flow is authorized and completed.
 
 ## Era A — Existence
 
@@ -51,11 +54,12 @@ Explicitly deferred from this cycle:
 - CPF, customer identity/profile persistence, payment, or saved continuity;
 - autonomous AI send or autonomous scheduling.
 
-### V2 — Commercial product experience (authorized specification cycle)
+### V2 — Commercial product experience — **DONE (2026-08-17)**
 
-Feature package: `specs/002-v2-commercial-product-experience/`. The items
-below are approved discovery/specification inputs, not authorization to add V2
-runtime behavior before its SDD gates.
+Feature package: `specs/002-v2-commercial-product-experience/`. All items
+below were implemented and passed acceptance; see that package's
+`acceptance.md` Execution record and `tasks.md` T000-T131 for evidence. This
+section is kept as the historical record of the authorized scope.
 
 - professional UI/UX;
 - customer-facing display and copy action for that customer's own conversation

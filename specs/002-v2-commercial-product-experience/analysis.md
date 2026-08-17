@@ -130,7 +130,7 @@ none are outstanding.
   code exists yet — this must be filled in with real file paths during
   `tasks.md` Phase 11, not left as placeholders once tests exist.
 
-## 5. Verdict
+## 5. Verdict (pre-implementation)
 
 No unresolved contradiction between `spec.md`, `plan.md`, `tasks.md`,
 `data-model.md`, `contracts/openapi.yaml`, and `acceptance.md` as of this
@@ -138,3 +138,67 @@ review. `checklists/requirements.md`'s final item ("Cross-artifact analysis
 reports no material contradiction") is satisfied by this document. V2 is
 ready to move from artifact authoring into `tasks.md` Phase 0 (SDD gates)
 and implementation, per `AGENTS.md`'s required SDD flow.
+
+## 6. Phase 11 post-implementation convergence review (2026-08-17)
+
+Re-run after Phases 1-10 implementation, per `tasks.md` T130: this time
+checking the artifacts *against the implementation*, not only against each
+other. Method: for `contracts/openapi.yaml`, diffed the contract's
+paths+methods against the live app's actual registered FastAPI routes, then
+spot-checked the highest-risk response/request schemas field-by-field
+against their real dict-builder functions. For `data-model.md`, read every
+integrity claim in its §6 against the code path it describes. For
+`checklists/security.md`, verified each item against a specific test or a
+targeted code-review pass rather than taking the pre-implementation draft's
+wording on faith.
+
+### Findings and repairs
+
+1. **`anonymous_access.token_validation_rate_limited` was specified in
+   `plan.md` §14 as a required V2 audit event but was never implemented.**
+   `token_bound_conversation` called `enforce_not_locked_out` and let its
+   `429` propagate without ever recording the event. This is exactly the
+   class of drift `tasks.md` T111 exists to catch. Fixed in Phase 10:
+   the dependency now records the event (payload-free, `conversation_id`
+   deliberately left null) before re-raising. New E2E-adjacent coverage:
+   `app/tests/smoke_v2_token_rate_limit.py`.
+2. **`data-model.md` §6 documented write-time allowlist validation for
+   `qa_dynamic_bindings.source_table` in the V2-8 CRUD screen as a required
+   check ("both checks are required"), but `knowledge/router.py` never
+   implemented it** — only the resolution-time check in
+   `knowledge/dynamic_binding.py` existed. Not a security gap (resolution
+   time is and remains the actual enforcement boundary, per the same
+   paragraph), but a documented UX guarantee (catch an operator's typo at
+   creation time, not three steps later as a generic `ABSTAIN`) that was
+   silently missing. Fixed in Phase 11: `knowledge/router.py` gained
+   `validate_binding()`, reusing `dynamic_binding.py`'s
+   `ALLOWLISTED_TABLES` so the two checks cannot drift apart from each
+   other in the future. Covered by two new assertions in
+   `smoke_v2_knowledge_crud.py`.
+
+Both findings share a pattern worth naming: they are cases where a
+pre-implementation artifact correctly specified a requirement, and the
+requirement was simply dropped somewhere between specification and
+implementation, with no test catching the gap because no test asserted the
+*absence* of the behavior either. Neither was caught by the phase-by-phase
+implementation gates (which all passed) because those gates test what was
+built, not what the spec said should exist. This is precisely what a
+dedicated post-implementation convergence pass (T111, T121, T130) is for,
+and both are now closed with regression coverage rather than just a doc
+fix.
+
+`contracts/openapi.yaml` and the remaining ten `checklists/security.md`
+items had no drift: every registered route matches the contract, every
+spot-checked schema matches its response builder exactly, and the other ten
+security properties were already true and are now backed by an explicit
+test/code-review reference each (see the checklist itself).
+
+### Verdict
+
+No unresolved contradiction between any V2 artifact and the implementation
+as of this review, after repairing the two findings above. `spec.md` §5's
+11 acceptance outcomes are covered by `acceptance.md`'s executable
+scenarios and by `tasks.md` T124-T128's new E2E coverage; see
+`acceptance.md`'s Execution record for the pass/fail evidence. V2 is ready
+for `tasks.md` T131 (`PROJECT_STATE.md` DONE) once that execution record is
+complete.

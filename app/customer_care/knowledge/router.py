@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from customer_care.audit.service import record_event
 from customer_care.infrastructure.models import KnowledgeChunk, KnowledgeDocument, QADynamicBinding, QAEntry
+from customer_care.knowledge.dynamic_binding import ALLOWLISTED_TABLES
 from customer_care.knowledge.ingest import apply_embedding, chunk_content_hash, needs_reembedding, qa_content_hash
 from customer_care.rag.service import configured_embedding_provider
 from customer_care.shared.dependencies import CurrentOperator, DbSession
@@ -105,12 +106,32 @@ def chunk_dict(chunk: KnowledgeChunk) -> dict:
     }
 
 
+def validate_binding(binding_in: DynamicBindingIn) -> None:
+    """Write-time mirror of dynamic_binding.py's resolution-time allowlist
+    check (data-model.md §6): catches an operator's table/column typo at
+    creation time with a 422, instead of only surfacing it later as a
+    generic ABSTAIN fallback. Not itself a security boundary — the
+    resolution-time check remains authoritative and is never skipped, since
+    an allowlist entry could theoretically be removed after this check ran."""
+    allowlisted = ALLOWLISTED_TABLES.get(binding_in.source_table)
+    if not allowlisted:
+        raise api_error(422, "INVALID_DYNAMIC_BINDING", f"source_table '{binding_in.source_table}' is not in the allowlist")
+    model, _order_column = allowlisted
+    for spec in binding_in.output_columns:
+        if not hasattr(model, spec.get("column", "")):
+            raise api_error(422, "INVALID_DYNAMIC_BINDING", f"column '{spec.get('column')}' not found in table '{binding_in.source_table}'")
+    for key in binding_in.filter:
+        if not hasattr(model, key):
+            raise api_error(422, "INVALID_DYNAMIC_BINDING", f"filter column '{key}' not found in table '{binding_in.source_table}'")
+
+
 def upsert_binding(session: DbSession, qa_id: str, binding_in: DynamicBindingIn | None) -> None:
     existing = session.get(QADynamicBinding, qa_id)
     if binding_in is None:
         if existing:
             session.delete(existing)
         return
+    validate_binding(binding_in)
     if existing:
         existing.source_table = binding_in.source_table
         existing.filter = binding_in.filter

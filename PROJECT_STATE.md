@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-13
+Last updated: 2026-08-17
 
 ## Lifecycle and authority
 
@@ -102,18 +102,65 @@ captures only decisions already made by the human:
 It also lists the product decisions that require clarification before a V2 plan
 or code can be honestly produced.
 
+## V2 implementation — DONE (2026-08-17)
+
+All 11 phases of `specs/002-v2-commercial-product-experience/tasks.md`
+(T000-T131) are complete, committed, and pushed to `main`:
+
+- **Phase 1** — migrations (`conversations`/`ai_generations` new columns,
+  `message_selections`, `content.qa_dynamic_bindings`,
+  `content.knowledge_dynamic_fixture`).
+- **Phase 2 (V2-2)** — 8-character ambiguity-free customer token; IP-keyed
+  rate limiter with escalating lockout (default 30 failures/window, raised
+  from an initial 5 per human instruction after Phase 2 landed).
+- **Phase 3 (V2-4)** — operator-selected conversation-message context
+  (`message_selections`), default trailing-customer-run selection,
+  "desmarcar conversas".
+- **Phase 4 (V2-7 manual)** — "Gerar rascunho" manual trigger; no
+  "Regenerar" control (removed the V1 regenerate endpoint entirely).
+- **Phase 5 (V2-3)** — "Buscar evidências" single-hit selection,
+  deterministic clinical-full-parent / Q&A-LLM branches.
+- **Phase 6 (V2-7 automatic)** — typing heartbeat + lazy 8-second
+  automatic-draft debounce, no scheduler/WebSocket.
+- **Phase 7 (V2-6)** — dynamic-evidence safety correction (D-028): the
+  original V1 closure finding is now closed with deterministic,
+  allowlist-only `{{variable}}` substitution and a unified audit-only
+  fallback for every failure mode.
+- **Phase 8 (V2-8)** — knowledge-base CRUD (Q&A + clinical parent/child),
+  soft delete, idempotent re-embed, full audit coverage.
+- **Phase 9 (V2-1)** — professional design-system redesign of both SPAs;
+  the backend-authority audit this phase required found and fixed two
+  real UI gaps where a control could be offered that the backend would
+  reject.
+- **Phase 10** — audit/observability convergence; found and fixed one
+  real gap, a specified-but-unimplemented audit event
+  (`anonymous_access.token_validation_rate_limited`).
+- **Phase 11** — acceptance automation and final convergence; found and
+  fixed one more real gap (write-time dynamic-binding allowlist
+  validation, documented but unimplemented), added the 5 remaining E2E
+  scenarios (T124-T128), and executed the full `acceptance.md` protocol.
+
+`specs/002-v2-commercial-product-experience/acceptance.md`'s Execution
+record (2026-08-17) covers all 11 `spec.md` §5 acceptance outcomes, all
+passing. `analysis.md` §6 records the Phase 11 convergence review. All V1
+safety invariants (explicit-send-only, append-only audit, no
+chain-of-thought persistence, server-side citation/authorization
+enforcement, manual fallback on AI/RAG failure) were re-verified intact
+under every new V2 trigger path.
+
+Three real implementation gaps were found across Phases 9-11 by
+dedicated backend-authority/audit/data-model convergence checks rather
+than by the phase-by-phase build gates (which all passed throughout) —
+each is now closed with regression coverage. This is the expected shape
+of a convergence pass: it catches drift between "what the spec/plan says
+must exist" and "what got built," which passing build-time tests alone
+cannot catch by construction.
+
 ## Immediate next action for Claude Code
 
-V1 is closed (GO, 2026-08-13); its worktree is committed and pushed. V2's
-full pre-implementation artifact set is complete (2026-08-14): `spec.md`
-(clarified, 8 decisions resolved as V2-2..V2-8), `plan.md`, `tasks.md`
-(T000-T131), `data-model.md`, `contracts/openapi.yaml`, `acceptance.md`,
-and `checklists/{requirements,security,traceability}.md`. `analysis.md`
-records the cross-artifact convergence review: 9 findings (mostly wrong
-internal section cross-references and two small schema-consistency gaps),
-all repaired, no outstanding contradiction.
-
-V2 production code has not been written. Next: begin `tasks.md` Phase 0 (SDD
-gates) and implement in dependency order starting with Phase 1 (migrations),
-rerunning all affected gates as each phase completes, per `tasks.md`'s
-dependency summary.
+V1 remains closed (GO, 2026-08-13) and V2 is now DONE (2026-08-17); both
+are committed and pushed. There is no open implementation work in either
+package. `ROADMAP.md`/`DECISIONS.md` govern what (if anything) comes next
+— e.g. dynamic appointment availability remains a separate, not-yet
+-authorized future feature (D-026), distinct from V2's `dynamic_data_required`
+safety correction (D-028) which V2 Phase 7 already closed.

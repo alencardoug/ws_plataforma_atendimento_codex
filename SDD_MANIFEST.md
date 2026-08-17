@@ -15,13 +15,15 @@
 
 `specs/001-v1-assisted-customer-service`
 
-## Authorized next specification
+## Completed second feature
 
-`specs/002-v2-commercial-product-experience`
+`specs/002-v2-commercial-product-experience` — **DONE (2026-08-17)**.
 
-V2 is authorized to proceed in SDD order. No V2 production code is executable
-scope until its own `spec.md`, plan, tasks, acceptance coverage, and
-cross-artifact analysis are complete.
+V2 proceeded through the full SDD order (`spec.md`, `plan.md`, `tasks.md`,
+`data-model.md`, `contracts/openapi.yaml`, `acceptance.md`, cross-artifact
+`analysis.md`) before any production code was written, then implemented and
+passed acceptance. See `PROJECT_STATE.md` for the summary and that package's
+own `tasks.md`/`acceptance.md`/`analysis.md` for full evidence.
 
 ## Required pre-code review
 

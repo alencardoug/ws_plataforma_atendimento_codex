@@ -27,6 +27,24 @@ def run() -> None:
     assert customer_attempt.status_code == 401, customer_attempt.text
 
     # --- Q&A CRUD ---
+    # Write-time allowlist validation (data-model.md §6): a non-allowlisted
+    # source_table is rejected at creation with a 422, not silently accepted
+    # to fail later as a generic ABSTAIN at generation time.
+    rejected_binding = client.post("/api/v1/operator/knowledge/qa", headers=headers, json={
+        "category": "smoke-fixture",
+        "question": "Pergunta com tabela inválida",
+        "answer_markdown": "Resposta {{slot}}.",
+        "dynamic_binding": {"source_table": "not_allowlisted_table", "output_columns": [{"column": "label", "variable_name": "slot"}]},
+    })
+    assert rejected_binding.status_code == 422 and rejected_binding.json()["code"] == "INVALID_DYNAMIC_BINDING", rejected_binding.text
+    rejected_column = client.post("/api/v1/operator/knowledge/qa", headers=headers, json={
+        "category": "smoke-fixture",
+        "question": "Pergunta com coluna inválida",
+        "answer_markdown": "Resposta {{slot}}.",
+        "dynamic_binding": {"source_table": "knowledge_dynamic_fixture", "output_columns": [{"column": "not_a_real_column", "variable_name": "slot"}]},
+    })
+    assert rejected_column.status_code == 422 and rejected_column.json()["code"] == "INVALID_DYNAMIC_BINDING", rejected_column.text
+
     created = client.post("/api/v1/operator/knowledge/qa", headers=headers, json={
         "category": "smoke-fixture",
         "question": "Pergunta sintética de CRUD",

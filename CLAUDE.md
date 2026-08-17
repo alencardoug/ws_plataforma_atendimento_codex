@@ -4,21 +4,25 @@ Read and obey `AGENTS.md` first.
 
 ## Current lifecycle state
 
-- V1 implementation and acceptance are complete. Post-acceptance V1 refinements
-  exist in the current **uncommitted** worktree; preserve and review them rather
-  than resetting or replacing them.
+- V1 implementation and acceptance are complete (closure verdict: GO,
+  2026-08-13) and fully committed/pushed.
 - The human explicitly authorized V2 discovery/specification on 2026-08-11.
   Its package is `specs/002-v2-commercial-product-experience/`.
-- V2 production code must not begin until its feature artifacts have passed
-  `specify -> clarify -> plan -> tasks -> analyze` and acceptance coverage is
-  confirmed. The human authorization already covers proceeding in that order.
-  The V1 runtime remains the executable baseline in the meantime.
-- Dynamic appointment availability is a separate future feature, not the V2
-  package, unless a later human decision explicitly combines the scopes. The
-  human made exactly one such narrow combination on 2026-08-12 (D-028): the
-  `dynamic_data_required=true` safety correction (deterministic, database-
-  driven chunk-pattern substitution, no LLM rewrite) is planned within V2.
-  Appointment-booking operations remain excluded from V2 as before.
+- **V2 implementation is DONE (2026-08-17).** All 11 phases in its
+  `tasks.md` (T000-T131) passed their gates, `acceptance.md`'s Execution
+  record covers all 11 `spec.md` §5 outcomes, and `analysis.md` §6 records
+  the final cross-artifact convergence review. `PROJECT_STATE.md` is the
+  authoritative summary. The V2 runtime (which supersedes V1's UI/API
+  surface where V2 changed it, while preserving every V1 safety invariant)
+  is now the executable baseline.
+- Dynamic appointment availability is a separate future feature, not part
+  of the completed V2 package, unless a later human decision explicitly
+  authorizes it. The human made exactly one narrow combination into V2 on
+  2026-08-12 (D-028): the `dynamic_data_required=true` safety correction
+  (deterministic, database-driven chunk-pattern substitution via a
+  server-side allowlist, no LLM rewrite) — V2 Phase 7 implemented and
+  closed this. Appointment-booking operations remain excluded from V2, as
+  before.
 
 Read in this order:
 

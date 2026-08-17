@@ -1,6 +1,10 @@
 # Claude Code Handoff — V1 Baseline to V2 Specification
 
 **Prepared:** 2026-08-11
+**Superseded:** 2026-08-17 — V2 implementation is now DONE (`PROJECT_STATE.md`,
+`specs/002-v2-commercial-product-experience/tasks.md`). This document is kept
+as the historical record of the V1→V2 handoff moment; its "not yet
+implemented"/"begin V2" framing below no longer describes the current state.
 **Human authorization:** continue V2 in SDD order; do not begin V2 production
 implementation before its SDD gates are satisfied.
 

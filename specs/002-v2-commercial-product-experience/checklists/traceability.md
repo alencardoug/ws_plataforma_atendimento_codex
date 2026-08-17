@@ -48,19 +48,18 @@ unchanged and still governs V1-inherited behavior.
 
 | Coverage | Evidence |
 |---|---|
-| Token rate limiting | *(new test module, per T025)* |
-| Message-context selection/default/clear-all | *(new test module, per T036)* |
-| "Gerar rascunho" request-shape change, no `/regenerate` route | *(new test module, per T044-T045)* |
-| "Buscar evidências" single-selection + independence | *(new test module, per T054, T056-T057)* |
-| Typing heartbeat + lazy 8s trigger | *(new test module, per T066-T068)* |
-| Dynamic-pattern resolution + all fallback modes | *(new test module, per T076-T079)* |
-| Knowledge CRUD + re-embed + soft delete + audit | *(new test module, per T089-T090)* |
-| E2E: typing-debounce batching | *(per tasks.md T124)* |
-| E2E: "Buscar evidências"/"Gerar rascunho" independence | *(per tasks.md T125)* |
-| E2E: dynamic-pattern happy path + fallback | *(per tasks.md T126)* |
-| E2E: knowledge CRUD round trip | *(per tasks.md T127)* |
-| E2E: token lockout | *(per tasks.md T128)* |
-
-This table's right-hand column should be filled in with actual file paths as
-Phase 11 (`tasks.md`) produces them — do not claim executable evidence exists
-before the corresponding test file is committed.
+| Token format/rate limiting | `app/tests/test_anonymous_token_rate_limit.py`; `app/tests/smoke_v2_token_rate_limit.py` |
+| Message-context selection/default/clear-all | `app/tests/smoke_n2.py` (V2-4 section) |
+| "Gerar rascunho" request-shape change, no `/regenerate` route | `app/tests/smoke_n2.py` (V2-4 section) |
+| "Buscar evidências" single-selection + independence | `app/tests/smoke_n2.py` (V2-3/V2-6 sections) |
+| Typing heartbeat + lazy 8s trigger | `app/tests/smoke_v2_automatic_trigger.py` |
+| Dynamic-pattern resolution + all fallback modes | `app/tests/smoke_v2_dynamic_pattern.py`; `app/tests/smoke_n2.py` (V2-6 section) |
+| Knowledge CRUD + re-embed + soft delete + audit + write-time binding validation | `app/tests/smoke_v2_knowledge_crud.py` |
+| N1 search flag / manual-fallback regression | `app/tests/smoke_resilience.py` |
+| Real-provider draft generation | `app/tests/smoke_real_provider.py` |
+| E2E: V1 acceptance flows re-verified against the V2-1 redesign | `frontend/e2e/v1.spec.ts` |
+| E2E: typing-debounce batching | `frontend/e2e/v2.spec.ts` (T124) |
+| E2E: "Buscar evidências"/"Gerar rascunho" independence | `frontend/e2e/v2.spec.ts` (T125) |
+| E2E: dynamic-pattern happy path + fallback | `frontend/e2e/v2.spec.ts` (T126) |
+| E2E: knowledge CRUD round trip | `frontend/e2e/v2.spec.ts` (T127) |
+| E2E: token lockout | `frontend/e2e/v2.spec.ts` (T128) |

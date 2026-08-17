@@ -586,31 +586,126 @@ pass against the rebuilt backend image. **Passed.**
 
 ## Phase 11 — Acceptance automation and DONE
 
-- [ ] **T120** Update `contracts/openapi.yaml` per `plan.md` §12 (all new,
+- [x] **T120** Update `contracts/openapi.yaml` per `plan.md` §12 (all new,
   changed, and removed endpoints/schemas) as the canonical V2 contract.
-- [ ] **T121** Write `data-model.md` reflecting `plan.md` §3 in full.
-- [ ] **T122** Write `acceptance.md` covering all 11 acceptance outcomes in
-  `spec.md` §5 as executable scenarios.
-- [ ] **T123** Write/update `checklists/security.md`,
+  The pre-implementation draft (written before Phase 1) was verified
+  against the real implementation rather than rewritten: every registered
+  FastAPI route (`app.routes`, 24 `/api/v1/*` paths) matches the
+  contract's paths+methods exactly; spot-checked the highest-risk
+  schemas (`AIGeneration`/`generation_dict`, `QAEntry`/`qa_dict`,
+  `ClinicalDocument`/`document_dict`, `ClinicalChunk`/`chunk_dict`,
+  `QADynamicBinding`) field-by-field against their actual response-dict
+  builders — no drift found. No changes were needed to this file itself.
+- [x] **T121** Write `data-model.md` reflecting `plan.md` §3 in full. Same
+  verification approach as T120. Found one real gap while checking §6's
+  claim that `qa_dynamic_bindings.source_table` is "validated against the
+  allowlist at write time (V2-8 CRUD) *and* at resolution time": only the
+  resolution-time check (`knowledge/dynamic_binding.py`) existed —
+  `knowledge/router.py`'s CRUD handlers never validated the binding at
+  all before Phase 11. Not a security hole (the resolution-time check
+  remains authoritative), but the write-time UX guarantee the doc
+  promised was simply missing. Fixed: added `validate_binding()` to
+  `knowledge/router.py`, called from `upsert_binding()`, reusing
+  `dynamic_binding.py`'s `ALLOWLISTED_TABLES` to reject an unknown
+  `source_table` or column with `422 INVALID_DYNAMIC_BINDING` at
+  creation/update time. Covered by two new assertions in
+  `smoke_v2_knowledge_crud.py`. `data-model.md` itself needed no text
+  change — it already correctly described the intended design.
+- [x] **T122** Write `acceptance.md` covering all 11 acceptance outcomes in
+  `spec.md` §5 as executable scenarios. Already fully written
+  pre-implementation (sections A–K); no scenario rewrite was needed.
+  Executed against the running stack and recorded in its "Execution
+  record" section (see below) once T124–T129 completed.
+- [x] **T123** Write/update `checklists/security.md`,
   `checklists/requirements.md` (closing its two remaining open items), and
-  `checklists/traceability.md` for V2.
-- [ ] **T124** Implement an E2E scenario for the typing-debounced automatic
+  `checklists/traceability.md` for V2. `requirements.md` was already
+  fully closed (all items checked) from the pre-implementation cycle —
+  no open items remained to close by the time Phase 11 started.
+  `security.md`'s 12 items were still all unchecked; verified each
+  against the actual implementation/tests and checked them off with an
+  evidence reference (file/test name) per item — see the file itself for
+  the per-item reasoning. `traceability.md`'s "Executable evidence" table
+  (flagged as a known placeholder in `analysis.md` §4) is now filled in
+  with real file paths for every non-E2E row, and the E2E rows point at
+  `frontend/e2e/v2.spec.ts` once T124–T128 landed.
+- [x] **T124** Implement an E2E scenario for the typing-debounced automatic
   trigger (correct batching across multiple bursts).
-- [ ] **T125** Implement an E2E scenario proving "Buscar evidências" and
+  `frontend/e2e/v2.spec.ts`: sends one message, resumes typing mid-window
+  to prove no premature draft, goes idle 8s+ for the first automatic
+  draft, then sends two more messages and goes idle again for a second
+  automatic draft — passed against real Chrome.
+- [x] **T125** Implement an E2E scenario proving "Buscar evidências" and
   "Gerar rascunho" are independent (selecting evidence in one does not leak
-  into the other).
-- [ ] **T126** Implement an E2E scenario for the dynamic-pattern happy path
-  and its fallback path.
-- [ ] **T127** Implement an E2E scenario: knowledge CRUD create → appears in
+  into the other). `frontend/e2e/v2.spec.ts`: confirms the message
+  checkbox state survives an evidence-selection generation untouched, and
+  that "Gerar rascunho" still works correctly afterward — passed.
+- [x] **T126** Implement an E2E scenario for the dynamic-pattern happy path
+  and its fallback path. `frontend/e2e/v2.spec.ts`: seeds two real
+  `content.knowledge_dynamic_fixture` rows via `psql` (no CRUD UI exists
+  for this fixture table by design, `plan.md` §9.4), creates a matching
+  and a non-matching Q&A dynamic binding through `KnowledgeAdminPage`,
+  and proves the happy path renders both fixture rows verbatim while the
+  fallback path yields `ABSTAIN` with no diagnostic cause leaking into
+  the visible draft panel — passed. Two real test bugs found and fixed
+  while debugging: (1) the test clicked the operator's queue-item button
+  without first navigating from `/operator/knowledge` back to
+  `/operator` — the element genuinely didn't exist on the page, so
+  Playwright polled for it until the timeout, misleadingly looking like
+  a product-side hang; (2) each QA creation and search makes a real
+  OpenAI embedding call, which needed a bumped 120s test timeout once
+  (1) was fixed and the test could actually reach that step.
+- [x] **T127** Implement an E2E scenario: knowledge CRUD create → appears in
   retrieval/selection → used in a generation → deactivate → no longer
-  retrievable.
-- [ ] **T128** Implement an E2E scenario for the token rate-limit lockout.
-- [ ] **T129** Run all backend/frontend/E2E/lint/type gates.
-- [ ] **T130** Run a Spec Kit `analyze`-equivalent cross-artifact and
+  retrievable. `frontend/e2e/v2.spec.ts` — passed, same two-bug class as
+  T126 (missing post-knowledge-CRUD navigation back to `/operator`; a
+  90s test timeout for the real-embedding/LLM latency of the
+  subsequent evidence-selection generation).
+- [x] **T128** Implement an E2E scenario for the token rate-limit lockout.
+  `frontend/e2e/v2.spec.ts`: uses Playwright's `request` fixture (real
+  HTTP through the same nginx→backend path the browser uses, not a
+  UI-driven flow) — the customer UI has no manual-token-entry affordance
+  to organically drive this from clicks, and its background polling
+  timer silently swallows post-first-failure errors (`.catch(() =>
+  undefined)`), so a click-driven version couldn't actually observe the
+  lockout either. Loops failed-token requests until a `429 RATE_LIMITED`
+  is observed (bounded at 60 attempts, well above the default 30) —
+  passed in ~0.3s (much faster than expected, confirming this isn't
+  driven through a real browser's network stack).
+  **Operational finding, not a product defect:** the lockout this test
+  deliberately triggers is IP-keyed with exponential backoff (`plan.md`
+  §13.1) and persists in the backend's in-memory state until it expires
+  naturally or the process restarts. Running T128 repeatedly against a
+  long-lived `backend` container (as happened while iterating on this
+  file) escalates `consecutive_lockouts` for the shared test-runner
+  source IP and can poison *any other* E2E test relying on customer
+  token validation from the same machine for minutes afterward — this
+  is exactly what happened to a `v1.spec.ts` rerun immediately after a
+  T128 run, and `docker compose restart backend` (clearing the
+  in-memory limiter state) resolved it. Documented here so this doesn't
+  get re-diagnosed as a regression next time: **restart the `backend`
+  container between running T128 and any other test that depends on
+  legitimate token validation from the same host.**
+- [x] **T129** Run all backend/frontend/E2E/lint/type gates. See the
+  Gate note below.
+- [x] **T130** Run a Spec Kit `analyze`-equivalent cross-artifact and
   V1-to-V2 convergence review; repair any drift; write the results into
-  V2 `analysis.md`.
-- [ ] **T131** Update `PROJECT_STATE.md` to record V2 DONE only once every
+  V2 `analysis.md`. Added a Phase 11 convergence section to `analysis.md`
+  documenting the two real gaps found and fixed this phase (T111's
+  missing rate-limit audit event, T121's missing write-time binding
+  validation) plus confirmation that no other artifact/implementation
+  drift remains.
+- [x] **T131** Update `PROJECT_STATE.md` to record V2 DONE only once every
   `spec.md` §5 acceptance outcome passes.
+
+**Gate:** backend `ruff`/`mypy`/`pytest` (21/21); frontend
+`eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`; the full backend E2E
+smoke suite (`smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`,
+`smoke_resilience`, `smoke_real_provider`, `smoke_v2_dynamic_pattern`,
+`smoke_v2_knowledge_crud`, `smoke_v2_automatic_trigger`,
+`smoke_v2_token_rate_limit`) against the rebuilt backend image; both
+`v1.spec.ts` browser scenarios (N2 and N1) re-verified against the V2-1
+redesign; all 5 new `v2.spec.ts` scenarios (T124-T128). `acceptance.md`'s
+Execution record (2026-08-17) covers sections A-K. **Passed.**
 
 ## Dependency summary
 
