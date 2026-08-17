@@ -1,0 +1,23 @@
+# Scopes `gcloud run deploy --source .` (repo root) to only what the root
+# Dockerfile actually needs: app/ and prompts/. Everything else (frontend/,
+# documents/, specs/, docs/, db/, .git/, this session's worktrees, etc.) is
+# irrelevant to the backend image and would only slow the upload/build.
+.git/
+.gitignore
+.claude/
+frontend/
+documents/
+specs/
+docs/
+db/
+adr/
+scripts/
+teste_humano.md
+/*.md
+app/.venv312/
+app/__pycache__/
+app/**/__pycache__/
+app/.pytest_cache/
+app/.mypy_cache/
+app/.ruff_cache/
+app/.env

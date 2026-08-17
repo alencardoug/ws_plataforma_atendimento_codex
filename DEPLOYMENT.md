@@ -64,6 +64,31 @@ the public internet (TLS-encrypted), not a GCP private VPC. `database.py`'s
 existing `pool_pre_ping=True` already handles Neon's compute
 autosuspend/resume transparently — no code change was needed for that.
 
+**Incident (2026-08-17, fixed same day): `prompts/rag_answer.md` was
+unreachable in production, breaking every LLM-composed draft.** Local
+docker-compose serves `prompts/` to the backend via a live read-only bind
+mount (`./prompts:/workspace/prompts:ro`); Cloud Run has no equivalent for
+our own repo files, and the original `deploy-backend.sh` used `--source
+./app` as the Cloud Build context, which never included the sibling
+`prompts/` directory at all. Every admin-Q&A LLM-generation request 500'd
+with `RuntimeError: Prompt not found: rag_answer.md` — caught only by
+testing the actual draft-generation endpoint post-deploy, not by `/health`
+or `/ready`, which don't touch `load_prompt()`. Fixed by adding a
+repo-root-level `Dockerfile` (Cloud Run only; local docker-compose still
+builds `app/Dockerfile` unchanged) that `COPY prompts/ /workspace/prompts/`
+at build time, changing `deploy-backend.sh` to `--source .`, and adding
+`.gcloudignore` to keep the wider upload scoped to `app/`+`prompts/` only.
+**A second self-inflicted bug during that same fix**: the first
+`.gcloudignore` draft had an unanchored `*.md` line, which — per
+`.gitignore`-pattern semantics — matched `prompts/rag_answer.md` too and
+silently re-excluded it; fixed by anchoring to `/*.md` (repo root only).
+Verified by actually calling `POST .../drafts` end-to-end against
+production after the fix, not just re-checking `/health`/`/ready`.
+**Lesson for future changes to this repo's deploy tooling: `/health` and
+`/ready` do not exercise `load_prompt()` — always smoke-test an actual
+draft-generation call after any change to what the Cloud Run build
+includes.**
+
 Supabase is intentionally not used: its free tier fully pauses the project
 after a period of inactivity (manual unpause required), which is incompatible
 with a `min-instances=0` backend that itself scales to zero.
@@ -202,6 +227,11 @@ what would be deleted before committing to it.
 - Confirm `sessionStorage` tokens/audit events behave identically to local —
   nothing about the anonymous-token or audit mechanism changes with the
   deployment target.
+- **Actually call `POST .../operator/conversations/{id}/drafts` end-to-end**
+  (or "Buscar evidências") and confirm it returns `201`, not just that
+  `/health`/`/ready` return `200`. Those two don't call `load_prompt()` — see
+  the incident note above; this is exactly the check that would have caught
+  it immediately instead of after a real user hit it.
 
 ### Known limitation carried over, not fixed by this deployment
 

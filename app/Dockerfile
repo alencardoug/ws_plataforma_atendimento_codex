@@ -1,3 +1,8 @@
+# Local docker-compose only (context: ./app, per docker-compose.yml).
+# prompts/ reaches the container via a live read-only bind mount, not a
+# COPY here -- see docker-compose.yml's backend.volumes. Cloud Run
+# deploys use the separate root-level Dockerfile instead, which bakes
+# prompts/ in at build time since Cloud Run has no bind-mount equivalent.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Deploys the backend to Cloud Run from source (Cloud Build builds app/Dockerfile
-# remotely — no local docker build/push needed). Run from the repo root.
+# Deploys the backend to Cloud Run from source (Cloud Build builds the
+# repo-root Dockerfile remotely -- no local docker build/push needed). Run
+# from the repo root. Source is the repo root, not ./app, so the build can
+# also COPY prompts/ into the image (Cloud Run has no bind-mount equivalent
+# to how local docker-compose serves prompts/ to app/Dockerfile) -- see the
+# comment at the top of the repo-root Dockerfile for the full reasoning.
 #
 # Prerequisites (one-time, see DEPLOYMENT.md "Production deployment" section):
 #   - gcloud auth login && gcloud config set project <PROJECT_ID>
@@ -15,7 +19,7 @@ SERVICE_NAME="customer-care-backend"
 REGION="us-east1"
 
 gcloud run deploy "$SERVICE_NAME" \
-  --source ./app \
+  --source . \
   --region "$REGION" \
   --allow-unauthenticated \
   --min-instances=0 \
