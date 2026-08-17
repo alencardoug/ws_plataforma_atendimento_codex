@@ -1,19 +1,27 @@
 {
-  "hosting": {
-    "public": "frontend/dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {
-        "source": "/api/**",
-        "run": {
-          "serviceId": "customer-care-backend",
-          "region": "us-east1"
+  "hosting": [
+    {
+      "target": "production",
+      "public": "frontend/dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "run": {
+            "serviceId": "customer-care-backend",
+            "region": "us-east1"
+          }
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
         }
-      },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  }
+      ]
+    },
+    {
+      "target": "legacy",
+      "public": "deploy/legacy-redirect",
+      "ignore": ["firebase.json", "**/.*"]
+    }
+  ]
 }

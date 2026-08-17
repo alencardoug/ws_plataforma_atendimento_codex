@@ -216,6 +216,39 @@ than 30 days beyond those 2. At ~100MB/image this caps growth around
 instead of `--no-dry-run` first if you ever change the policy, to preview
 what would be deleted before committing to it.
 
+### Custom `*.web.app` subdomain (optional, one-time)
+
+The default Hosting site's subdomain is always the project ID
+(`customer-care-prod.web.app`) and can't be renamed in place. To use a
+different `*.web.app` subdomain instead, add a second Hosting **site** to
+the same Firebase project — free, no new GCP project/billing/Cloud Run
+duplication needed:
+
+```
+firebase hosting:sites:create <desired-site-id> --project <PROJECT_ID>
+firebase target:apply hosting production <desired-site-id> --project <PROJECT_ID>
+firebase use --add <PROJECT_ID> --alias default   # re-run: target:apply can blank out .firebaserc's "projects" key
+```
+
+Then add `"target": "production"` to `firebase.json`'s `hosting` block
+(alongside the existing `public`/`rewrites` keys) so `deploy-frontend.sh`
+deploys to the named site instead of the project's default one. Site IDs are
+globally unique across all Firebase users (like project IDs) — expect your
+first choice to sometimes already be taken; the CLI suggests an available
+variant when that happens.
+
+This project uses site `plataforma-atendimento-prod`
+(`https://plataforma-atendimento-prod.web.app`). The original default site
+(`customer-care-prod.web.app`) still exists — **Firebase does not allow
+deleting a project's default Hosting site**, full stop, no override flag for
+it. Since it can't be removed, it's repointed at a small static redirect
+page instead of the real app: `firebase.json`'s `hosting` array has a second
+entry (`target: legacy`, `public: deploy/legacy-redirect`) that's deployed
+independently with `firebase deploy --only hosting:legacy`. Regular
+`deploy/deploy-frontend.sh` runs only touch the `production` target/site;
+the legacy redirect page is static and never needs redeploying unless the
+production URL changes again.
+
 ### Post-deploy validation
 
 - Open the `*.web.app` URL; confirm HTTPS is automatic (no manual cert step).

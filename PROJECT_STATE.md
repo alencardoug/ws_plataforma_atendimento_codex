@@ -161,8 +161,12 @@ cannot catch by construction.
 Decided (D-029) to prioritize deploying the completed V1+V2 system ahead of
 starting V3. Live at:
 
-- Frontend: `https://customer-care-prod.web.app` (Firebase Hosting, automatic
-  TLS, `/api/**` rewrite to Cloud Run).
+- Frontend: `https://plataforma-atendimento-prod.web.app` (Firebase Hosting
+  site `plataforma-atendimento-prod`, target `production`). Automatic TLS,
+  `/api/**` rewrite to Cloud Run. The project's undeletable default site
+  (`customer-care-prod.web.app`, Firebase disallows removing a default
+  site) now serves only a static redirect page (target `legacy`) — see
+  `DEPLOYMENT.md`.
 - Backend: Cloud Run service `customer-care-backend`, region `us-east1`
   (GCP Always Free tier is region-restricted; chosen as the eligible region
   closest to the majority-Brazil target audience), `min-instances=0`.
