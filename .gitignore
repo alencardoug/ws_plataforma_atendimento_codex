@@ -11,3 +11,6 @@ frontend/playwright-report/
 frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
+.firebaserc
+.firebase/
+app/.venv312/
