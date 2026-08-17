@@ -12,7 +12,7 @@
 set -euo pipefail
 
 SERVICE_NAME="customer-care-backend"
-REGION="us-central1"
+REGION="us-east1"
 
 gcloud run deploy "$SERVICE_NAME" \
   --source ./app \

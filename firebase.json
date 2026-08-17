@@ -7,7 +7,7 @@
         "source": "/api/**",
         "run": {
           "serviceId": "customer-care-backend",
-          "region": "us-central1"
+          "region": "us-east1"
         }
       },
       {
