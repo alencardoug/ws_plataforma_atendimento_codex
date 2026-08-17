@@ -13,4 +13,5 @@ frontend/vite.config.js
 frontend/vite.config.d.ts
 .firebaserc
 .firebase/
+firebase-debug.log
 app/.venv312/

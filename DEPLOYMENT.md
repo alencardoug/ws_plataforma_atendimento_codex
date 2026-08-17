@@ -168,6 +168,29 @@ Expected to stay within free tiers for demo/pilot-level traffic:
 independent files today (Cloud Run has no native awareness of the Firebase
 rewrite), so a rename requires updating both.
 
+### Housekeeping: Artifact Registry cleanup policy (one-time)
+
+Every `deploy/deploy-backend.sh` run leaves a new container image version in
+the `cloud-run-source-deploy` repository that Cloud Build creates on first
+deploy; nothing deletes old versions automatically. Artifact Registry's free
+tier is only 0.5GB of storage, so this is the most likely of everything in
+this runbook to silently start costing money after repeated redeploys — not
+traffic, storage. One-time fix, run once per project:
+
+```
+gcloud artifacts repositories set-cleanup-policies cloud-run-source-deploy \
+  --location=<REGION> --project=<PROJECT_ID> \
+  --policy=deploy/artifact-cleanup-policy.json --no-dry-run
+```
+
+The policy (`deploy/artifact-cleanup-policy.json`) always keeps the 2 most
+recent image versions regardless of age — one live, one rollback target; no
+expectation of reusing anything older than that — and deletes anything older
+than 30 days beyond those 2. At ~100MB/image this caps growth around
+200-250MB, comfortably under the 0.5GB free tier. Test with `--dry-run`
+instead of `--no-dry-run` first if you ever change the policy, to preview
+what would be deleted before committing to it.
+
 ### Post-deploy validation
 
 - Open the `*.web.app` URL; confirm HTTPS is automatic (no manual cert step).
