@@ -46,3 +46,16 @@ for secret in database-url openai-api-key anonymous-token-pepper operator-auth-s
 done
 
 echo "Secrets created/updated and access granted to ${COMPUTE_SA}."
+
+# Secret Manager has no Cloud Monitoring metric for active-version count (no
+# alert policy is possible), and each secret's first 6 active versions/month
+# are free (US$0.06/version/month beyond that -- cheap, but worth a heads-up
+# since this is the only place in the whole deploy workflow that creates a
+# new version). Checked here, at the only point a new version can appear.
+echo
+for secret in database-url openai-api-key anonymous-token-pepper operator-auth-secret; do
+  count=$(gcloud secrets versions list "$secret" --filter="state=ENABLED" --format="value(name)" | wc -l)
+  if [ "$count" -ge 6 ]; then
+    echo "WARNING: secret '$secret' has $count active versions (free tier is 6/month; beyond that is US\$0.06/version/month). Consider destroying old versions: gcloud secrets versions list $secret" >&2
+  fi
+done
