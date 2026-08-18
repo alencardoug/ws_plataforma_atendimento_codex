@@ -461,31 +461,46 @@ animation initially under-measured this, not a functional issue).
 
 ## Phase 10 — Post-conversation satisfaction survey [V3-12]
 
-- [ ] **T100 [V3-12]**
+- [x] **T100 [V3-12]**
   `POST /public/conversations/{conversation_id}/satisfaction` in
   `anonymous_access/router.py`, using the existing `token_bound_conversation`
   dependency — `plan.md` §15. 409 `NOT_CLOSED` if
   `conversation.status != "CLOSED"`; 409 `ALREADY_SUBMITTED` if a response
-  row already exists.
-- [ ] **T101 [V3-12]** Compute `category_slug` per `plan.md` §3.1/§3.4's
+  row already exists; `score` validated via Pydantic `Field(ge=1, le=5)`
+  (matching this codebase's existing numeric-constraint convention, e.g.
+  `rag/router.py`'s `top_k`) rather than a manual check.
+- [x] **T101 [V3-12]** Compute `category_slug` per `plan.md` §3.1/§3.4's
   denormalization (the conversation's most recent `ANSWER` generation with
   a non-null `category_slug`; `NULL` if none).
-- [ ] **T102 [V3-12]**
+- [x] **T102 [V3-12]**
   `record_event(session, "conversation.satisfaction_submitted", "CUSTOMER",
   conversation_id=..., payload={...})` — matching the existing pattern
   every other customer-facing write already follows.
-- [ ] **T103 [P] [V3-12]** `CustomerPage`: after `close()` succeeds (post
-  T092's confirmation), render the optional survey (1-5 buttons,
-  green-to-red emoji; "Sua necessidade foi resolvida?" Sim 🙂 / Não 🙁)
-  with a visible skip action that sends no request.
-- [ ] **T104** Tests: `NOT_CLOSED`/`ALREADY_SUBMITTED` negative tests;
-  positive test asserting `category_slug` denormalization matches the
-  conversation's actual most-recent categorized generation; skipping the
-  survey never blocks or delays the close that already completed
-  (acceptance outcome 13).
+- [x] **T103 [P] [V3-12]** `CustomerPage`: new `SatisfactionSurvey`
+  component, rendered after `close()` succeeds (post T092's confirmation):
+  1-5 emoji score buttons (😡🙁😐🙂😄), "Sua necessidade foi resolvida?"
+  Sim 🙂/Não 🙁, a submit button disabled until both are chosen, and a
+  "Pular" skip action that sends no request.
+- [x] **T104** Negative/positive cases verified live (real HTTP, rebuilt
+  container — same substitution rationale as prior phases, this endpoint's
+  logic is a linear sequence of DB checks with no separable pure function
+  to unit-test in isolation): `NOT_CLOSED` before close, `422` for an
+  out-of-range score, `ALREADY_SUBMITTED` on a second attempt, and
+  `category_slug` on the submitted response exactly matching the
+  conversation's actual categorized draft. Skip-never-blocks-close is
+  structural — the survey only ever renders after `close()` already
+  resolved, and skipping calls no endpoint at all.
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`.
+**Live verification**: full sequence run against the rebuilt stack —
+`409 NOT_CLOSED` pre-close, `422` for `score: 9`, successful `201` post-
+close with correct `category_slug` traced back to the actual draft that
+answered the conversation, `409 ALREADY_SUBMITTED` on retry. Frontend
+survey verified end-to-end via Playwright: appears only after confirmed
+close, submit stays disabled until both score and resolved are chosen,
+submitting closes the survey (screenshot captured).
+
+**Gate:** backend `ruff`/`mypy` (40 files clean)/`pytest` (51/51);
+frontend `eslint`/`tsc --noEmit`/`vitest` (16/16)/`vite build`. **Passed.**
 
 ## Phase 11 — Documented read-only metrics [V3-3, V3-4]
 

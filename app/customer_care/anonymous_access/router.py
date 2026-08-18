@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from customer_care.ai.router import evaluate_automatic_trigger
@@ -11,7 +12,7 @@ from customer_care.anonymous_access.rate_limit import enforce_not_locked_out, re
 from customer_care.anonymous_access.security import digest_conversation_token, issue_conversation_token
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import customer_projection
-from customer_care.infrastructure.models import Conversation, Message
+from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.shared.dependencies import DbSession, customer_bearer
 from customer_care.shared.errors import api_error
 from customer_care.shared.schemas import BodyIn, ConversationOut, CreateConversationOut, CustomerMessageOut
@@ -111,3 +112,33 @@ def typing_heartbeat(conversation: Annotated[Conversation, Depends(token_bound_c
     conversation.last_customer_typing_at = now
     conversation.last_customer_activity_at = now
     session.commit()
+
+
+class SubmitSatisfactionIn(BaseModel):
+    score: int = Field(ge=1, le=5)
+    resolved: bool
+
+
+def satisfaction_dict(response: ConversationSatisfactionResponse) -> dict:
+    return {"id": response.id, "conversation_id": response.conversation_id, "score": response.score, "resolved": response.resolved, "category_slug": response.category_slug, "submitted_at": response.submitted_at}
+
+
+@router.post("/{conversation_id}/satisfaction", status_code=201)
+def submit_satisfaction(payload: SubmitSatisfactionIn, conversation: Annotated[Conversation, Depends(token_bound_conversation)], session: DbSession, request: Request) -> dict:
+    """V3-12: optional, non-blocking — the conversation already closed via
+    close_conversation before this is ever called. Customer-only, no
+    operator_id. category_slug is denormalized at submission time from the
+    conversation's most recent ANSWER generation with a non-null
+    category_slug (plan.md §3.1/§3.4); NULL if none exists."""
+    if conversation.status != "CLOSED":
+        raise api_error(409, "NOT_CLOSED", "Conversation must be closed before submitting a satisfaction response")
+    existing = session.scalar(select(ConversationSatisfactionResponse).where(ConversationSatisfactionResponse.conversation_id == conversation.id))
+    if existing:
+        raise api_error(409, "ALREADY_SUBMITTED", "A satisfaction response already exists for this conversation")
+    category_slug = session.scalar(select(AIGeneration.category_slug).where(AIGeneration.conversation_id == conversation.id, AIGeneration.status == "ANSWER", AIGeneration.category_slug.is_not(None)).order_by(AIGeneration.created_at.desc()))
+    response = ConversationSatisfactionResponse(conversation_id=conversation.id, score=payload.score, resolved=payload.resolved, category_slug=category_slug)
+    session.add(response)
+    session.flush()
+    record_event(session, "conversation.satisfaction_submitted", "CUSTOMER", conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"score": payload.score, "resolved": payload.resolved, "category_slug": category_slug})
+    session.commit()
+    return satisfaction_dict(response)

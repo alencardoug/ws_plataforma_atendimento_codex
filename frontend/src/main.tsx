@@ -156,6 +156,30 @@ function CloseConfirmPrompt({ onConfirm, onCancel }: { onConfirm: () => void; on
   </div>;
 }
 
+const SCORE_EMOJI: Record<number, string> = { 1: "😡", 2: "🙁", 3: "😐", 4: "🙂", 5: "😄" };
+
+// V3-12: optional, never blocks/delays the close that already happened —
+// pure local state until the operator explicitly submits or skips.
+function SatisfactionSurvey({ onSubmit, onSkip }: { onSubmit: (score: number, resolved: boolean) => void; onSkip: () => void }) {
+  const [score, setScore] = useState<number | null>(null);
+  const [resolved, setResolved] = useState<boolean | null>(null);
+  return <div className="satisfaction-survey stack" aria-label="Pesquisa de satisfação">
+    <p>Como você avalia este atendimento?</p>
+    <div className="satisfaction-scores">
+      {[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" aria-pressed={score === value} className={score === value ? "btn-secondary" : "btn-ghost"} onClick={() => setScore(value)}>{SCORE_EMOJI[value]}</button>)}
+    </div>
+    <p>Sua necessidade foi resolvida?</p>
+    <div className="satisfaction-resolved">
+      <button type="button" aria-pressed={resolved === true} className={resolved === true ? "btn-secondary" : "btn-ghost"} onClick={() => setResolved(true)}>Sim 🙂</button>
+      <button type="button" aria-pressed={resolved === false} className={resolved === false ? "btn-secondary" : "btn-ghost"} onClick={() => setResolved(false)}>Não 🙁</button>
+    </div>
+    <div className="satisfaction-actions">
+      <button type="button" disabled={score === null || resolved === null} onClick={() => score !== null && resolved !== null && onSubmit(score, resolved)}>Enviar avaliação</button>
+      <button type="button" className="btn-ghost" onClick={onSkip}>Pular</button>
+    </div>
+  </div>;
+}
+
 export function CustomerPage() {
   const [id, setId] = useState(() => sessionStorage.getItem("conversation_id") || "");
   const [token, setToken] = useState(() => sessionStorage.getItem("conversation_token") || "");
@@ -164,6 +188,7 @@ export function CustomerPage() {
   const [error, setError] = useState("");
   const [tokenCopied, setTokenCopied] = useState(false);
   const [confirmingClose, setConfirmingClose] = useState(false);
+  const [surveyState, setSurveyState] = useState<"pending" | "dismissed" | "submitted">("pending");
 
   const copyToken = async () => {
     try {
@@ -226,6 +251,17 @@ export function CustomerPage() {
     setConfirmingClose(false);
     const closed = await api<CustomerConversation>(`/public/conversations/${id}`, { method: "POST" }, token);
     setConversation(closed);
+    setSurveyState("pending");
+  };
+
+  const submitSurvey = async (score: number, resolved: boolean) => {
+    await api(`/public/conversations/${id}/satisfaction`, { method: "POST", body: JSON.stringify({ score, resolved }) }, token);
+    setSurveyState("submitted");
+    sessionStorage.removeItem("conversation_id");
+    sessionStorage.removeItem("conversation_token");
+  };
+  const skipSurvey = () => {
+    setSurveyState("dismissed");
     sessionStorage.removeItem("conversation_id");
     sessionStorage.removeItem("conversation_token");
   };
@@ -266,6 +302,7 @@ export function CustomerPage() {
       {conversation?.status !== "CLOSED" && (confirmingClose
         ? <CloseConfirmPrompt onConfirm={() => void close().catch((caught) => setError(errorMessage(caught)))} onCancel={() => setConfirmingClose(false)} />
         : <button type="button" className="btn-ghost" onClick={() => setConfirmingClose(true)}>Encerrar conversa</button>)}
+      {conversation?.status === "CLOSED" && surveyState === "pending" && <SatisfactionSurvey onSubmit={(score, resolved) => void submitSurvey(score, resolved).catch((caught) => setError(errorMessage(caught)))} onSkip={skipSurvey} />}
       {error && <p role="alert">{error}</p>}
     </div>
   </main>;
