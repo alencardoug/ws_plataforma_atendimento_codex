@@ -137,6 +137,12 @@ def send_operator_message(conversation_id: UUID, payload: OperatorSendIn, operat
         generation = session.get(AIGeneration, payload.source_generation_id)
         if not generation or generation.conversation_id != conversation.id:
             raise api_error(422, "INVALID_GENERATION", "Generation does not belong to this conversation")
+        # V3-2: protects every send-from-a-generation path (an edited
+        # reply-box send and quick-approve alike) — not just quick-approve,
+        # which adds no dedicated endpoint of its own (plan.md §5).
+        latest_id = session.scalar(select(AIGeneration.id).where(AIGeneration.conversation_id == conversation.id, AIGeneration.status != "FAILED").order_by(AIGeneration.created_at.desc()))
+        if generation.id != latest_id:
+            raise api_error(409, "STALE_GENERATION", "A newer draft exists for this conversation; refresh before sending")
     validated = []
     for hit_id in payload.citation_retrieval_hit_ids:
         hit = session.get(RetrievalHit, hit_id)

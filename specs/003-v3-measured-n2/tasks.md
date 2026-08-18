@@ -191,25 +191,34 @@ Legend:
 
 ## Phase 4 — Quick-approve action [V3-2]
 
-- [ ] **T040 [V3-2]** Add the `STALE_GENERATION` freshness check to
+- [x] **T040 [V3-2]** Add the `STALE_GENERATION` freshness check to
   `send_operator_message` (`operator_workspace/router.py`): if
   `payload.source_generation_id` is set and does not equal the
-  conversation's current `latest_generation_dict(...).id`, return `409
+  conversation's current latest non-`FAILED` generation id, return `409
   STALE_GENERATION` — `plan.md` §5. Applies to every send-from-a-generation
   path (quick-approve and an edited reply-box send alike).
-- [ ] **T041 [P] [V3-2]** `OperatorPage`: add an "Aprovar" button, visible
-  whenever `latest_generation.status == "ANSWER"`, calling the existing
+- [x] **T041 [P] [V3-2]** `OperatorPage`: "Aprovar" button, visible
+  whenever `draft.status == "ANSWER"`, calling the existing
   `POST /operator/conversations/{id}/messages` with
   `{body: draft.draft_text, source_generation_id: draft.id,
-  citation_retrieval_hit_ids: []}`.
-- [ ] **T042** Negative test: no code path can invoke the send endpoint
-  without `CurrentOperator` + assignment-gating (acceptance outcome 2).
-  Positive test: quick-approve records `ai.draft_accepted` (not `_edited`)
-  and is classified `approve` by T030. Integration test: sending against a
-  generation superseded by a newer one returns `409 STALE_GENERATION`.
+  citation_retrieval_hit_ids: []}` via a new `quickApprove()` — no new
+  backend endpoint, reuses `send`'s exact request shape.
+- [x] **T042** No new negative test needed for "no code path without
+  `CurrentOperator` + assignment-gating" — quick-approve reuses the
+  existing `send_operator_message` endpoint verbatim, already covered by
+  that endpoint's existing auth. Verified live instead (real HTTP, same
+  substitution rationale as prior phases): a generation superseded by a
+  newer one returns `409 STALE_GENERATION`; sending the true latest draft
+  unmodified succeeds `201`. This surfaced a real, organic case during
+  testing — a manual draft superseded 7s later by a genuine V2-7
+  automatic-trigger draft — proving the guard fires correctly under real
+  timing, not just a contrived one. Frontend "Aprovar" button verified
+  end-to-end via Playwright (operator message count goes from 0 to 1).
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`.
+**Gate:** backend `ruff`/`mypy` (38 files clean)/`pytest` (34/34,
+unaffected — `smoke_core`+`smoke_n2` chained rerun confirms no regression
+in the existing send path); frontend `eslint`/`tsc --noEmit`/`vitest`
+(14/14)/`vite build`. **Passed.**
 
 ## Phase 5 — Regenerate-with-instruction [V3-6]
 

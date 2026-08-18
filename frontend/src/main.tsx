@@ -359,6 +359,16 @@ export function OperatorPage() {
     setDraft(null);
     await open(selected.id);
   };
+  // V3-2: sends the current draft byte-for-byte unmodified. No dedicated
+  // backend endpoint — the same send path already tags this `approve`
+  // (ai.draft_accepted) since body === draft_text (plan.md §1/§5).
+  const quickApprove = async () => {
+    if (!selected || !draft) return;
+    await api<Message>(`/operator/conversations/${selected.id}/messages`, { method: "POST", body: JSON.stringify({ body: draft.draft_text, source_generation_id: draft.id, citation_retrieval_hit_ids: [] }) }, token);
+    setText("");
+    setDraft(null);
+    await open(selected.id);
+  };
   const canGenerate = selectedMessageIds.size > 0 || searchQuery.trim().length > 0;
   const generate = async () => {
     if (!selected || !canGenerate) return;
@@ -473,6 +483,7 @@ export function OperatorPage() {
         <span className={`badge badge-${draft.status === "ANSWER" ? "active" : "closed"}`}>{draft.status}</span>
         <MessageBody body={draft.draft_text} />
         <button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button>
+        {draft.status === "ANSWER" && <button type="button" className="btn-secondary" onClick={() => void quickApprove().catch((caught) => setError(errorMessage(caught)))}>Aprovar</button>}
         {draft.request_messages && draft.request_messages.length > 0 && <button type="button" className="btn-ghost" onClick={() => setShowRequestDebug(true)}>Ver requisição enviada</button>}
         {draft.evidence.map((item) => <small key={item.retrieval_hit_id} className="message-citation">{item.title}</small>)}
       </div>}
