@@ -172,6 +172,8 @@ article.message.customer { margin-left: auto; background: var(--brand-100); }
 .message-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) 0 0; }
 .message-author { font-size: var(--font-size-small); color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
 .message-citation { display: block; margin: var(--space-2) 0 0; font-size: var(--font-size-small); color: var(--text-muted); }
+.message-taxonomy-actions { display: flex; gap: var(--space-2); margin-top: var(--space-2); flex-wrap: wrap; }
+.message-taxonomy-actions button { font-size: var(--font-size-small); padding: var(--space-1) var(--space-2); }
 
 .conversation-token {
   display: inline-flex;

@@ -19,6 +19,9 @@ interface Message {
   author_type: "CUSTOMER" | "OPERATOR";
   body: string;
   citations?: Citation[];
+  // Operator-only (V3-1): absent on CustomerPage's shared projection —
+  // an AI generation stays an internal artifact, never customer-visible.
+  source_generation_id?: string | null;
 }
 
 interface CustomerConversation {
@@ -258,6 +261,8 @@ export function OperatorPage() {
   const [searchEvidence, setSearchEvidence] = useState<Evidence[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [showRequestDebug, setShowRequestDebug] = useState(false);
+  const [markedIncorrectIds, setMarkedIncorrectIds] = useState<Set<string>>(new Set());
+  const [escalatedIds, setEscalatedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -325,11 +330,26 @@ export function OperatorPage() {
     lastGenerationIdRef.current = data.latest_generation?.id ?? null;
     setDraft(data.latest_generation ?? null);
     setShowRequestDebug(false);
+    setMarkedIncorrectIds(new Set());
+    setEscalatedIds(new Set());
   };
   const claim = async (conversationId: string) => {
     await api<OperatorConversation>(`/operator/conversations/${conversationId}/claim`, { method: "POST" }, token);
     await load();
     await open(conversationId);
+  };
+  // V3-1: reachable from any message in the rendered history, not only the
+  // latest draft. Idempotent server-side; the local Set only drives this
+  // session's button feedback, reset on conversation switch (open()).
+  const markIncorrect = async (generationId: string) => {
+    if (!selected) return;
+    await api(`/operator/conversations/${selected.id}/generations/${generationId}/mark-incorrect`, { method: "POST" }, token);
+    setMarkedIncorrectIds((current) => new Set(current).add(generationId));
+  };
+  const escalateGeneration = async (generationId: string) => {
+    if (!selected) return;
+    await api(`/operator/conversations/${selected.id}/generations/${generationId}/escalate`, { method: "POST" }, token);
+    setEscalatedIds((current) => new Set(current).add(generationId));
   };
   const send = async (event: FormEvent) => {
     event.preventDefault();
@@ -423,6 +443,10 @@ export function OperatorPage() {
               <span className="message-author">{message.author_type === "CUSTOMER" ? "Cliente" : "Operador"}</span>
             </label>
             <MessageBody body={message.body} />
+            {message.source_generation_id && <div className="message-taxonomy-actions">
+              <button type="button" className="btn-ghost" disabled={markedIncorrectIds.has(message.source_generation_id)} onClick={() => void markIncorrect(message.source_generation_id as string).catch((caught) => setError(errorMessage(caught)))}>{markedIncorrectIds.has(message.source_generation_id) ? "✓ Marcado como incorreto" : "Marcar como incorreto"}</button>
+              <button type="button" className="btn-ghost" disabled={escalatedIds.has(message.source_generation_id)} onClick={() => void escalateGeneration(message.source_generation_id as string).catch((caught) => setError(errorMessage(caught)))}>{escalatedIds.has(message.source_generation_id) ? "✓ Sinalizado (lacuna de conteúdo)" : "Sinalizar lacuna de conteúdo"}</button>
+            </div>}
           </article>)}
         </div>
         {selected.status === "ACTIVE" ? <>

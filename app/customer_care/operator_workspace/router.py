@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import func, select, text
 
-from customer_care.ai.router import evaluate_automatic_trigger, is_customer_typing, latest_generation_dict
+from customer_care.ai.router import evaluate_automatic_trigger, evidence_for_generation, generation_dict, is_customer_typing, latest_generation_dict
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id, customer_projection
 from customer_care.infrastructure.models import (
@@ -64,7 +64,7 @@ def list_conversations(
 def operator_conversation_detail(conversation_id: UUID, operator: CurrentOperator, session: DbSession) -> dict:
     conversation = require_assignment(session, conversation_id, operator.id)
     evaluate_automatic_trigger(session, conversation)
-    return {**summary(conversation), **customer_projection(session, conversation), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/claim")
@@ -83,7 +83,7 @@ def claim(conversation_id: UUID, operator: CurrentOperator, session: DbSession, 
     conversation.status = "ACTIVE"
     record_event(session, "conversation.claimed", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"active_count_after": active_count + 1})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/release", response_model=ConversationSummaryOut)
@@ -124,7 +124,7 @@ def take_over(conversation_id: UUID, operator: CurrentOperator, session: DbSessi
     conversation.taken_over_at = datetime.now(UTC)
     record_event(session, "conversation.taken_over", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"from_mode": "N2", "to_mode": "N1"})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=OperatorMessageOut, status_code=201)
@@ -163,3 +163,41 @@ def send_operator_message(conversation_id: UUID, payload: OperatorSendIn, operat
     session.refresh(message)
     citations = session.scalars(select(MessageCitation).where(MessageCitation.message_id == message.id)).all()
     return {"id": message.id, "author_type": "OPERATOR", "body": message.body, "citations": [{"title": c.display_title, "section": c.display_section, "url": c.display_url} for c in citations], "created_at": message.created_at}
+
+
+def require_generation(session: DbSession, conversation: Conversation, generation_id: UUID) -> AIGeneration:
+    generation = session.get(AIGeneration, generation_id)
+    if not generation:
+        raise api_error(404, "NOT_FOUND", "Generation not found")
+    if generation.conversation_id != conversation.id:
+        raise api_error(422, "INVALID_GENERATION", "Generation does not belong to this conversation")
+    return generation
+
+
+@router.post("/conversations/{conversation_id}/generations/{generation_id}/mark-incorrect")
+def mark_incorrect(conversation_id: UUID, generation_id: UUID, operator: CurrentOperator, session: DbSession, request: Request) -> dict:
+    """V3-1: retroactive, reachable from any generation in the
+    conversation's history, not only the latest. Idempotent — re-marking
+    just updates the timestamp/actor."""
+    conversation = require_assignment(session, conversation_id, operator.id)
+    generation = require_generation(session, conversation, generation_id)
+    generation.marked_incorrect_at = datetime.now(UTC)
+    generation.marked_incorrect_by_operator_id = operator.id
+    record_event(session, "generation.marked_incorrect", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"ai_generation_id": str(generation.id)})
+    session.commit()
+    return generation_dict(session, generation, evidence_for_generation(session, generation))
+
+
+@router.post("/conversations/{conversation_id}/generations/{generation_id}/escalate")
+def escalate(conversation_id: UUID, generation_id: UUID, operator: CurrentOperator, session: DbSession, request: Request) -> dict:
+    """V3-1, redefined per spec.md: a content-gap signal ("the operator
+    could not answer using what is already standardized") — not a routing/
+    handoff request to a specialist (that remains V5's separate, unbuilt
+    workflow). Tag only: no queue, no routing side effect."""
+    conversation = require_assignment(session, conversation_id, operator.id)
+    generation = require_generation(session, conversation, generation_id)
+    generation.escalated_at = datetime.now(UTC)
+    generation.escalated_by_operator_id = operator.id
+    record_event(session, "generation.escalated", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"ai_generation_id": str(generation.id)})
+    session.commit()
+    return generation_dict(session, generation, evidence_for_generation(session, generation))

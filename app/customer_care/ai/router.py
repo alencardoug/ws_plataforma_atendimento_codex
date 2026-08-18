@@ -10,7 +10,7 @@ from customer_care.ai.providers import GenerationResult, configured_generation_p
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
-from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, Conversation, KnowledgeDocument, Message, MessageSelection, QAEntry, RetrievalHit
+from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Conversation, KnowledgeDocument, Message, MessageSelection, QAEntry, RetrievalHit
 from customer_care.knowledge.dynamic_binding import DynamicResolutionError, resolve_dynamic_pattern
 from customer_care.rag.service import Evidence, evidence_dict, load_evidence, retrieve
 from customer_care.shared.dependencies import CurrentOperator, DbSession
@@ -74,6 +74,8 @@ def generation_dict(session: DbSession, generation: AIGeneration, evidence: list
         "created_at": generation.created_at,
         "request_messages": request_messages,
         "category_slug": generation.category_slug,
+        "marked_incorrect_at": generation.marked_incorrect_at,
+        "escalated_at": generation.escalated_at,
     }
 
 
@@ -101,6 +103,31 @@ def derive_category_slug(session: DbSession, generation: AIGeneration) -> str | 
         document = session.get(KnowledgeDocument, hit.expanded_parent_document_id)
         return document.cancer_type if document else None
     return None
+
+
+def classify_generation(session: DbSession, generation: AIGeneration) -> set[str]:
+    """V3-1's eight-tag operator-feedback taxonomy (plan.md §3.2/§19),
+    derived entirely from existing durable facts — no parallel record.
+    Reused verbatim by the documented V3-4 metrics queries, kept in
+    lockstep (tasks.md T111)."""
+    tags: set[str] = set()
+    send_event_types = session.scalars(select(AuditEvent.event_type).where(AuditEvent.event_type.in_(["ai.draft_accepted", "ai.draft_edited"]), AuditEvent.payload_json["ai_generation_id"].astext == str(generation.id))).all()
+    if "ai.draft_accepted" in send_event_types:
+        tags.add("approve")
+    if "ai.draft_edited" in send_event_types:
+        tags.add("edit")
+    if generation.trigger == "MANUAL_EVIDENCE":
+        tags.add("search")
+    conversation = session.get(Conversation, generation.conversation_id)
+    if conversation and conversation.taken_over_at is not None:
+        tags.add("take-over")
+    if generation.prior_generation_id is not None:
+        tags.add("regenerate-with-instruction" if generation.instruction_text else "regenerate")
+    if generation.marked_incorrect_at is not None:
+        tags.add("mark-incorrect")
+    if generation.escalated_at is not None:
+        tags.add("escalate")
+    return tags
 
 
 def full_parent_draft(evidence: list[Evidence]) -> GenerationResult | None:

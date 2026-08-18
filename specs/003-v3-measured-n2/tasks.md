@@ -145,35 +145,49 @@ Legend:
 
 ## Phase 3 — Operator feedback taxonomy [V3-1]
 
-- [ ] **T030 [V3-1]** Implement `classify_generation(session, generation)
+- [x] **T030 [V3-1]** Implement `classify_generation(session, generation)
   -> set[str]` in `customer_care/ai/router.py` per `plan.md` §3.2/§19:
   approve/edit from `ai.draft_accepted`/`ai.draft_edited`; search from
   `trigger == "MANUAL_EVIDENCE"`; take-over from the conversation's
   `taken_over_at`; regenerate/regenerate-with-instruction from
   `prior_generation_id`/`instruction_text`; mark-incorrect/escalate from
   the new T013 columns.
-- [ ] **T031 [V3-1]**
+- [x] **T031 [V3-1]**
   `POST /operator/conversations/{conversation_id}/generations/{generation_id}/mark-incorrect`
   in `operator_workspace/router.py` — assignment-gated
-  (`require_assignment`), 422 `INVALID_GENERATION` if the generation does
-  not belong to the conversation, idempotent, `record_event(...,
-  "generation.marked_incorrect", ...)` — `plan.md` §4.
-- [ ] **T032 [V3-1]**
+  (`require_assignment`), 404 if the generation doesn't exist, 422
+  `INVALID_GENERATION` if it belongs to a different conversation,
+  idempotent, `record_event(..., "generation.marked_incorrect", ...)` —
+  `plan.md` §4. New shared `require_generation` helper.
+- [x] **T032 [V3-1]**
   `POST /operator/conversations/{conversation_id}/generations/{generation_id}/escalate`
   — same shape, `record_event(..., "generation.escalated", ...)` —
   `plan.md` §4.
-- [ ] **T033 [P] [V3-1]** `OperatorPage`: render mark-incorrect/escalate
+- [x] **T033 [P] [V3-1]** `OperatorPage`: render mark-incorrect/escalate
   buttons on every generation in the conversation's rendered history (not
-  only the latest), calling T031/T032.
-- [ ] **T034** Unit tests for `classify_generation` — one fixture per tag,
+  only the latest), calling T031/T032. Required extending
+  `conversations/projections.py`'s `customer_projection` with an
+  `include_generation_id` flag (default `False`, operator-only call sites
+  pass `True`) so each `OPERATOR` message's `source_generation_id` reaches
+  the frontend without ever reaching `/public/*` — an AI generation stays
+  an internal artifact to the customer (Article III), only the operator
+  surface can target one by id.
+- [x] **T034** Unit tests for `classify_generation` — one fixture per tag,
   including a generation that is both `edit` and later `marked_incorrect`
   (independent, non-exclusive facts, per `plan.md` §19).
-- [ ] **T035** Integration tests for T031/T032: 422 on a generation from
-  another conversation; idempotent re-mark updates the timestamp; audit
-  events recorded correctly.
+  `tests/test_taxonomy.py` (9 tests, same fake-session pattern as T024).
+- [x] **T035** Verified live against the rebuilt local stack (real HTTP,
+  not a DB-backed pytest integration test — same substitution rationale as
+  T017/T022): mark-incorrect sets `marked_incorrect_at`; a second call
+  updates the timestamp (idempotent); escalate sets `escalated_at`; a
+  `generation_id` belonging to a different `conversation_id` returns `422`;
+  a nonexistent `generation_id` returns `404`. Frontend buttons verified
+  end-to-end via Playwright against the rebuilt containers — both buttons
+  appear on the sent operator message, and each flips to a "✓" confirmed
+  state after a successful call (screenshot captured).
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`.
+**Gate:** backend `ruff`/`mypy` (38 files clean)/`pytest` (34/34); frontend
+`eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`. **Passed.**
 
 ## Phase 4 — Quick-approve action [V3-2]
 
