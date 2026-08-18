@@ -176,6 +176,9 @@ describe("V1 routes", () => {
         if (url.endsWith("/operator/knowledge/clinical-documents") && (!init || init.method === undefined)) {
           return { ok: true, json: async () => [] };
         }
+        if (url.endsWith("/operator/knowledge/categories") && (!init || init.method === undefined)) {
+          return { ok: true, json: async () => [{ slug: "geral", label: "Geral", is_active: true }] };
+        }
         throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
       }),
     );
@@ -184,7 +187,7 @@ describe("V1 routes", () => {
 
     expect(await screen.findByText("Pergunta existente")).toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Categoria"), { target: { value: "geral" } });
+    fireEvent.change(await screen.findByLabelText("Categoria"), { target: { value: "geral" } });
     fireEvent.change(screen.getByLabelText("Pergunta"), { target: { value: "Nova pergunta" } });
     fireEvent.change(screen.getByLabelText("Resposta"), { target: { value: "Nova resposta." } });
     fireEvent.click(screen.getByRole("button", { name: "Adicionar pergunta e resposta" }));

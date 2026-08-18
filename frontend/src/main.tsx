@@ -475,6 +475,12 @@ interface QAItem {
   dynamic_binding: QADynamicBindingData | null;
 }
 
+interface Category {
+  slug: string;
+  label: string;
+  is_active: boolean;
+}
+
 interface ClinicalDocumentItem {
   document_id: string;
   title: string;
@@ -500,7 +506,11 @@ export function KnowledgeAdminPage() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
+  const [categories, setCategories] = useState<Category[]>([]);
   const [qaCategory, setQaCategory] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+  const [newCategorySlug, setNewCategorySlug] = useState("");
+  const [newCategoryLabel, setNewCategoryLabel] = useState("");
   const [qaQuestion, setQaQuestion] = useState("");
   const [qaAnswer, setQaAnswer] = useState("");
   const [qaBindingTable, setQaBindingTable] = useState("");
@@ -514,8 +524,20 @@ export function KnowledgeAdminPage() {
     if (!token) return;
     setQaItems(await api<QAItem[]>("/operator/knowledge/qa", {}, token));
     setDocuments(await api<ClinicalDocumentItem[]>("/operator/knowledge/clinical-documents", {}, token));
+    // V3-8: category list stays live — fetched every load, never a fixed
+    // copy, so it can never drift from what other operators just created.
+    setCategories(await api<Category[]>("/operator/knowledge/categories", {}, token));
     setLoaded(true);
   }, [token]);
+
+  const createCategory = async () => {
+    const created = await api<Category>("/operator/knowledge/categories", { method: "POST", body: JSON.stringify({ slug: newCategorySlug, label: newCategoryLabel }) }, token);
+    setCategories((current) => [...current, created].sort((a, b) => a.slug.localeCompare(b.slug)));
+    setQaCategory(created.slug);
+    setNewCategorySlug("");
+    setNewCategoryLabel("");
+    setCreatingCategory(false);
+  };
 
   useEffect(() => {
     const initial = window.setTimeout(() => void loadAll().catch((caught) => setError(errorMessage(caught))), 0);
@@ -576,7 +598,20 @@ export function KnowledgeAdminPage() {
     <section className="card">
       <h2>Perguntas e respostas</h2>
       <form onSubmit={(event) => void createQA(event).catch((caught) => setError(errorMessage(caught)))}>
-        <label htmlFor="qa-category">Categoria<input id="qa-category" value={qaCategory} onChange={(event) => setQaCategory(event.target.value)} required /></label>
+        {!creatingCategory && <label htmlFor="qa-category">Categoria
+          <select id="qa-category" value={qaCategory} onChange={(event) => setQaCategory(event.target.value)} required>
+            <option value="" disabled>Selecione uma categoria</option>
+            {categories.map((category) => <option key={category.slug} value={category.slug}>{category.label}</option>)}
+          </select>
+        </label>}
+        {!creatingCategory && <button type="button" className="btn-ghost" onClick={() => setCreatingCategory(true)}>Criar nova categoria</button>}
+        {creatingCategory && <fieldset>
+          <legend>Nova categoria</legend>
+          <label htmlFor="new-category-slug">Identificador<input id="new-category-slug" value={newCategorySlug} onChange={(event) => setNewCategorySlug(event.target.value)} required /></label>
+          <label htmlFor="new-category-label">Rótulo<input id="new-category-label" value={newCategoryLabel} onChange={(event) => setNewCategoryLabel(event.target.value)} required /></label>
+          <button type="button" onClick={() => void createCategory().catch((caught) => setError(errorMessage(caught)))}>Criar categoria</button>
+          <button type="button" className="btn-ghost" onClick={() => setCreatingCategory(false)}>Cancelar</button>
+        </fieldset>}
         <label htmlFor="qa-question">Pergunta<input id="qa-question" value={qaQuestion} onChange={(event) => setQaQuestion(event.target.value)} required /></label>
         <label htmlFor="qa-answer">Resposta<textarea id="qa-answer" value={qaAnswer} onChange={(event) => setQaAnswer(event.target.value)} required /></label>
         <fieldset>

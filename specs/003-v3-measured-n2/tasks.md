@@ -107,29 +107,41 @@ Legend:
 ## Phase 2 — Category registry backend and `category_slug` derivation
 [V3-8 (category), V3-1/V3-3/V3-4/V3-12 (cross-cutting dependency)]
 
-- [ ] **T020 [V3-8]** `GET /operator/knowledge/categories` (list
+- [x] **T020 [V3-8]** `GET /operator/knowledge/categories` (list
   `{slug, label}`, `is_active = true` only) — `plan.md` §11.
-- [ ] **T021 [V3-8]** `POST /operator/knowledge/categories` (create;
-  `/operator/knowledge/*` auth) — `plan.md` §11.
-- [ ] **T022 [V3-1/V3-3/V3-4/V3-12]** Implement the `category_slug`
+  `knowledge/router.py`'s `list_categories`.
+- [x] **T021 [V3-8]** `POST /operator/knowledge/categories` (create;
+  `/operator/knowledge/*` auth) — `plan.md` §11. `create_category`; 409
+  `CATEGORY_EXISTS` on a duplicate slug.
+- [x] **T022 [V3-1/V3-3/V3-4/V3-12]** Implement the `category_slug`
   derivation in `generate_draft` and `select_evidence`
   (`app/customer_care/ai/router.py`): on `status == "ANSWER"`, resolve the
   `use_order = 1` `AIGenerationSource` → `RetrievalHit`; if `matched_qa_id`
   is set, copy `QAEntry.category`; else if `expanded_parent_document_id` is
   set, copy `KnowledgeDocument.cancer_type`; else leave `NULL` — `plan.md`
   §3.1 (as corrected 2026-08-18 to cover the clinical-parent path).
-- [ ] **T023 [P]** `KnowledgeAdminPage`
+  `derive_category_slug()`; verified live via HTTP against the local
+  stack — a Q&A-grounded draft correctly returned `category_slug:
+  "instituicao"`.
+- [x] **T023 [P]** `KnowledgeAdminPage`
   (`frontend/src/main.tsx`): replace the free-text `category` `<input>`
   with a `<select>` fed by T020, plus an inline "criar nova categoria"
-  affordance calling T021.
-- [ ] **T024** Unit tests: T022's derivation for (a) a Q&A-grounded
+  affordance calling T021. Verified live via Playwright: the select lists
+  all 27 seeded categories; creating a new one adds it live and
+  auto-selects it, with no page reload.
+- [x] **T024** Unit tests: T022's derivation for (a) a Q&A-grounded
   `ANSWER`, (b) a clinical-parent-grounded `ANSWER`
   (`full_parent_draft` path), (c) an `ABSTAIN`, (d) a plain-greeting
   `ANSWER` with no evidence — asserting `category_slug` is exactly right
   in each case, including `NULL` for (c)/(d).
+  `tests/test_category_derivation.py` (4 tests, fake-session pattern
+  matching `test_security_and_ingestion.py`'s `_FakeOperatorSession` — real
+  relational behavior covered by the T022 live-HTTP check instead of a
+  DB-backed unit test, consistent with this suite's existing DB-free
+  convention).
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend `eslint`/
-`tsc --noEmit`/`vitest`/`vite build`.
+**Gate:** backend `ruff`/`mypy` (39 files clean)/`pytest` (25/25); frontend
+`eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`. **Passed.**
 
 ## Phase 3 — Operator feedback taxonomy [V3-1]
 

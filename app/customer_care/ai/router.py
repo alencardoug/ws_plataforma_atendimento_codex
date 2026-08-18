@@ -10,7 +10,7 @@ from customer_care.ai.providers import GenerationResult, configured_generation_p
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
-from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, Conversation, Message, MessageSelection, QAEntry, RetrievalHit
+from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, Conversation, KnowledgeDocument, Message, MessageSelection, QAEntry, RetrievalHit
 from customer_care.knowledge.dynamic_binding import DynamicResolutionError, resolve_dynamic_pattern
 from customer_care.rag.service import Evidence, evidence_dict, load_evidence, retrieve
 from customer_care.shared.dependencies import CurrentOperator, DbSession
@@ -73,7 +73,34 @@ def generation_dict(session: DbSession, generation: AIGeneration, evidence: list
         "duration_ms": generation.duration_ms,
         "created_at": generation.created_at,
         "request_messages": request_messages,
+        "category_slug": generation.category_slug,
     }
+
+
+def derive_category_slug(session: DbSession, generation: AIGeneration) -> str | None:
+    """V3-1/V3-3/V3-4/V3-12 (plan.md §3.1, resolved 2026-08-18): category
+    attribution for a completed ANSWER generation, from whichever evidence
+    was actually used (use_order=1) — QAEntry.category for a Q&A-grounded
+    answer, KnowledgeDocument.cancer_type for a clinical-parent-grounded
+    one (both the same content.categories registry). NULL for ABSTAIN/
+    FAILED and for evidence-free ANSWERs (e.g. a plain greeting) — callers
+    must call this only after AIGenerationSource rows for `generation` are
+    flushed."""
+    if generation.status != "ANSWER":
+        return None
+    source = session.scalar(select(AIGenerationSource).where(AIGenerationSource.ai_generation_id == generation.id, AIGenerationSource.use_order == 1))
+    if not source:
+        return None
+    hit = session.get(RetrievalHit, source.retrieval_hit_id)
+    if not hit:
+        return None
+    if hit.matched_qa_id:
+        qa = session.get(QAEntry, hit.matched_qa_id)
+        return qa.category if qa else None
+    if hit.expanded_parent_document_id:
+        document = session.get(KnowledgeDocument, hit.expanded_parent_document_id)
+        return document.cancer_type if document else None
+    return None
 
 
 def full_parent_draft(evidence: list[Evidence]) -> GenerationResult | None:
@@ -152,6 +179,8 @@ def generate_draft(
         selected = {UUID(value) for value in result.used_hit_ids}
         for order, item in enumerate((item for item in evidence if item.retrieval_hit_id in selected), 1):
             session.add(AIGenerationSource(ai_generation_id=generation.id, retrieval_hit_id=item.retrieval_hit_id, use_order=order))
+        session.flush()
+        generation.category_slug = derive_category_slug(session, generation)
         event_type = "ai.draft_abstained" if result.status == "ABSTAIN" else "ai.draft_generated"
         record_event(session, event_type, "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "retrieval_run_id": str(run.id), "model": model, "duration_ms": generation.duration_ms, "prior_generation_id": str(prior_generation_id) if prior_generation_id else None, "reason_code": result.reason_code, "trigger": trigger})
         if dynamic_cause is not None:
@@ -235,6 +264,8 @@ def select_evidence(retrieval_hit_id: UUID, payload: SelectEvidenceIn, operator:
         session.add(generation)
         session.flush()
         session.add(AIGenerationSource(ai_generation_id=generation.id, retrieval_hit_id=hit.id, use_order=1))
+        session.flush()
+        generation.category_slug = derive_category_slug(session, generation)
         event_type = "ai.draft_abstained" if result.status == "ABSTAIN" else "ai.draft_generated"
         record_event(session, event_type, "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "retrieval_run_id": str(hit.retrieval_run_id), "model": model, "duration_ms": generation.duration_ms, "reason_code": result.reason_code, "trigger": "MANUAL_EVIDENCE"})
         if dynamic_cause is not None:

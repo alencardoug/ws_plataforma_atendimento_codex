@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from customer_care.audit.service import record_event
-from customer_care.infrastructure.models import KnowledgeChunk, KnowledgeDocument, QADynamicBinding, QAEntry
+from customer_care.infrastructure.models import Category, KnowledgeChunk, KnowledgeDocument, QADynamicBinding, QAEntry
 from customer_care.knowledge.dynamic_binding import ALLOWLISTED_TABLES
 from customer_care.knowledge.ingest import apply_embedding, chunk_content_hash, needs_reembedding, qa_content_hash
 from customer_care.rag.service import configured_embedding_provider
@@ -37,6 +37,11 @@ class UpdateQAIn(BaseModel):
     answer_markdown: str | None = None
     customer_citation_allowed: bool | None = None
     dynamic_binding: DynamicBindingIn | None = None
+
+
+class CreateCategoryIn(BaseModel):
+    slug: str
+    label: str
 
 
 class CreateClinicalDocumentIn(BaseModel):
@@ -140,6 +145,34 @@ def upsert_binding(session: DbSession, qa_id: str, binding_in: DynamicBindingIn 
         existing.updated_at = datetime.now(UTC)
     else:
         session.add(QADynamicBinding(qa_id=qa_id, source_table=binding_in.source_table, filter=binding_in.filter, output_columns=binding_in.output_columns, row_limit=binding_in.row_limit))
+
+
+# --- Category registry (V3-8) ---------------------------------------------
+
+
+def category_dict(category: Category) -> dict:
+    return {"slug": category.slug, "label": category.label, "is_active": category.is_active}
+
+
+@router.get("/categories")
+def list_categories(operator: CurrentOperator, session: DbSession, include_inactive: bool = Query(False)) -> list[dict]:
+    """Backs V3-8's guided category selector — administrative
+    (content.qa_entries.category) and clinical-site (content.documents.
+    cancer_type) categories share this one registry (plan.md §3.1,
+    resolved 2026-08-18), so this list always reflects both."""
+    query = select(Category) if include_inactive else select(Category).where(Category.is_active.is_(True))
+    return [category_dict(row) for row in session.scalars(query.order_by(Category.slug)).all()]
+
+
+@router.post("/categories", status_code=201)
+def create_category(payload: CreateCategoryIn, operator: CurrentOperator, session: DbSession) -> dict:
+    if session.get(Category, payload.slug):
+        raise api_error(409, "CATEGORY_EXISTS", f"Category '{payload.slug}' already exists")
+    category = Category(slug=payload.slug, label=payload.label, is_active=True)
+    session.add(category)
+    record_event(session, "knowledge.category_created", "OPERATOR", actor_id=operator.id, payload={"slug": payload.slug})
+    session.commit()
+    return category_dict(category)
 
 
 # --- Q&A -----------------------------------------------------------------
