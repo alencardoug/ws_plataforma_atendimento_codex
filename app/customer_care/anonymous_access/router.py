@@ -15,6 +15,7 @@ from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.shared.dependencies import DbSession, customer_bearer
 from customer_care.shared.errors import api_error
+from customer_care.shared.http import client_ip
 from customer_care.shared.schemas import BodyIn, ConversationOut, CreateConversationOut, CustomerMessageOut
 from customer_care.shared.settings import get_settings
 
@@ -30,7 +31,7 @@ def token_bound_conversation(
     if not credentials:
         raise api_error(401, "UNAUTHORIZED", "Conversation token required")
     settings = get_settings()
-    client_key = request.client.host if request.client else "unknown"
+    client_key = client_ip(request)
     try:
         enforce_not_locked_out("token_validation", client_key)
     except HTTPException:

@@ -30,7 +30,7 @@ extending V1's) is unchanged and still governs V1/V2-inherited behavior.
 | 4 | Read-only metrics surface, server-side enforced | E |
 | 5 | Evaluation case isolation from production metrics | F |
 | 6 | Regenerate-with-instruction internal-only, audited | G |
-| 7 | V1/V2 acceptance spot-check | P |
+| 7 | V1/V2 acceptance spot-check | O |
 | 8 | Clear/reset scope (no durable-row side effects) | H |
 | 9 / 9a | Guided knowledge-CRUD correctness; transformar-em-Q&A pre-fill/confirm | I |
 | 10 | Countdown reset/no-negative/no-self-trigger | J |
@@ -46,22 +46,25 @@ extending V1's) is unchanged and still governs V1/V2-inherited behavior.
 | No new infrastructure (no scheduler for countdown) | T080, `plan.md` §12/§23 | A, O |
 | Evaluation-case structural isolation | T014, T074 | F |
 | Column-introspection allowlist enforcement | T061, T064 | I, N |
-| Audit coverage for new event types | T031, T032, T053, T102, T120 | N, O |
-| `classify_generation()` / SQL query agreement (no drift) | T030, T111 | O |
+| Audit coverage for new event types | T031, T032, T053, T102, T120 | N, P |
+| `classify_generation()` / SQL query agreement (no drift) | T030, T111 | D |
 | Quick-approve staleness guard | T040, T042 | C |
 
-## Executable evidence (to be populated as tests land)
+## Executable evidence (landed)
 
 | Coverage | Evidence |
 |---|---|
-| `classify_generation()` taxonomy derivation | `app/tests/test_v3_taxonomy.py` (planned, T034) |
-| Mark-incorrect/escalate endpoints | `app/tests/smoke_v3_taxonomy_hcr.py` (planned, T131) |
-| Quick-approve + staleness guard | `app/tests/smoke_v3_taxonomy_hcr.py` (planned, T131) |
-| Regenerate-with-instruction provider passthrough | `app/tests/test_v3_regenerate_instruction.py` (planned, T056) |
-| Category registry migration/backfill | `app/tests/test_v3_category_migration.py` (planned, T017) |
-| Guided knowledge-CRUD + transformar-em-Q&A | `app/tests/smoke_v3_knowledge_guided.py` (planned, T131) |
-| Evaluation-case isolation | `app/tests/test_v3_evaluation_cases.py` (planned, T074) |
-| Countdown indicator | `frontend/e2e/v3.spec.ts` (planned, T132) |
-| Scroll-to-top / clear-reset / confirm-close | `frontend/e2e/v3.spec.ts` (planned, T132) |
-| Satisfaction survey | `app/tests/smoke_v3_satisfaction.py` (planned, T131) |
-| Documented metrics queries vs. `classify_generation()` agreement | `app/tests/test_v3_metrics_queries.py` (planned, T111) |
+| `classify_generation()` taxonomy derivation | `app/tests/test_taxonomy.py` (T030-T035) |
+| Mark-incorrect/escalate endpoints, quick-approve, staleness guard, search, take-over, HCR SQL/Python agreement | `app/tests/smoke_v3_taxonomy_hcr.py` (T131) |
+| Regenerate-with-instruction provider passthrough | `app/tests/test_taxonomy.py`, `app/tests/test_ai_providers.py` (T050-T056) |
+| Category registry migration/backfill, `category_slug` derivation | `app/tests/test_category_derivation.py` (T010-T017) |
+| Guided knowledge-CRUD (category freshness, allowlisted table dropdown, real-column introspection) | `app/tests/smoke_v3_knowledge_guided.py` (T131) |
+| transformar-em-Q&A pre-fill | `app/tests/test_qa_transform.py` (unit); `frontend/e2e/v3.spec.ts` (end-to-end, T132) |
+| Evaluation-case isolation | `app/tests/test_evaluation_isolation.py` (T070-T074) |
+| Automatic-draft status (read-only mirror of the trigger guard) | `app/tests/test_automatic_draft_status.py` (T080-T082) |
+| Countdown indicator, scroll-to-top, Limpar (clear/reset), confirm-before-close | `frontend/e2e/v3.spec.ts` (T132, 5 scenarios) |
+| Satisfaction survey (block-before-close, skip-leaves-no-row, attribution, duplicate rejection) | `app/tests/smoke_v3_satisfaction.py` (T131) |
+| Documented metrics queries vs. `classify_generation()` agreement | `app/tests/smoke_v3_metrics_agreement.py` (T111) |
+| D-030 rate-limiter client-key correction (found during T132) | `app/tests/test_client_ip.py`; `app/tests/smoke_v2_token_rate_limit.py`; `frontend/e2e/v2.spec.ts` T128 |
+| `contracts/openapi.yaml` AIGeneration schema drift (found during T134): `marked_incorrect_by_operator_id`/`escalated_by_operator_id` were documented but never returned by `generation_dict()` | `app/customer_care/ai/router.py` (fixed, both fields now returned); re-verified via `smoke_core.py` → `smoke_v3_taxonomy_hcr.py` |
+| Full V1/V2 regression spot-check | `app/tests/smoke_core.py`/`smoke_n2.py`/`smoke_concurrent_capacity.py`/`smoke_resilience.py`/`smoke_real_provider.py`/`smoke_v2_*.py` (9/9, T121); `frontend/e2e/v1.spec.ts`/`v2.spec.ts` (T132) |

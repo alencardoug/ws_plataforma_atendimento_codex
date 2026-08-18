@@ -182,15 +182,84 @@ deploy (extra GCP APIs needed beyond the obvious three, a persistently-403ing
 Console) are in `DEPLOYMENT.md`'s "Production deployment" section — read that
 before attempting a second deploy or tearing this one down.
 
+## V3 implementation — DONE (2026-08-18)
+
+All 13 phases of `specs/003-v3-measured-n2/tasks.md` (T000-T134) are
+complete and committed to `main` (not yet pushed/redeployed — see the
+deploy-cadence note at the end of this section):
+
+- **Phase 1-2** — `content.categories` shared registry (backfilled from
+  both `qa_entries.category` and `documents.cancer_type`, resolved
+  2026-08-18 after human pushback on an earlier admin-Q&A-only draft),
+  `ai_generations` new columns, `category_slug` derivation
+  (`derive_category_slug()`).
+- **Phase 3 (V3-1)** — `classify_generation()`'s eight-tag taxonomy,
+  computed entirely from existing durable facts; `mark-incorrect`/
+  `escalate` endpoints (retroactive, idempotent, tag-only — no queue).
+- **Phase 4 (V3-2)** — quick-approve (no new endpoint — reuses the
+  existing send path); the `STALE_GENERATION` guard added here caught a
+  real, organic race during its own live verification (a manual draft
+  legitimately superseded by an automatic one) and later required a
+  matching fix to `smoke_n2.py` in Phase 12.
+- **Phase 5 (V3-6)** — regenerate-with-instruction. Found and fixed a
+  real pre-existing V2 bug while implementing this: `draft()` never
+  actually computed/passed `prior_generation_id` despite V2's own
+  spec/acceptance claiming it worked.
+- **Phase 6 (V3-8 ×V3-1)** — guided category/dynamic-table/column
+  selectors (live `information_schema` introspection via
+  `sqlalchemy.inspect()`, scoped to the allowlist); "transformar em Q&A".
+- **Phase 7 (V3-5)** — evaluation cases, structurally isolated (no FK
+  to conversations/generations), no auto-rerun mechanism.
+- **Phase 8 (V3-9)** — automatic-draft countdown
+  (`automatic_draft_status()`, read-only mirror of the trigger guard).
+- **Phase 9-10 (V3-7, V3-10, V3-11)** — clear/reset, scroll-to-top
+  (scoped to evidence selection only), confirm-before-close on both
+  surfaces.
+- **Phase 11 (V3-3/V3-4)** — `docs/metrics/v3_queries.sql` (4
+  documented, zero-write-route queries); found and fixed a real
+  `GROUPING SETS`/`COALESCE` bug that conflated a trigger's "no
+  category" subtotal with its "all categories" subtotal.
+- **Phase 12** — audit-catalog/V1-V2 regression consolidation; the full
+  pre-existing 9-script `smoke_*` suite passes (one script needed a
+  narrow fix — see Phase 13 below).
+- **Phase 13** — acceptance automation and final convergence. Found and
+  fixed two more real gaps: **a genuine V2-era security defect** (the
+  V2-2 rate limiter's client key collapsed every customer behind this
+  project's one reverse-proxy hop onto one shared value, making its
+  lockout global instead of per-customer — `DECISIONS.md` D-030, fixed
+  as an approved V2 correction), and a `contracts/openapi.yaml` schema
+  drift (`AIGeneration`'s two operator-id fields were documented but
+  never returned).
+
+`specs/003-v3-measured-n2/acceptance.md`'s Execution record (2026-08-18)
+covers all 13 `spec.md` §5 acceptance outcomes (sections A-P), all
+passing. `analysis.md` §6 records the Phase 13 convergence review. All
+V1/V2 safety invariants (explicit-send-only, append-only audit, no
+chain-of-thought persistence, server-side citation/authorization
+enforcement, manual fallback on AI/RAG failure, N1/N2 mode boundaries)
+were re-verified intact under every new V3 trigger/tag path — the full
+`v1.spec.ts`/`v2.spec.ts`/`v3.spec.ts` Playwright suite (12 scenarios, 1
+skipped by design) now passes together in a single bare `playwright test`
+run, confirmed stable across repeated runs.
+
+Six real implementation gaps were found across this cycle by dedicated
+convergence/regression checks rather than by the phase-by-phase build
+gates (which all passed throughout) — each is now closed with regression
+coverage. Per this project's deploy-cadence practice, this V3 work is
+committed but not yet redeployed to production; deploy at the end of the
+current refinement window, not reactively per-commit.
+
 ## Immediate next action for Claude Code
 
-V1 remains closed (GO, 2026-08-13), V2 is DONE (2026-08-17), and the
-production deployment above is live and verified end-to-end. There is no
-open implementation work in any of the three. The human is currently running
-`teste_humano.md`'s manual test/RAG-evaluation plan (originally written
-against local Docker Compose; now also applicable against the production
-URL above). `ROADMAP.md`/`DECISIONS.md` govern what comes next once that
-finishes — most likely the V3 ("Measured N2") specification cycle, not yet
-started. Dynamic appointment availability remains a separate, not-yet
--authorized future feature (D-026), distinct from V2's `dynamic_data_required`
-safety correction (D-028) which V2 Phase 7 already closed.
+V1 remains closed (GO, 2026-08-13), V2 is DONE (2026-08-17), and V3
+("Measured N2") is DONE (2026-08-18). There is no open implementation work
+in any of the three. V3's changes are committed to `main` but not yet
+pushed or redeployed to production — per this project's deploy-cadence
+practice, batch the next production deploy at the end of the current
+refinement window rather than redeploying reactively; the production
+environment described above still serves V1+V2 only until that happens.
+`ROADMAP.md`/`DECISIONS.md` govern what comes next: dynamic appointment
+availability remains a separate, not-yet-authorized future feature
+(D-026), distinct from V2's `dynamic_data_required` safety correction
+(D-028, V2 Phase 7) and unrelated to anything V3 built. No V4/V5
+specification cycle has been authorized yet.

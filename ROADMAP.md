@@ -87,13 +87,17 @@ section is kept as the historical record of the authorized scope.
 
 ## Era B — Trust
 
-### V3 — Measured N2
+### V3 — Measured N2 — Implemented (DONE 2026-08-18)
 
 - full operator feedback taxonomy;
 - approve/edit/regenerate/regenerate-with-instruction/search/take-over/escalate/mark-incorrect;
 - Human Correction Rate and related evidence;
 - first read-only management metrics;
 - evaluation datasets/suites tied to categories.
+
+See `specs/003-v3-measured-n2/` for the full spec/plan/tasks/acceptance
+package and `PROJECT_STATE.md`'s "V3 implementation — DONE" section for
+the closure summary.
 
 ### V4 — N3 governed autonomy / Supervisor
 

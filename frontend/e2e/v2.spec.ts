@@ -18,6 +18,11 @@ function psql(sql: string): void {
   execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
 }
 
+function restartBackend(): void {
+  execFileSync("docker", ["compose", "restart", "backend"], { cwd: repoRoot, stdio: "inherit" });
+  execFileSync("bash", ["-c", "until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done"], { cwd: repoRoot, stdio: "inherit", timeout: 30_000 });
+}
+
 // Each of T124/T125/T126/T127 claims an operator conversation slot (cap is
 // OPERATOR_MAX_ACTIVE_CONVERSATIONS, 4 by default) and does not release it —
 // closing mid-scenario would interfere with what each scenario is proving.
@@ -41,6 +46,16 @@ test.describe("V2 acceptance (tasks.md T124-T128)", () => {
 
   test.afterAll(() => {
     psql(`TRUNCATE ${conversationTables} CASCADE;`);
+    // T128 deliberately trips the anonymous-token rate limiter's lockout.
+    // That state lives in the backend process's memory, keyed by client IP
+    // (customer_care/shared/http.py client_ip()) — every request through
+    // this same docker-compose nginx proxy resolves to the same real
+    // source IP (this test runner's own machine), so the lockout it
+    // engaged would otherwise still be active for whichever e2e/*.spec.ts
+    // file runs next (e.g. v3.spec.ts) in the same `playwright test` pass.
+    // Restarting clears it, matching what T128 always needed done before
+    // running other token-validation-dependent scenarios from this host.
+    restartBackend();
   });
 
   test("typing-debounced automatic trigger batches correctly across multiple bursts (T124, V2-7 automatic)", async ({ browser }) => {
@@ -137,24 +152,41 @@ test.describe("V2 acceptance (tasks.md T124-T128)", () => {
       const operator = await operatorContext.newPage();
       await login(operator);
 
-      // Happy path: a binding whose filter matches rows.
+      // Happy path: a binding whose filter matches rows. V3-8 replaced the
+      // free-text "Categoria"/"Tabela"/"Filtro (JSON)"/"Colunas de saída
+      // (JSON)" inputs with guided selectors backed by the live category
+      // registry and real `information_schema` column introspection —
+      // updated here to match (found and fixed while implementing V3-8,
+      // T132: this suite had not been rerun against V3's UI until now).
       await operator.goto("/operator/knowledge");
-      await operator.getByLabel("Categoria").fill(category);
+      await operator.getByRole("button", { name: "Criar nova categoria" }).click();
+      await operator.getByLabel("Identificador").fill(category);
+      await operator.getByLabel("Rótulo").fill(`Categoria fixture ${category}`);
+      await operator.getByRole("button", { name: "Criar categoria" }).click();
+      await expect(operator.getByLabel("Categoria")).toHaveValue(category);
       await operator.getByLabel("Pergunta").fill(`Quais horarios fixture ${category} estao disponiveis?`);
-      await operator.getByLabel("Resposta").fill("Horario fixture: {{slot}}.");
-      await operator.getByLabel("Tabela").fill("knowledge_dynamic_fixture");
-      await operator.getByLabel("Filtro (JSON)").fill(JSON.stringify({ category }));
-      await operator.getByLabel("Colunas de saída (JSON)").fill(JSON.stringify([{ column: "label", variable_name: "slot" }]));
+      await operator.getByLabel("Resposta", { exact: true }).fill("Horario fixture: {{slot}}.");
+      await operator.getByLabel("Tabela").selectOption("knowledge_dynamic_fixture");
+      await operator.getByLabel("Coluna do filtro").selectOption("category");
+      await operator.getByLabel("Valor do filtro").fill(category);
+      await operator.getByRole("button", { name: "Adicionar filtro" }).click();
+      await operator.getByLabel("Coluna de saída").selectOption("label");
+      await operator.getByLabel("Nome da variável").fill("slot");
+      await operator.getByRole("button", { name: "Adicionar coluna" }).click();
       await operator.getByRole("button", { name: "Adicionar pergunta e resposta" }).click();
       await expect(operator.getByText(`Quais horarios fixture ${category} estao disponiveis?`)).toBeVisible();
 
       // Fallback path: same table/columns, filter matches zero rows.
-      await operator.getByLabel("Categoria").fill(category);
+      await operator.getByLabel("Categoria").selectOption(category);
       await operator.getByLabel("Pergunta").fill(`Quais horarios fixture ${category} inexistente estao disponiveis?`);
-      await operator.getByLabel("Resposta").fill("Horario fixture: {{slot}}.");
-      await operator.getByLabel("Tabela").fill("knowledge_dynamic_fixture");
-      await operator.getByLabel("Filtro (JSON)").fill(JSON.stringify({ category: `${category}-no-match` }));
-      await operator.getByLabel("Colunas de saída (JSON)").fill(JSON.stringify([{ column: "label", variable_name: "slot" }]));
+      await operator.getByLabel("Resposta", { exact: true }).fill("Horario fixture: {{slot}}.");
+      await operator.getByLabel("Tabela").selectOption("knowledge_dynamic_fixture");
+      await operator.getByLabel("Coluna do filtro").selectOption("category");
+      await operator.getByLabel("Valor do filtro").fill(`${category}-no-match`);
+      await operator.getByRole("button", { name: "Adicionar filtro" }).click();
+      await operator.getByLabel("Coluna de saída").selectOption("label");
+      await operator.getByLabel("Nome da variável").fill("slot");
+      await operator.getByRole("button", { name: "Adicionar coluna" }).click();
       await operator.getByRole("button", { name: "Adicionar pergunta e resposta" }).click();
       await expect(operator.getByText(`Quais horarios fixture ${category} inexistente estao disponiveis?`)).toBeVisible();
 
@@ -201,9 +233,13 @@ test.describe("V2 acceptance (tasks.md T124-T128)", () => {
       await login(operator);
 
       await operator.goto("/operator/knowledge");
-      await operator.getByLabel("Categoria").fill(category);
+      await operator.getByRole("button", { name: "Criar nova categoria" }).click();
+      await operator.getByLabel("Identificador").fill(category);
+      await operator.getByLabel("Rótulo").fill(`Categoria fixture ${category}`);
+      await operator.getByRole("button", { name: "Criar categoria" }).click();
+      await expect(operator.getByLabel("Categoria")).toHaveValue(category);
       await operator.getByLabel("Pergunta").fill(question);
-      await operator.getByLabel("Resposta").fill("Resposta aprovada de round-trip T127.");
+      await operator.getByLabel("Resposta", { exact: true }).fill("Resposta aprovada de round-trip T127.");
       await operator.getByRole("button", { name: "Adicionar pergunta e resposta" }).click();
       await expect(operator.getByText(question)).toBeVisible();
 

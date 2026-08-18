@@ -609,29 +609,109 @@ customer_care` (40 files clean)/`pytest` (51/51). **Passed.**
 
 ## Phase 13 — Acceptance automation and DONE
 
-- [ ] **T130** Write `acceptance.md` covering `spec.md` §5's 13 outcomes as
+- [x] **T130** Write `acceptance.md` covering `spec.md` §5's 13 outcomes as
   executable scenarios (backend integration tests + frontend
-  `vitest`/Playwright scenarios as appropriate per outcome).
-- [ ] **T131** New E2E smoke script(s) — `smoke_v3_taxonomy_hcr.py`
+  `vitest`/Playwright scenarios as appropriate per outcome). Done —
+  `specs/003-v3-measured-n2/acceptance.md`, sections A-P plus an Execution
+  record mapping every section to concrete evidence, following V2
+  `acceptance.md`'s format.
+- [x] **T131** New E2E smoke script(s) — `smoke_v3_taxonomy_hcr.py`
   (V3-1/V3-2/V3-3), `smoke_v3_knowledge_guided.py` (V3-8),
   `smoke_v3_satisfaction.py` (V3-12) — mirroring the existing
-  `smoke_v2_*` naming convention.
-- [ ] **T132** Frontend `v3.spec.ts` covering V3-7/V3-9/V3-10/V3-11's
+  `smoke_v2_*` naming convention. All three run clean against the live
+  backend (see acceptance.md §B-D, §I, §M for exact evidence each proves).
+- [x] **T132** Frontend `v3.spec.ts` covering V3-7/V3-9/V3-10/V3-11's
   client-only behaviors (Playwright), plus quick-approve/mark-incorrect/
-  escalate/transformar-em-Q&A/regenerate-with-instruction UI flows.
-- [ ] **T133** `checklists/{requirements,security,traceability}.md`
+  escalate/transformar-em-Q&A/regenerate-with-instruction UI flows. Done —
+  5 scenarios, all passing against the rebuilt containers. Two real,
+  previously-latent gaps were found and fixed while proving the *whole*
+  `e2e/*.spec.ts` suite (not just this new file) passes together via bare
+  `playwright test` (the actual `npm run test:e2e` gate, which runs every
+  file, not one at a time — this had apparently never been exercised as a
+  combined run before):
+  1. `v2.spec.ts`'s T126/T127 used free-text "Categoria"/"Tabela"/"Filtro
+     (JSON)"/"Colunas de saída (JSON)" locators that V3-8's guided
+     selectors (category dropdown+create, table dropdown, filter/output
+     add-row UI) had silently broken — a real regression in previously-
+     passing V1/V2 acceptance coverage, caused by V3-8's own intentional
+     UI change and never re-verified against it. Fixed by updating those
+     two tests to drive the new guided UI (also fixed an
+     `getByLabel("Resposta")` ambiguity: once a `<textarea>` has content,
+     Playwright's accessible-name computation for its implicit
+     `<label>` concatenates the label text with the textarea's rendered
+     value — same class of quirk the `<select>`/"Tabela" case already
+     hit).
+  2. **A real security defect, not a test bug**: `v3.spec.ts` running
+     right after `v2.spec.ts`'s T128 (which deliberately trips the V2-2
+     anonymous-token rate limiter's lockout) started 429-ing on its own
+     perfectly valid tokens. Root cause: `token_bound_conversation`'s
+     rate-limit key was `request.client.host` — behind this project's one
+     same-origin reverse-proxy hop (local nginx; Firebase Hosting → Cloud
+     Run in production), that is always the proxy's own single address,
+     so the "per-source" lockout was actually global — one attacker
+     tripping it would deny every real customer, not just themselves.
+     This violated plan.md §13.1's own explicit acceptance requirement
+     ("does not block legitimate customers"). Authorized by the human as
+     an immediate approved V2 correction (2026-08-18, no `spec.md`/
+     `plan.md` text change needed — only the implementation was wrong).
+     Fixed via `customer_care/shared/http.py`'s new `client_ip()`
+     (trusts `X-Forwarded-For`'s first entry, which the one trusted proxy
+     hop always *sets* — never appends/passes through — from its own view
+     of the peer) plus `frontend/nginx.conf` setting that header
+     accordingly. Recorded as `DECISIONS.md` D-030. Regression-covered by
+     `test_client_ip.py` (4 tests) and reconfirmed via
+     `smoke_v2_token_rate_limit.py` and `v2.spec.ts`'s T128, both still
+     passing. `playwright.config.ts` also gained `workers: 1` (every
+     `e2e/*.spec.ts` file drives the same live backend/DB/operator
+     capacity and was never designed for concurrent-file execution) and a
+     `globalSetup` that restarts the backend once before the whole run;
+     `v1.spec.ts` gained its own DB reset (it previously assumed it always
+     ran first against a pristine database) and `v2.spec.ts`'s `afterAll`
+     now restarts the backend after T128 specifically. Full bare
+     `playwright test` (12 tests, all files) confirmed stable across two
+     consecutive clean runs: 11 passed, 1 skipped by design.
+- [x] **T133** `checklists/{requirements,security,traceability}.md`
   finalized against the implemented state (not just the plan).
-- [ ] **T134** `analysis.md` — cross-artifact convergence review across
+  `requirements.md` was already accurate (plan-time items only, all
+  already checked). `security.md`'s 10 plan-time items were re-verified
+  against real code/tests one by one and checked off; the D-030
+  rate-limiter finding (see T132) was added as an 11th, newly-discovered
+  item. `traceability.md`'s "Executable evidence" table was rewritten from
+  planned/placeholder filenames to the actual landed test files, its
+  acceptance-area letter references corrected to match `acceptance.md`'s
+  final A-P lettering (a `V1/V2 acceptance spot-check → O` mislabel and an
+  `audit coverage`/`classify_generation() agreement` mislabel, both found
+  while cross-checking), and gained rows for both the D-030 finding and a
+  second real finding from the same review pass (next task).
+- [x] **T134** `analysis.md` — cross-artifact convergence review across
   `spec.md`/`plan.md`/`data-model.md`/`contracts/openapi.yaml`/
   `acceptance.md`/`tasks.md`, before declaring V3 done. Update
   `PROJECT_STATE.md`, `ROADMAP.md`, `DECISIONS.md` to record V3 closure,
-  matching how V2's closure was recorded.
+  matching how V2's closure was recorded. Done — `analysis.md` §6 records
+  the review (OpenAPI route diff, `AIGeneration` schema field-by-field
+  check, `data-model.md` §8 integrity-claim verification,
+  `checklists/security.md` re-verification); found and fixed 2 real gaps
+  (D-030's rate-limiter finding and the `AIGeneration`
+  `marked_incorrect_by_operator_id`/`escalated_by_operator_id` contract
+  drift, see T132/T133). `PROJECT_STATE.md` gained a "V3 implementation —
+  DONE" section mirroring V2's; `ROADMAP.md`'s V3 entry marked
+  Implemented; `DECISIONS.md` D-030 records the rate-limiter correction.
+  Also updated `CLAUDE.md`'s "Current lifecycle state" — found it had
+  never been updated for V3's authorization/existence at all throughout
+  this entire implementation cycle (a real staleness gap, not previously
+  caught since nothing else depends on that file being current); it now
+  documents V3 the same way it already documented V1/V2.
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`; the full backend E2E smoke
-suite (all `smoke_*` scripts including the new V3 ones) against the
-rebuilt backend image; all new `v3.spec.ts` scenarios; `acceptance.md`'s
-Execution record covers all 13 `spec.md` §5 outcomes.
+**Gate:** backend `ruff` (clean)/`mypy customer_care` (40 files
+clean)/`pytest` (55/55); frontend `eslint`/`tsc --noEmit`/`vitest`
+(16/16)/`vite build` all clean; the full 12-script `smoke_*` suite (9
+pre-existing + `smoke_v3_taxonomy_hcr`/`smoke_v3_knowledge_guided`/
+`smoke_v3_satisfaction`) 12/12 PASS against the rebuilt backend image;
+the full `e2e/*.spec.ts` suite (`v1.spec.ts`/`v2.spec.ts`/`v3.spec.ts`,
+12 scenarios, 1 skipped by design) 11/11 PASS via bare `playwright test`
+(the actual `npm run test:e2e` gate), confirmed stable across repeated
+runs; `acceptance.md`'s Execution record covers all 13 `spec.md` §5
+outcomes. **Passed. V3 is DONE.**
 
 ## Dependency summary
 

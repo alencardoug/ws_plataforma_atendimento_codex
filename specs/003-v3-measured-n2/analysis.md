@@ -147,3 +147,81 @@ place. `checklists/requirements.md`'s final item ("Cross-artifact analysis
 reports no material contradiction") is satisfied by this document. V3 is
 ready to move from artifact authoring into `tasks.md` Phase 0 (SDD gates)
 and implementation, per `AGENTS.md`'s required SDD flow.
+
+## 6. Phase 13 post-implementation convergence review (2026-08-18)
+
+Re-run after Phases 1-12 implementation, per `tasks.md` T134: checking
+every artifact against the real implementation, not only against each
+other, matching V2's own Phase 11 convergence method (`specs/002-v2-
+commercial-product-experience/analysis.md` §6). `contracts/openapi.yaml`'s
+paths were diffed against the live app's actual registered routes
+(`curl .../openapi.json`); the highest-risk schema (`AIGeneration`, the
+only one V3 extends with new fields) was spot-checked field-by-field
+against `generation_dict()`'s real return dict. `data-model.md` §8's
+integrity claims were each checked against the actual model/migration
+(FK/unique constraints) or the actual query code. `checklists/security.md`'s
+10 plan-time items were each re-verified against a specific test or a
+targeted code-review pass, not taken on the plan draft's wording.
+
+### Findings and repairs
+
+1. **A real, previously-latent security defect, found while proving
+   `v3.spec.ts` passes together with the rest of the `e2e/*.spec.ts` suite
+   (not a V3-introduced regression, but a V2-era mechanism V3's own new
+   test file was the first thing to actually exercise this way):** the
+   V2-2 per-source token-validation rate limiter's client key
+   (`request.client.host` in `token_bound_conversation`) is the immediate
+   TCP peer — behind this project's one same-origin reverse-proxy hop
+   (local docker-compose nginx; Firebase Hosting → Cloud Run in
+   production, D-029), that collapses every real customer onto one shared
+   value, making the "per-source" lockout global instead of per-customer.
+   This is a direct violation of `plan.md` §13.1's own explicit acceptance
+   requirement ("does not block legitimate customers") — worse, it is a
+   denial-of-service amplification: one attacker's lockout would deny
+   every legitimate customer, system-wide, not just themselves. Authorized
+   by the human as an immediate approved V2 correction (2026-08-18).
+   Fixed via `customer_care/shared/http.py`'s new `client_ip()` (trusts
+   `X-Forwarded-For`'s first entry — safe here because the one trusted
+   proxy hop always *sets*, never appends/passes through, that header from
+   its own view of the connecting peer) plus `frontend/nginx.conf`
+   configuring nginx to do exactly that. No `spec.md`/`plan.md` text
+   changed — §13.1's own requirement was already correct; only the
+   implementation was wrong. Recorded as `DECISIONS.md` D-030.
+   Regression-covered by `test_client_ip.py` (4 unit tests); reconfirmed
+   via `smoke_v2_token_rate_limit.py` and `v2.spec.ts`'s T128 continuing
+   to pass.
+2. **`contracts/openapi.yaml`'s `AIGeneration` schema documented
+   `marked_incorrect_by_operator_id`/`escalated_by_operator_id` as V3
+   additions, but `ai/router.py`'s `generation_dict()` never actually
+   returned either field** — only the two `_at` timestamps. Exactly the
+   class of drift a dedicated convergence pass exists to catch (same
+   pattern as V2's Phase 11 finding #1: a correctly-specified requirement
+   silently dropped between specification and implementation, uncaught by
+   phase gates because they test what was built, not what the contract
+   promised). Not a security gap (the underlying columns were always
+   written correctly by `mark_incorrect`/`escalate`; only the read-back
+   response was incomplete), but a real API-contract violation any future
+   operator-UI feature reading "who marked this incorrect" would have hit.
+   Fixed by adding both fields to `generation_dict()`'s return dict;
+   re-verified via `smoke_core.py` → `smoke_v3_taxonomy_hcr.py` and the
+   full frontend build/lint/type/test gates (additive fields, no consumer
+   broke).
+
+`data-model.md` §8's remaining integrity claims had no drift:
+`content.categories.slug` uniqueness, `category_slug`'s snapshot-at-
+creation-time behavior (confirmed against `derive_category_slug()`'s real
+code), and `conversation_satisfaction_responses.conversation_id`'s
+`UNIQUE` constraint (confirmed against the actual SQLAlchemy model
+column, `unique=True`) all matched exactly. `checklists/security.md`'s
+other 9 items had no drift — each is now backed by an explicit
+test/code-review reference (the checklist itself records which).
+
+### Verdict
+
+No unresolved contradiction between any V3 artifact and the implementation
+as of this review, after repairing the two findings above (one a genuine
+security correction to a V2 mechanism, one a contract-completeness gap).
+`spec.md` §5's 13 acceptance outcomes are covered by `acceptance.md`'s
+executable scenarios (sections A-P); see `acceptance.md`'s Execution
+record for the pass/fail evidence, and `checklists/traceability.md` for
+the outcome → task → acceptance-area → test-file mapping. V3 is DONE.

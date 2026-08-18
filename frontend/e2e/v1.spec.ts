@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
 function requiredEnvironment(name: "E2E_OPERATOR_EMAIL" | "E2E_OPERATOR_PASSWORD"): string {
@@ -8,9 +12,23 @@ function requiredEnvironment(name: "E2E_OPERATOR_EMAIL" | "E2E_OPERATOR_PASSWORD
 
 const operatorEmail = requiredEnvironment("E2E_OPERATOR_EMAIL");
 const operatorPassword = requiredEnvironment("E2E_OPERATOR_PASSWORD");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+
+function psql(sql: string): void {
+  execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+}
+
+const conversationTables = "customer_service.audit_events, customer_service.message_selections, customer_service.message_citations, customer_service.ai_generation_sources, customer_service.ai_generations, customer_service.retrieval_hits, customer_service.retrieval_runs, customer_service.messages, customer_service.conversation_assignments, customer_service.conversations";
 
 test("six independent customers, capacity, hidden N2 draft, explicit send and take-over", async ({ browser }) => {
   test.skip(process.env.E2E_MATURITY_MODE === "N1", "N2 acceptance scenario");
+  // This scenario asserts an exact 4-active/2-waiting split, so it needs a
+  // conversation-table slate with zero pre-existing rows — added when V3's
+  // v2.spec.ts/v3.spec.ts siblings started resetting between/around
+  // themselves and this file (run together via `npm run test:e2e`/bare
+  // `playwright test`, which exercises every e2e/*.spec.ts file) needed the
+  // same guarantee, not just "runs first against an empty DB".
+  psql(`TRUNCATE ${conversationTables} CASCADE;`);
   const contexts: BrowserContext[] = [];
   const customerPages: Page[] = [];
   const sessions: Array<{ id: string; token: string }> = [];

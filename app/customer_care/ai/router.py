@@ -76,7 +76,9 @@ def generation_dict(session: DbSession, generation: AIGeneration, evidence: list
         "request_messages": request_messages,
         "category_slug": generation.category_slug,
         "marked_incorrect_at": generation.marked_incorrect_at,
+        "marked_incorrect_by_operator_id": generation.marked_incorrect_by_operator_id,
         "escalated_at": generation.escalated_at,
+        "escalated_by_operator_id": generation.escalated_by_operator_id,
         "instruction_text": generation.instruction_text,
     }
 
