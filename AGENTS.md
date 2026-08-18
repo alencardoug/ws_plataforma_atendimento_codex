@@ -18,14 +18,21 @@ Do not silently invent a resolution to conflicting requirements. Update the high
 V1 baseline: `specs/001-v1-assisted-customer-service` — implemented and closed
 for new product behavior.
 
-V2 discovery/specification: `specs/002-v2-commercial-product-experience` —
-explicitly authorized by the human on 2026-08-11. Complete its specification,
-clarification record, plan, tasks, contracts, acceptance, and cross-artifact
-analysis before writing V2 production behavior; then implement in the approved
-SDD dependency order.
+V2: `specs/002-v2-commercial-product-experience` — DONE (2026-08-17). See
+`PROJECT_STATE.md`.
 
-Dynamic appointment availability remains a distinct future feature. It is not
-part of V2 unless a human explicitly adds it to the V2 specification.
+V3 ("Measured N2"): `specs/003-v3-measured-n2` — DONE (2026-08-18). See
+`PROJECT_STATE.md`.
+
+Dynamic appointment availability (read-only availability consultation only):
+`specs/004-dynamic-appointment-availability` — explicitly authorized by the
+human on 2026-08-18. Its `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/
+`acceptance.md`/`analysis.md` (pre-implementation) are complete and
+cross-checked (`analysis.md` §5, no unresolved contradiction); implement in
+the approved SDD dependency order (`tasks.md`'s Phase 1-6). Booking, holds,
+payment, identity persistence, and every other `dynamic_resolver` name
+besides `appointment_availability` remain explicitly out of scope — see that
+package's `spec.md` §6.
 
 ## Required SDD flow
 

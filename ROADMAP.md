@@ -14,13 +14,15 @@ roadmap only until their own Spec Kit flow is authorized and completed.
 
 Current scope. Anonymous web customer, operator, N1/N2, offline ingestion, dual RAG strategy, queue/capacity, audit, local Docker Compose.
 
-### Future feature — Dynamic appointment availability
+### Future feature — Dynamic appointment availability — Specification complete, implementation pending (2026-08-18)
 
-This is intentionally separate from V2, with one narrow exception (see below).
-Choose a feature ID and create its Spec Kit directory only when a human
-authorizes this scope. This entry records agreed intent but is not executable
-scope until its own specification, plan, tasks, and consistency analysis are
-approved.
+This was intentionally separate from V2/V3, with one narrow exception (see
+below). The human authorized its own Spec Kit cycle on 2026-08-18:
+`specs/004-dynamic-appointment-availability/`. Its `spec.md`/`plan.md`/
+`data-model.md`/`tasks.md`/`acceptance.md`/pre-implementation `analysis.md`
+are complete; implementation has not yet started. See that package and
+`PROJECT_STATE.md` for status — this roadmap entry below records the
+original agreed intent that authorization was based on, not a live status.
 
 The cycle must begin with a safety correction: administrative evidence marked
 `dynamic_data_required=true` must never be passed through as a literal answer

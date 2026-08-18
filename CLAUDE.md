@@ -37,19 +37,31 @@ Read and obey `AGENTS.md` first.
   every V1/V2 safety invariant) is now the executable baseline. This cycle
   also produced one approved correction to a V2 mechanism (D-030: the V2-2
   rate limiter's client-key derivation) — see `DECISIONS.md`.
-- Dynamic appointment availability, N3 governed autonomy/policy
-  enforcement, the specialist-escalation workflow (V5), and an automated
-  evaluation-case re-run mechanism all remain out of V3's scope, unchanged
-  from prior exclusions, unless a later human decision explicitly
-  authorizes them.
+- N3 governed autonomy/policy enforcement, the specialist-escalation
+  workflow (V5), and an automated evaluation-case re-run mechanism all
+  remain out of scope, unchanged from prior exclusions, unless a later
+  human decision explicitly authorizes them.
+- The human authorized the "Dynamic appointment availability" feature's
+  discovery/specification on 2026-08-18 — read-only appointment-
+  availability consultation only, not booking. Its package is
+  `specs/004-dynamic-appointment-availability/`. Its `spec.md` (13→9
+  numbered outcomes AA-1..AA-8, resolved), `plan.md`, `data-model.md`,
+  `tasks.md`, `acceptance.md`, and the pre-implementation `analysis.md` are
+  complete; implementation (that package's `tasks.md` Phase 1 onward) is
+  the next work once a human confirms. Booking, holds, payment, identity
+  persistence, and every `dynamic_resolver` name besides
+  `appointment_availability` (`price_lookup`/`payment_simulator`/
+  `insurance_lookup`) remain explicitly deferred — see that package's
+  `spec.md` §6.
 
 Read in this order:
 
 1. `.specify/memory/constitution.md`
 2. `PROJECT_STATE.md`
 3. `CLAUDE_CODE_HANDOFF.md`
-4. `specs/003-v3-measured-n2/spec.md`
-5. the complete V1/V2 packages, especially their `spec.md`, `plan.md`,
+4. `specs/004-dynamic-appointment-availability/spec.md` (current active
+   cycle)
+5. the complete V1/V2/V3 packages, especially their `spec.md`, `plan.md`,
    `tasks.md`, `data-model.md`, contract, acceptance, analysis, and
    checklists
 6. `SDD_MANIFEST.md`, `ROADMAP.md`, and `DECISIONS.md`
@@ -102,6 +114,18 @@ authoring is expected unless a new correction is authorized (see above).
 DONE (2026-08-18); no further V3 spec/plan/tasks authoring is expected
 unless a new correction is authorized, following the same
 repair-the-highest-authority-artifact process as a V1/V2 correction.
+
+### Dynamic appointment availability — specification complete, implementation pending
+
+`specs/004-dynamic-appointment-availability/` is the current active
+package. Its `spec.md`, `plan.md`, `data-model.md`, `tasks.md`,
+`acceptance.md`, and pre-implementation `analysis.md` are all written and
+cross-checked; `tasks.md` Phase 0 (SDD gates) is done. Implementation
+(`tasks.md` Phase 1 onward) has not started. Read `tasks.md`'s dependency
+summary before continuing; do not skip a phase's gate. This feature has no
+frontend surface (an internal resolution-path change only, matching V2-6's
+own no-new-route precedent) — do not add one unless the spec is amended
+first.
 
 ## General Claude Code behavior
 
