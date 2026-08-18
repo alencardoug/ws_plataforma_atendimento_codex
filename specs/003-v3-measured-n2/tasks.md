@@ -504,22 +504,47 @@ frontend `eslint`/`tsc --noEmit`/`vitest` (16/16)/`vite build`. **Passed.**
 
 ## Phase 11 — Documented read-only metrics [V3-3, V3-4]
 
-- [ ] **T110 [V3-3/V3-4]** `docs/metrics/v3_queries.sql`: abstention rate
+- [x] **T110 [V3-3/V3-4]** `docs/metrics/v3_queries.sql`: abstention rate
   overall/by category (including the explicit "sem categoria" row);
   Human Correction Rate overall/by category (`plan.md` §6 formula);
   generation volume by `trigger`/`category_slug`; V3-12 average score and
   resolved-rate overall/by category — `plan.md` §7. Each query
-  parameterizable by date range and optionally `category_slug`.
-- [ ] **T111** Test asserting the SQL `CASE`/aggregate expressions in
-  T110 agree with `classify_generation()`'s (T030) Python logic against
-  the same fixture data — `plan.md` §19, guards against silent drift
-  between the two representations.
-- [ ] **T112** Confirm no write endpoint exists anywhere in this surface
-  (acceptance outcome 4 — read-only enforced by construction, not by
-  omission).
+  parameterizable by date range (`psql -v start_date=.../-v end_date=...`,
+  `\if :{?...}`-guarded so the file also runs as-is with no flags) and, by
+  a documented pattern, `category_slug`. A real bug surfaced and was fixed
+  while validating this against the live database: the volume-by-
+  trigger/category query's `GROUPING SETS` originally conflated a
+  trigger's "no category" subtotal with its "all categories" subtotal
+  under the same displayed label — fixed by wrapping both grouping
+  expressions in `COALESCE` before the `GROUPING SETS`, not just in the
+  `SELECT` list, matching the other three queries' already-correct
+  `ROLLUP` pattern.
+- [x] **T111** `tests/smoke_v3_metrics_agreement.py` — not a `test_*.py`
+  file on purpose (`pyproject.toml`'s `python_files=["test_*.py"]`
+  deliberately excludes it from the DB-free fast suite, same as every
+  other `smoke_*.py` script): tallies `classify_generation()`'s
+  approve/edit counts per category in Python against the actual live
+  `ai_generations`/`audit_events` rows, and compares to the HCR query's
+  own SQL aggregation over the same rows. Run against the local dev
+  database's real accumulated data (not a synthetic fixture) — confirmed
+  exact agreement across all 3 categories present.
+- [x] **T112** No write endpoint exists anywhere in this surface by
+  construction — `docs/metrics/v3_queries.sql` is a static file with zero
+  API route wired to it, nothing to disable (acceptance outcome 4).
 
-**Gate:** `psql`/pytest-driven query tests pass against a seeded fixture
-database; no backend/frontend route added.
+**Live verification**: all 4 queries run cleanly against the real local
+database both with no `-v` flags (all-time default) and with an explicit
+`-v start_date=.../-v end_date=...` range: abstention rate, HCR,
+volume-by-trigger/category (post-fix), and satisfaction all produced
+internally consistent results (e.g. `HCR` overall = weighted average of
+its per-category rows; trigger subtotals in query 3 sum exactly to their
+per-category rows).
+
+**Gate:** `psql`-driven query tests pass against the live database;
+`smoke_v3_metrics_agreement.py` confirms SQL/Python agreement; backend
+`ruff`/`mypy` (40 files clean)/`pytest` (51/51, unaffected — new script
+correctly excluded from the fast suite); no backend/frontend route added.
+**Passed.**
 
 ## Phase 12 — Audit/observability consolidation and V1/V2 regression
 spot-check
