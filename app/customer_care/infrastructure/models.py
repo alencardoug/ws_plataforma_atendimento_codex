@@ -64,13 +64,27 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
 
+class Category(Base):
+    """V3-8: formal registry shared by content.qa_entries.category (administrative
+    topics) and content.documents.cancer_type (clinical site), replacing both
+    columns' previously ungoverned free text. See plan.md §3.1 (resolved
+    2026-08-18)."""
+
+    __tablename__ = "categories"
+    __table_args__ = {"schema": "content"}
+    slug: Mapped[str] = mapped_column(Text, primary_key=True)
+    label: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
 class KnowledgeDocument(Base):
     __tablename__ = "documents"
     __table_args__ = {"schema": "content"}
     document_id: Mapped[str] = mapped_column(Text, primary_key=True)
     title: Mapped[str] = mapped_column(Text)
     document_type: Mapped[str] = mapped_column(Text)
-    cancer_type: Mapped[str | None] = mapped_column(Text)
+    cancer_type: Mapped[str | None] = mapped_column(ForeignKey("content.categories.slug"))
     care_phase: Mapped[str | None] = mapped_column(Text)
     procedure_slug: Mapped[str | None] = mapped_column(Text)
     audience: Mapped[list[str]] = mapped_column(ARRAY(Text))
@@ -119,7 +133,7 @@ class QAEntry(Base):
     __tablename__ = "qa_entries"
     __table_args__ = {"schema": "content"}
     qa_id: Mapped[str] = mapped_column(Text, primary_key=True)
-    category: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(ForeignKey("content.categories.slug"))
     question: Mapped[str] = mapped_column(Text)
     answer_markdown: Mapped[str] = mapped_column(Text)
     retrieval_intents: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
@@ -192,6 +206,12 @@ class AIGeneration(Base):
     trigger: Mapped[str] = mapped_column(String)
     manual_search_text: Mapped[str | None] = mapped_column(Text)
     dynamic_pattern_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    instruction_text: Mapped[str | None] = mapped_column(Text)
+    category_slug: Mapped[str | None] = mapped_column(ForeignKey("content.categories.slug"))
+    marked_incorrect_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    marked_incorrect_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    escalated_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
 
 
 class MessageSelection(Base):
@@ -251,6 +271,43 @@ class MessageCitation(Base):
     display_section: Mapped[str | None] = mapped_column(Text)
     display_url: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class EvaluationCase(Base):
+    """V3-5: durable, category-tagged evaluation case. Storage only — no
+    automated re-run mechanism in V3 (spec.md §7); actual_status/actual_notes
+    are set only by a reviewer's manual re-check. No FK path into
+    conversations/ai_generations by design — isolation from production
+    metrics is structural (plan.md §3.3)."""
+
+    __tablename__ = "evaluation_cases"
+    __table_args__ = {"schema": "content"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    category_slug: Mapped[str | None] = mapped_column(ForeignKey("content.categories.slug"))
+    question: Mapped[str] = mapped_column(Text)
+    expected_status: Mapped[str] = mapped_column(Text)
+    expected_evidence_ids: Mapped[list | None] = mapped_column(JSONB)
+    actual_status: Mapped[str | None] = mapped_column(Text)
+    actual_notes: Mapped[str | None] = mapped_column(Text)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class ConversationSatisfactionResponse(Base):
+    """V3-12: optional, customer-only, post-close satisfaction survey
+    response. One row per conversation; a missing row means "skipped," never
+    backfilled (plan.md §3.4)."""
+
+    __tablename__ = "conversation_satisfaction_responses"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"), unique=True)
+    score: Mapped[int] = mapped_column(Integer)
+    resolved: Mapped[bool] = mapped_column(Boolean)
+    category_slug: Mapped[str | None] = mapped_column(ForeignKey("content.categories.slug"))
+    submitted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
 
 class AuditEvent(Base):

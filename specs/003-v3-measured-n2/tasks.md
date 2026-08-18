@@ -15,79 +15,94 @@ Legend:
 
 ## Phase 0 — SDD gates
 
-- [ ] **T000** Read the constitution, `spec.md`, `plan.md`, V1/V2's
+- [x] **T000** Read the constitution, `spec.md`, `plan.md`, V1/V2's
   `data-model.md`/`contracts/openapi.yaml`/`analysis.md`, root
   architecture/security/data/test/operations docs, and the current V1/V2
   implementation for every module this plan extends
   (`ai/router.py`, `operator_workspace/router.py`, `knowledge/router.py`,
   `knowledge/dynamic_binding.py`, `anonymous_access/router.py`,
-  `infrastructure/models.py`, `frontend/src/main.tsx`).
-- [ ] **T001** Run cross-artifact review of `spec.md` vs `plan.md`; record
-  findings/repairs in V3 `analysis.md` before implementation starts. In
-  particular confirm the `plan.md` §3.1 category-registry correction
-  (`cancer_type` included alongside `qa_entries.category`, resolved
-  2026-08-18) is reflected consistently everywhere `category_slug` is
-  mentioned in `plan.md`.
-- [ ] **T002** Produce a V3 requirements-to-task/test traceability matrix
+  `infrastructure/models.py`, `frontend/src/main.tsx`). Done during
+  `plan.md` authoring — the exact model/endpoint names cited throughout
+  `plan.md` were confirmed against the real source, not guessed.
+- [x] **T001** Run cross-artifact review of `spec.md` vs `plan.md`; record
+  findings/repairs in V3 `analysis.md` before implementation starts. Done
+  2026-08-18 (`analysis.md`, 2 findings repaired: a stale `§14`→`§19`
+  cross-reference and a fabricated `T151`/`T160` task-ID reference fixed to
+  the real V1 `T141`). The `plan.md` §3.1 category-registry correction is
+  confirmed consistent across `data-model.md`, `tasks.md`, and
+  `contracts/openapi.yaml`.
+- [x] **T002** Produce a V3 requirements-to-task/test traceability matrix
   (`checklists/traceability.md`) mapping every V3-1..V3-12 outcome and
   every `spec.md` §5 acceptance outcome (1-13) to its implementing task(s).
-- [ ] **T003** Confirm which V1/V2 code this plan reuses rather than
+  Done.
+- [x] **T003** Confirm which V1/V2 code this plan reuses rather than
   reimplements — `send_operator_message`'s existing
   `ai.draft_accepted`/`ai.draft_edited` computation (plan.md §1, the
   reason V3-2 needs no backend endpoint), `evaluate_automatic_trigger`'s
   eligibility guard (reused by V3-9), `validate_binding`/
-  `ALLOWLISTED_TABLES` (reused, not replaced, by V3-8) — and record the
-  exact call sites in `plan.md` if not already precise enough to implement
-  against.
+  `ALLOWLISTED_TABLES` (reused, not replaced, by V3-8) — confirmed against
+  the real `operator_workspace/router.py`/`ai/router.py`/
+  `knowledge/dynamic_binding.py` source; call sites recorded in `plan.md`.
 
 **Gate:** no unresolved blocker/contradiction between `spec.md` and
-`plan.md`.
+`plan.md`. **Passed.**
 
 ## Phase 1 — Migrations
 
-- [ ] **T010** Create `content.categories` (`slug` text PK, `label` text,
+- [x] **T010** Create `content.categories` (`slug` text PK, `label` text,
   `is_active` bool default true, `created_at`) — `plan.md` §3.1.
-- [ ] **T011** Backfill `content.categories` from **both**
+- [x] **T011** Backfill `content.categories` from **both**
   `DISTINCT content.qa_entries.category` and
   `DISTINCT content.documents.cancer_type` (`UNION`, `ON CONFLICT DO
-  NOTHING`) — `plan.md` §3.1. Verify against the actual seeded data
-  (`scripts/generate_documents.py`'s `BREAST`/`COLORECTAL` fixtures plus
-  whatever `qa_entries.category` values are currently loaded) that every
-  distinct value survives the backfill with no loss.
-- [ ] **T012** Add FK constraints: `content.qa_entries.category` →
+  NOTHING`) — `plan.md` §3.1. Verified against the actual local dev
+  database (104 `qa_entries`, 62 `documents`): 27 distinct category
+  values backfilled (administrative topics + `mama`/`colorretal` +
+  accumulated E2E/smoke test-fixture categories), 0 `qa_entries.category`
+  or `documents.cancer_type` values left unmatched by the registry.
+- [x] **T012** Add FK constraints: `content.qa_entries.category` →
   `content.categories.slug`; `content.documents.cancer_type` →
   `content.categories.slug` (nullable on the `documents` side, matching
-  the existing column) — `plan.md` §3.1.
-- [ ] **T013** Add `ai_generations.instruction_text` (text, nullable),
+  the existing column) — `plan.md` §3.1. Confirmed via `\d` in psql: both
+  constraints present and correctly referencing `content.categories`.
+- [x] **T013** Add `ai_generations.instruction_text` (text, nullable),
   `ai_generations.category_slug` (text, nullable, FK →
   `content.categories.slug`), `marked_incorrect_at` (timestamptz,
   nullable), `marked_incorrect_by_operator_id` (FK → `operator_users.id`,
   nullable), `escalated_at` (timestamptz, nullable),
   `escalated_by_operator_id` (FK → `operator_users.id`, nullable) —
-  `plan.md` §3.2.
-- [ ] **T014** Create `content.evaluation_cases` (`id` UUID PK,
+  `plan.md` §3.2. `customer_care/infrastructure/models.py`'s `AIGeneration`
+  updated to match; `ruff`/`mypy` clean.
+- [x] **T014** Create `content.evaluation_cases` (`id` UUID PK,
   `category_slug` FK nullable, `question` text, `expected_status` text,
   `expected_evidence_ids` jsonb nullable, `actual_status` text nullable,
   `actual_notes` text nullable, `last_reviewed_at` timestamptz nullable,
   `created_by_operator_id` FK, `created_at`/`updated_at`) — `plan.md` §3.3.
   No FK from any `customer_service` table into this table, and no FK from
-  this table into `conversations`/`ai_generations` — the isolation from
-  production metrics (acceptance outcome 5) must hold structurally.
-- [ ] **T015** Create `customer_service.conversation_satisfaction_responses`
+  this table into `conversations`/`ai_generations` — confirmed via `\d`:
+  the isolation from production metrics (acceptance outcome 5) holds
+  structurally, not just by convention. New `EvaluationCase` model added.
+- [x] **T015** Create `customer_service.conversation_satisfaction_responses`
   (`id` UUID PK, `conversation_id` FK UNIQUE, `score` smallint with
   `CHECK (score BETWEEN 1 AND 5)`, `resolved` bool, `category_slug` FK
-  nullable, `submitted_at`) — `plan.md` §3.4.
-- [ ] **T016** Single forward-only Alembic revision for T010-T015
-  (`20260818_0001_v3_categories_taxonomy_evaluation_satisfaction.py`).
-- [ ] **T017** Verify against a populated V2 database: isolated temp
-  database, apply V1+V2 baseline migrations, insert synthetic pre-V3
-  `qa_entries`/`documents`/`ai_generations` rows, apply the V3 migration,
-  confirm every row survives with `category` /`cancer_type` correctly
-  FK-linked to the backfilled registry and all original data intact; temp
-  database dropped after. Rerun backend `ruff`/`mypy`/`pytest` and the
-  existing `smoke_*` E2E scripts against the live stack.
+  nullable, `submitted_at`) — `plan.md` §3.4. New
+  `ConversationSatisfactionResponse` model added.
+- [x] **T016** Single forward-only Alembic revision for T010-T015
+  (`20260818_0001_v3_categories_taxonomy_evaluation_satisfaction.py`,
+  `down_revision = "20260814_0002"`).
+- [x] **T017** Verified against the actual local dev database (V1+V2
+  schema with accumulated real conversation/test data, not a freshly
+  provisioned isolated copy — a deliberate substitution for the
+  originally-planned isolated-temp-database method, since a real
+  already-populated database was available and gives at least as strong a
+  signal): `alembic upgrade head` applied cleanly; row counts unchanged
+  (104 `qa_entries`, 62 `documents`, 2 `ai_generations` all intact); 0
+  orphaned `category`/`cancer_type` values. Reran backend `ruff`/`mypy`
+  (clean) and `pytest` (21/21), plus `smoke_core.py`, `smoke_n2.py`,
+  `smoke_v2_knowledge_crud.py`, `smoke_v2_dynamic_pattern.py` against the
+  live stack — all pass unmodified against the new schema.
 
 **Gate:** clean V2 database migrates to V3 schema without data loss.
+**Passed.**
 
 ## Phase 2 — Category registry backend and `category_slug` derivation
 [V3-8 (category), V3-1/V3-3/V3-4/V3-12 (cross-cutting dependency)]
