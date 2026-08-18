@@ -1,0 +1,462 @@
+openapi: 3.1.0
+info:
+  title: Customer Care AI V3 API (delta)
+  version: 3.0.0-delta
+  description: >-
+    This is a DELTA over specs/002-v2-commercial-product-experience's
+    contracts/openapi.yaml (2.0.0), which remains canonical for every path
+    and schema not listed or overridden here — see spec.md §8/plan.md §22,
+    matching how V3's data-model.md is also a delta (unlike V2's own
+    contracts/openapi.yaml, which chose to fully supersede V1's; V3 follows
+    the lighter delta form spec.md §8 explicitly authorized). AI generation
+    remains internal; no V3 endpoint publishes a generation directly to a
+    customer. Every V1/V2 safety invariant (explicit operator send,
+    server-side citation/authorization enforcement, append-only audit, no
+    chain-of-thought persistence) is unchanged; see plan.md §18 for the
+    summary of what changed and why.
+
+    Sections below marked "(new)" add a path/schema. Sections marked
+    "(override)" replace only the named fields/responses of the matching
+    V2 entry — everything else about that path/schema (security, other
+    fields, other responses) is unchanged from V2's file.
+servers:
+  - url: http://localhost:8000/api/v1
+
+paths:
+  # ---------------------------------------------------------------------
+  # New paths
+  # ---------------------------------------------------------------------
+  /operator/conversations/{conversation_id}/generations/{generation_id}/mark-incorrect:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/GenerationId'
+    post:
+      tags: [Operator]
+      summary: Mark a generation as incorrect (V3-1) — new
+      description: >-
+        Reachable from any generation in the conversation's rendered
+        history, not only the latest (plan.md §4). Idempotent — re-marking
+        updates the timestamp. Does not send anything to the customer and
+        does not affect the underlying generation's status/draft_text.
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Generation flagged; returns the updated generation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGeneration'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: generation_id does not belong to conversation_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /operator/conversations/{conversation_id}/generations/{generation_id}/escalate:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+      - $ref: '#/components/parameters/GenerationId'
+    post:
+      tags: [Operator]
+      summary: Escalate a generation as a content-gap signal (V3-1) — new
+      description: >-
+        Redefined from ROADMAP.md's original framing (spec.md V3-1): this
+        is NOT a routing/handoff request to a human specialist (that
+        remains V5's separate, unbuilt workflow). It marks that the
+        operator could not answer using what is already standardized in
+        the knowledge base — tag only, no queue, no routing side effect.
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Generation flagged; returns the updated generation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIGeneration'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: generation_id does not belong to conversation_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /operator/knowledge/categories:
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: List active categories (V3-8) — new
+      description: >-
+        Backs V3-8's guided category selector. Returns both administrative
+        (formerly content.qa_entries.category free text) and clinical
+        (content.documents.cancer_type) categories from the same shared
+        registry (plan.md §3.1, resolved 2026-08-18).
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Active categories
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Category' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Operator Knowledge CRUD]
+      summary: Create a new category (V3-8) — new
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCategoryRequest' }
+      responses:
+        '201':
+          description: Category created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Category' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: slug already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/knowledge/dynamic-tables:
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: List allowlisted dynamic-binding tables (V3-8) — new
+      description: >-
+        Returns exactly ALLOWLISTED_TABLES.keys() (knowledge/dynamic_binding.py)
+        — the dropdown can never diverge from the actual allowlist because
+        it reads it directly (plan.md §11).
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Allowlisted table names
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { type: string }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /operator/knowledge/dynamic-tables/{table}/columns:
+    parameters:
+      - $ref: '#/components/parameters/Table'
+    get:
+      tags: [Operator Knowledge CRUD]
+      summary: Introspect an allowlisted table's columns (V3-8) — new
+      description: >-
+        Resolved 2026-08-18 to live introspection via
+        sqlalchemy.inspect(ALLOWLISTED_TABLES[table][0]).columns — never a
+        raw information_schema query against an arbitrary table name
+        (plan.md §11/§18). 404 if table is not in ALLOWLISTED_TABLES.
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: Column names/types for the allowlisted table
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DynamicTableColumn' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /operator/evaluation/cases:
+    get:
+      tags: [Operator Evaluation]
+      summary: List evaluation cases (V3-5) — new
+      security:
+        - operatorBearer: []
+      parameters:
+        - name: category_slug
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: Evaluation cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/EvaluationCase' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Operator Evaluation]
+      summary: Create evaluation case (V3-5) — new
+      description: >-
+        Storage only — no automated re-run mechanism exists in V3
+        (spec.md §7). Never spawns a Conversation and is never counted in
+        V3-3/V3-4's production metrics (plan.md §3.3, structural isolation).
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateEvaluationCaseRequest' }
+      responses:
+        '201':
+          description: Case created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationCase' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /operator/evaluation/cases/{case_id}:
+    parameters:
+      - $ref: '#/components/parameters/CaseId'
+    patch:
+      tags: [Operator Evaluation]
+      summary: Record a reviewer's manual re-check (V3-5) — new
+      description: >-
+        Sets actual_status/actual_notes/last_reviewed_at after a reviewer
+        manually re-checks the case against the live system. No automated
+        execution engine calls this.
+      security:
+        - operatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateEvaluationCaseRequest' }
+      responses:
+        '200':
+          description: Case updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EvaluationCase' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /public/conversations/{conversation_id}/satisfaction:
+    parameters:
+      - $ref: '#/components/parameters/ConversationId'
+    post:
+      tags: [Public Customer]
+      summary: Submit post-conversation satisfaction survey (V3-12) — new
+      description: >-
+        Optional, non-blocking — the conversation already closed via the
+        existing close endpoint before this is ever called (spec.md V3-12).
+        Customer-only; token-bound like every other /public/* route.
+      security:
+        - customerConversationToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubmitSatisfactionRequest' }
+      responses:
+        '201':
+          description: Response recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SatisfactionResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: NOT_CLOSED or ALREADY_SUBMITTED
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  # ---------------------------------------------------------------------
+  # Changed paths (override — only the named fields/responses change)
+  # ---------------------------------------------------------------------
+  /operator/conversations/{conversation_id}/drafts:
+    post:
+      description: >-
+        (override, V3-6) requestBody schema GenerateDraftRequest gains
+        instruction_text (see components.schemas.GenerateDraftRequest
+        below). Everything else about this operation — the 201/409/422/503
+        responses, security, the "no separate regenerate endpoint" note —
+        is unchanged from V2's file. A second call against the same
+        conversation with prior_generation_id set remains how "regenerate"
+        happens; supplying instruction_text on that same call is how
+        "regenerate-with-instruction" (V3-1's new tag) happens — no new
+        endpoint, no new trigger enum value (plan.md §9).
+  /operator/conversations/{conversation_id}/messages:
+    post:
+      description: >-
+        (override, V3-2) gains a 409 STALE_GENERATION response: if
+        source_generation_id is set and does not equal the conversation's
+        current latest_generation.id, the request is rejected. Protects
+        every send-from-a-generation path — an edited reply-box send and a
+        quick-approve send alike (plan.md §5) — quick-approve itself adds
+        no new endpoint; it is a frontend call to this same operation with
+        body set to the current draft's draft_text, unmodified.
+      responses:
+        '409':
+          description: Forbidden (conversation state) OR STALE_GENERATION (superseded draft)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /operator/conversations/{conversation_id}:
+    get:
+      description: >-
+        (override, V3-9) OperatorConversationDetail gains
+        automatic_draft_eligible and automatic_draft_seconds_remaining (see
+        components.schemas.OperatorConversationDetail below). Everything
+        else is unchanged from V2's file, including the "polling this
+        endpoint is the automatic-trigger tick" note.
+  /operator/conversations/{conversation_id}/claim:
+    post:
+      description: >-
+        (override, V3-9) Same OperatorConversationDetail addition as the GET
+        above; response schema/status codes otherwise unchanged.
+  /operator/conversations/{conversation_id}/take-over:
+    post:
+      description: >-
+        (override, V3-9) Same OperatorConversationDetail addition as the GET
+        above; response schema/status codes otherwise unchanged.
+
+components:
+  parameters:
+    GenerationId:
+      name: generation_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Table:
+      name: table
+      in: path
+      required: true
+      schema: { type: string }
+      description: Must be a key of ALLOWLISTED_TABLES; unresolved names 404.
+    CaseId:
+      name: case_id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  schemas:
+    # -- New schemas --------------------------------------------------
+    Category:
+      type: object
+      required: [slug, label, is_active]
+      properties:
+        slug: { type: string }
+        label: { type: string }
+        is_active: { type: boolean }
+    CreateCategoryRequest:
+      type: object
+      required: [slug, label]
+      properties:
+        slug: { type: string, minLength: 1, maxLength: 64 }
+        label: { type: string, minLength: 1, maxLength: 200 }
+    DynamicTableColumn:
+      type: object
+      required: [column, type]
+      properties:
+        column: { type: string }
+        type: { type: string, description: SQLAlchemy column type name. }
+    EvaluationCase:
+      type: object
+      required: [id, question, expected_status, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        category_slug: { type: [string, 'null'] }
+        question: { type: string }
+        expected_status: { type: string, enum: [ANSWER, ABSTAIN] }
+        expected_evidence_ids:
+          type: [array, 'null']
+          items: { type: string }
+        actual_status: { type: [string, 'null'], enum: [ANSWER, ABSTAIN, null] }
+        actual_notes: { type: [string, 'null'] }
+        last_reviewed_at: { type: [string, 'null'], format: date-time }
+        created_by_operator_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateEvaluationCaseRequest:
+      type: object
+      required: [question, expected_status]
+      properties:
+        category_slug: { type: [string, 'null'] }
+        question: { type: string, minLength: 1 }
+        expected_status: { type: string, enum: [ANSWER, ABSTAIN] }
+        expected_evidence_ids:
+          type: [array, 'null']
+          items: { type: string }
+    UpdateEvaluationCaseRequest:
+      type: object
+      properties:
+        actual_status: { type: string, enum: [ANSWER, ABSTAIN] }
+        actual_notes: { type: [string, 'null'] }
+    SubmitSatisfactionRequest:
+      type: object
+      required: [score, resolved]
+      properties:
+        score: { type: integer, minimum: 1, maximum: 5 }
+        resolved: { type: boolean }
+    SatisfactionResponse:
+      type: object
+      required: [id, conversation_id, score, resolved, submitted_at]
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        score: { type: integer }
+        resolved: { type: boolean }
+        category_slug: { type: [string, 'null'] }
+        submitted_at: { type: string, format: date-time }
+
+    # -- Overrides of V2 schemas (field additions only) ----------------
+    GenerateDraftRequest:
+      description: >-
+        (override, V3-6) adds instruction_text to V2's schema. All other
+        fields (selected_message_ids, manual_search_text) and the "at
+        least one non-empty" validation rule are unchanged.
+      allOf:
+        - $ref: '../../002-v2-commercial-product-experience/contracts/openapi.yaml#/components/schemas/GenerateDraftRequest'
+        - type: object
+          properties:
+            instruction_text:
+              type: string
+              maxLength: 2000
+              default: ''
+              description: >-
+                V3-6 free-text steering instruction. Combined with (not
+                replacing) selected_message_ids/manual_search_text for the
+                same call. Never customer-facing.
+    AIGeneration:
+      description: >-
+        (override, V3-1/V3-6) adds instruction_text, category_slug,
+        marked_incorrect_at, marked_incorrect_by_operator_id, escalated_at,
+        escalated_by_operator_id to V2's schema. All other fields are
+        unchanged.
+      allOf:
+        - $ref: '../../002-v2-commercial-product-experience/contracts/openapi.yaml#/components/schemas/AIGeneration'
+        - type: object
+          properties:
+            instruction_text: { type: [string, 'null'] }
+            category_slug: { type: [string, 'null'] }
+            marked_incorrect_at: { type: [string, 'null'], format: date-time }
+            marked_incorrect_by_operator_id: { type: [string, 'null'], format: uuid }
+            escalated_at: { type: [string, 'null'], format: date-time }
+            escalated_by_operator_id: { type: [string, 'null'], format: uuid }
+    OperatorConversationDetail:
+      description: >-
+        (override, V3-9) adds automatic_draft_eligible and
+        automatic_draft_seconds_remaining to V2's schema. All other fields
+        are unchanged.
+      allOf:
+        - $ref: '../../002-v2-commercial-product-experience/contracts/openapi.yaml#/components/schemas/OperatorConversationDetail'
+        - type: object
+          properties:
+            automatic_draft_eligible:
+              type: boolean
+              description: >-
+                True iff there is customer activity not yet covered by a
+                generation — mirrors evaluate_automatic_trigger's own guard
+                exactly (plan.md §12).
+            automatic_draft_seconds_remaining:
+              type: [integer, 'null']
+              description: >-
+                Present only when automatic_draft_eligible is true.
+                max(0, AUTOMATIC_TRIGGER_IDLE_SECONDS - elapsed_seconds).
