@@ -26,15 +26,25 @@ def run() -> None:
     draft = generated.json()
     assert draft["status"] in {"ANSWER", "ABSTAIN"} and draft["evidence"]
     assert all("retrieval_hit_id" in item for item in draft["evidence"])
-    clinical = next((item for item in draft["evidence"] if item["knowledge_type"] == "CLINICAL" and item["customer_citation_allowed"]), None)
-    citations = [clinical["retrieval_hit_id"]] if clinical else []
     before_send = client.get(f"/api/v1/operator/conversations/{conversation_id}", headers=headers).json()
     assert all(message["body"] != draft["draft_text"] or message["author_type"] != "OPERATOR" for message in before_send["messages"])
-    admin = next((item for item in draft["evidence"] if item["knowledge_type"] == "ADMIN_QA"), None)
+    # V3-2's STALE_GENERATION guard (plan.md §5) means the generation sent
+    # must be whatever is truly latest at send-time, not necessarily the one
+    # captured right after generating it — a real operator's frontend
+    # already resyncs `draft` state via polling before every send for
+    # exactly this reason (a V2-7 automatic-trigger draft can legitimately
+    # supersede a manual one between generation and send, especially with
+    # the real OpenAI provider's latency). `before_send`'s own poll-
+    # equivalent GET already re-evaluated the automatic trigger; use
+    # whatever it reports as latest.
+    latest = before_send["latest_generation"] or draft
+    clinical = next((item for item in latest["evidence"] if item["knowledge_type"] == "CLINICAL" and item["customer_citation_allowed"]), None)
+    citations = [clinical["retrieval_hit_id"]] if clinical else []
+    admin = next((item for item in latest["evidence"] if item["knowledge_type"] == "ADMIN_QA"), None)
     if admin:
         rejected = client.post(f"/api/v1/operator/conversations/{conversation_id}/messages", headers=headers, json={"body": "Não deve publicar fonte administrativa.", "citation_retrieval_hit_ids": [admin["retrieval_hit_id"]]})
         assert rejected.status_code == 422 and rejected.json()["code"] == "CITATION_NOT_EXPOSABLE"
-    sent = client.post(f"/api/v1/operator/conversations/{conversation_id}/messages", headers=headers, json={"body": draft["draft_text"] or "Resposta manual.", "source_generation_id": draft["id"], "citation_retrieval_hit_ids": citations})
+    sent = client.post(f"/api/v1/operator/conversations/{conversation_id}/messages", headers=headers, json={"body": latest["draft_text"] or "Resposta manual.", "source_generation_id": latest["id"], "citation_retrieval_hit_ids": citations})
     assert sent.status_code == 201, sent.text
     if citations:
         assert len(sent.json()["citations"]) == 1
@@ -145,7 +155,7 @@ def run() -> None:
             db.commit()
 
     with get_session_factory()() as db:
-        generation = db.get(AIGeneration, draft["id"])
+        generation = db.get(AIGeneration, latest["id"])
         assert generation is not None
         published = db.scalars(select(Message).where(Message.source_generation_id == generation.id)).all()
         assert len(published) == 1 and published[0].author_type == "OPERATOR"
