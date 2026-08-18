@@ -48,7 +48,13 @@ def latest_generation_dict(session: DbSession, conversation: Conversation) -> di
     return generation_dict(session, latest, evidence_for_generation(session, latest))
 
 
-def generation_dict(session: DbSession, generation: AIGeneration, evidence: list[dict]) -> dict:
+def generation_dict(session: DbSession, generation: AIGeneration, evidence: list[dict], request_messages: list[dict[str, str]] | None = None) -> dict:
+    """`request_messages` is only ever populated at generation-creation time
+    (draft()/select_evidence(), operator-only response) — it is never
+    persisted, so a later poll reloading this same generation via
+    latest_generation_dict omits it. This is intentional: the operator
+    debug pop-up (§ ad hoc request, 2026-08-18) reads it from the frontend's
+    already-held response to the generating call, not from a later reload."""
     selected_message_ids = session.scalars(select(MessageSelection.message_id).where(MessageSelection.ai_generation_id == generation.id)).all()
     return {
         "id": generation.id,
@@ -66,6 +72,7 @@ def generation_dict(session: DbSession, generation: AIGeneration, evidence: list
         "prompt_version": generation.prompt_version,
         "duration_ms": generation.duration_ms,
         "created_at": generation.created_at,
+        "request_messages": request_messages,
     }
 
 
@@ -107,7 +114,7 @@ def generate_draft(
     manual_search_text: str,
     trigger: str = "MANUAL_DRAFT",
     prior_generation_id: UUID | None = None,
-) -> tuple[AIGeneration, list[dict]]:
+) -> tuple[AIGeneration, list[dict], list[dict[str, str]] | None]:
     if conversation.status != "ACTIVE" or conversation.effective_mode != "N2":
         raise api_error(409, "MODE_NOT_ALLOWED", "Draft generation requires an active effective-N2 conversation")
     history = [{"role": row.author_type.lower(), "content": row.body} for row in selected_messages]
@@ -152,7 +159,7 @@ def generate_draft(
         elif dynamic_used:
             record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id)})
         session.commit()
-        return generation, [evidence_dict(item) for item in evidence]
+        return generation, [evidence_dict(item) for item in evidence], result.request_messages
     except Exception as exc:
         generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=triggering_message_id, retrieval_run_id=run.id, prior_generation_id=prior_generation_id, operator_id=operator_id, status="FAILED", draft_text="", abstention_reason="PROVIDER_FAILURE", provider="unavailable", model="unavailable", prompt_version=prompt_version, duration_ms=round((perf_counter() - started) * 1000), trigger=trigger)
         session.add(generation)
@@ -176,8 +183,8 @@ def draft(conversation_id: UUID, payload: DraftIn, operator: CurrentOperator, se
         if missing:
             raise api_error(422, "MESSAGE_NOT_IN_CONVERSATION", "One or more selected messages do not belong to this conversation")
         selected_messages = sorted(rows, key=lambda row: row.created_at)
-    generation, evidence = generate_draft(session, operator.id, conversation, selected_messages, manual_search_text)
-    return generation_dict(session, generation, evidence)
+    generation, evidence, request_messages = generate_draft(session, operator.id, conversation, selected_messages, manual_search_text)
+    return generation_dict(session, generation, evidence, request_messages)
 
 
 @router.post("/operator/knowledge/evidence/{retrieval_hit_id}/select", status_code=201)
@@ -235,7 +242,7 @@ def select_evidence(retrieval_hit_id: UUID, payload: SelectEvidenceIn, operator:
         elif dynamic_used:
             record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id)})
         session.commit()
-        return generation_dict(session, generation, [evidence_dict(evidence)])
+        return generation_dict(session, generation, [evidence_dict(evidence)], result.request_messages)
     except Exception as exc:
         generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=None, retrieval_run_id=hit.retrieval_run_id, operator_id=operator.id, status="FAILED", draft_text="", abstention_reason="PROVIDER_FAILURE", provider="unavailable", model="unavailable", prompt_version=prompt_version, duration_ms=round((perf_counter() - started) * 1000), trigger="MANUAL_EVIDENCE")
         session.add(generation)

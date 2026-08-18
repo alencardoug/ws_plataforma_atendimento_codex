@@ -49,12 +49,18 @@ export interface Evidence {
   matched_child_excerpt?: string | null;
 }
 
+interface RequestMessage {
+  role: string;
+  content: string;
+}
+
 interface Draft {
   id: string;
   status: "ANSWER" | "ABSTAIN";
   draft_text: string;
   evidence: Evidence[];
   trigger?: "AUTOMATIC" | "MANUAL_DRAFT" | "MANUAL_EVIDENCE";
+  request_messages?: RequestMessage[] | null;
 }
 
 function defaultMessageSelection(messages: Message[]): Set<string> {
@@ -105,6 +111,27 @@ function StatusBadge({ status }: { status: ConversationStatus }) {
 
 export function ManualEvidence({ evidence, onSelect }: { evidence: Evidence; onSelect?: () => void }) {
   return <article className="evidence-item"><strong>{evidence.title}</strong>{evidence.section && <small>Seção: {evidence.section}</small>}<MessageBody body={evidence.content} />{evidence.matched_child_excerpt && <><small>Trecho encontrado</small><MessageBody body={evidence.matched_child_excerpt} /></>}{onSelect && <button type="button" onClick={onSelect}>Selecionar</button>}</article>;
+}
+
+// Operator-only transparency pop-up: shows the exact `messages` array sent
+// to the generation model for the currently displayed draft. Never shown on
+// CustomerPage. Sourced from the draft response already held in local
+// state — not persisted server-side, so it reflects only the draft that is
+// currently on screen (plan note in ai/router.py's generation_dict).
+export function RequestDebugDialog({ messages, onClose }: { messages: RequestMessage[]; onClose: () => void }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    ref.current?.showModal();
+  }, []);
+  return <dialog ref={ref} className="debug-dialog" onClose={onClose} aria-label="Requisição enviada ao modelo">
+    <h2>Requisição enviada ao modelo</h2>
+    <p className="is-loading">Conteúdo exato transmitido à API do provedor de IA para gerar este rascunho — visível somente ao operador.</p>
+    {messages.map((message, index) => <section key={index} className="debug-message">
+      <strong>{message.role}</strong>
+      <pre>{message.content}</pre>
+    </section>)}
+    <button type="button" className="btn-secondary" onClick={() => ref.current?.close()}>Fechar</button>
+  </dialog>;
 }
 
 export function CustomerPage() {
@@ -230,6 +257,7 @@ export function OperatorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchEvidence, setSearchEvidence] = useState<Evidence[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
+  const [showRequestDebug, setShowRequestDebug] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
@@ -296,6 +324,7 @@ export function OperatorPage() {
     setSelectedMessageIds(defaultMessageSelection(data.messages));
     lastGenerationIdRef.current = data.latest_generation?.id ?? null;
     setDraft(data.latest_generation ?? null);
+    setShowRequestDebug(false);
   };
   const claim = async (conversationId: string) => {
     await api<OperatorConversation>(`/operator/conversations/${conversationId}/claim`, { method: "POST" }, token);
@@ -420,8 +449,10 @@ export function OperatorPage() {
         <span className={`badge badge-${draft.status === "ANSWER" ? "active" : "closed"}`}>{draft.status}</span>
         <MessageBody body={draft.draft_text} />
         <button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button>
+        {draft.request_messages && draft.request_messages.length > 0 && <button type="button" className="btn-ghost" onClick={() => setShowRequestDebug(true)}>Ver requisição enviada</button>}
         {draft.evidence.map((item) => <small key={item.retrieval_hit_id} className="message-citation">{item.title}</small>)}
       </div>}
+      {showRequestDebug && draft?.request_messages && <RequestDebugDialog messages={draft.request_messages} onClose={() => setShowRequestDebug(false)} />}
       {searchEvidence.map((item) => <ManualEvidence key={item.retrieval_hit_id} evidence={item} onSelect={aiEligible ? () => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught))) : undefined} />)}
       {error && <p role="alert">{error}</p>}
     </aside>
