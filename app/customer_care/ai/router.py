@@ -25,6 +25,7 @@ AUTOMATIC_TRIGGER_IDLE_SECONDS = 8
 class DraftIn(BaseModel):
     selected_message_ids: list[UUID] = []
     manual_search_text: str = ""
+    instruction_text: str = ""
 
 
 class SelectEvidenceIn(BaseModel):
@@ -76,6 +77,7 @@ def generation_dict(session: DbSession, generation: AIGeneration, evidence: list
         "category_slug": generation.category_slug,
         "marked_incorrect_at": generation.marked_incorrect_at,
         "escalated_at": generation.escalated_at,
+        "instruction_text": generation.instruction_text,
     }
 
 
@@ -130,6 +132,18 @@ def classify_generation(session: DbSession, generation: AIGeneration) -> set[str
     return tags
 
 
+def build_llm_history(history: list[dict[str, str]], instruction_text: str) -> list[dict[str, str]]:
+    """V3-6: appends the operator's regenerate-with-instruction steering
+    text as a distinct `operator_instruction`-role entry, immediately
+    before the LLM call — never when empty (no behavior change for plain
+    regenerate/manual-draft calls). `prompts/rag_answer.md`'s "Operator
+    steering instruction" section tells the model this role is never
+    customer speech and must never be echoed into draft_text."""
+    if not instruction_text:
+        return history
+    return [*history, {"role": "operator_instruction", "content": instruction_text}]
+
+
 def full_parent_draft(evidence: list[Evidence]) -> GenerationResult | None:
     if not evidence or evidence[0].knowledge_type != "CLINICAL":
         return None
@@ -168,6 +182,7 @@ def generate_draft(
     manual_search_text: str,
     trigger: str = "MANUAL_DRAFT",
     prior_generation_id: UUID | None = None,
+    instruction_text: str = "",
 ) -> tuple[AIGeneration, list[dict], list[dict[str, str]] | None]:
     if conversation.status != "ACTIVE" or conversation.effective_mode != "N2":
         raise api_error(409, "MODE_NOT_ALLOWED", "Draft generation requires an active effective-N2 conversation")
@@ -195,10 +210,10 @@ def generate_draft(
             else:
                 provider = configured_generation_provider()
                 qa_evidence = [item for item in evidence if item.knowledge_type == "ADMIN_QA"]
-                result = provider.generate(history, qa_evidence, prompt.content)
+                result = provider.generate(build_llm_history(history, instruction_text), qa_evidence, prompt.content)
                 provider_name = provider.name
                 model = provider.model
-        generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=triggering_message_id, retrieval_run_id=run.id, prior_generation_id=prior_generation_id, operator_id=operator_id, status=result.status, draft_text=result.draft_text, abstention_reason=result.reason_code, provider=provider_name, model=model, prompt_version=prompt_version, input_tokens=result.input_tokens, output_tokens=result.output_tokens, duration_ms=round((perf_counter() - started) * 1000), trigger=trigger, manual_search_text=manual_search_text or None, dynamic_pattern_used=dynamic_used)
+        generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=triggering_message_id, retrieval_run_id=run.id, prior_generation_id=prior_generation_id, operator_id=operator_id, status=result.status, draft_text=result.draft_text, abstention_reason=result.reason_code, provider=provider_name, model=model, prompt_version=prompt_version, input_tokens=result.input_tokens, output_tokens=result.output_tokens, duration_ms=round((perf_counter() - started) * 1000), trigger=trigger, manual_search_text=manual_search_text or None, dynamic_pattern_used=dynamic_used, instruction_text=instruction_text or None)
         session.add(generation)
         session.flush()
         for message in selected_messages:
@@ -209,7 +224,7 @@ def generate_draft(
         session.flush()
         generation.category_slug = derive_category_slug(session, generation)
         event_type = "ai.draft_abstained" if result.status == "ABSTAIN" else "ai.draft_generated"
-        record_event(session, event_type, "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "retrieval_run_id": str(run.id), "model": model, "duration_ms": generation.duration_ms, "prior_generation_id": str(prior_generation_id) if prior_generation_id else None, "reason_code": result.reason_code, "trigger": trigger})
+        record_event(session, event_type, "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "retrieval_run_id": str(run.id), "model": model, "duration_ms": generation.duration_ms, "prior_generation_id": str(prior_generation_id) if prior_generation_id else None, "reason_code": result.reason_code, "trigger": trigger, "instruction_text": instruction_text or None})
         if dynamic_cause is not None:
             record_event(session, "ai.dynamic_pattern_fallback", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "cause": dynamic_cause})
         elif dynamic_used:
@@ -239,7 +254,16 @@ def draft(conversation_id: UUID, payload: DraftIn, operator: CurrentOperator, se
         if missing:
             raise api_error(422, "MESSAGE_NOT_IN_CONVERSATION", "One or more selected messages do not belong to this conversation")
         selected_messages = sorted(rows, key=lambda row: row.created_at)
-    generation, evidence, request_messages = generate_draft(session, operator.id, conversation, selected_messages, manual_search_text)
+    # V2-4/V3-1 "regenerate": a second manual "Gerar rascunho" call against
+    # this conversation links to whatever manual/automatic generation
+    # preceded it — this was specified (spec.md V3-1, V2's own acceptance.md
+    # §C.7) but never actually wired; fixed here since V3-6's
+    # regenerate-with-instruction tag depends on it. Scoped to this endpoint
+    # only — evaluate_automatic_trigger's AUTOMATIC generations and
+    # select_evidence's MANUAL_EVIDENCE ones are distinct trigger types, not
+    # "regenerate", and must not set this.
+    prior_generation_id = session.scalar(select(AIGeneration.id).where(AIGeneration.conversation_id == conversation.id, AIGeneration.status != "FAILED").order_by(AIGeneration.created_at.desc()))
+    generation, evidence, request_messages = generate_draft(session, operator.id, conversation, selected_messages, manual_search_text, prior_generation_id=prior_generation_id, instruction_text=payload.instruction_text.strip())
     return generation_dict(session, generation, evidence, request_messages)
 
 

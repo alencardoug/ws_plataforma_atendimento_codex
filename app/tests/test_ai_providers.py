@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 from uuid import uuid4
 
-from customer_care.ai.router import full_parent_draft
+from customer_care.ai.router import build_llm_history, full_parent_draft
 from customer_care.ai.providers import DeterministicTestGenerationProvider, OpenAIGenerationProvider
 from customer_care.rag.service import Evidence
 
@@ -45,6 +45,44 @@ def test_highest_ranked_clinical_evidence_makes_the_full_parent_sendable() -> No
 
 def test_administrative_evidence_does_not_bypass_llm_generation() -> None:
     assert full_parent_draft([evidence("Resposta administrativa", "ADMIN_QA")]) is None
+
+
+def test_build_llm_history_appends_nothing_when_instruction_text_is_empty() -> None:
+    history = [{"role": "customer", "content": "Oi"}]
+    assert build_llm_history(history, "") is history
+
+
+def test_build_llm_history_appends_operator_instruction_role_when_present() -> None:
+    history = [{"role": "customer", "content": "Oi"}]
+    result = build_llm_history(history, "seja mais formal")
+
+    assert result[:-1] == history
+    assert result[-1] == {"role": "operator_instruction", "content": "seja mais formal"}
+
+
+def test_openai_provider_passes_operator_instruction_through_and_never_leaks_it_into_draft_text() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"status":"ANSWER","draft_text":"Resposta formal.","used_hit_ids":[]}'))],
+                usage=None,
+            )
+
+    provider = object.__new__(OpenAIGenerationProvider)
+    provider.model = "test-model"
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    history_with_instruction = build_llm_history([{"role": "customer", "content": "Qual é o horário?"}], "seja mais formal")
+    result = provider.generate(history_with_instruction, [evidence()], "PROMPT VERSIONADO")
+
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    user_content = messages[1]["content"]
+    assert '"role": "operator_instruction"' in user_content
+    assert "seja mais formal" in user_content
+    assert "seja mais formal" not in result.draft_text
 
 
 def test_openai_provider_uses_the_versioned_prompt_without_an_artificial_output_limit() -> None:

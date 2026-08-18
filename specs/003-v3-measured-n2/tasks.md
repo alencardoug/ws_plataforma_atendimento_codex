@@ -222,36 +222,65 @@ in the existing send path); frontend `eslint`/`tsc --noEmit`/`vitest`
 
 ## Phase 5 — Regenerate-with-instruction [V3-6]
 
-- [ ] **T050 [V3-6]** `DraftIn` (`ai/router.py`) gains
+- [x] **T050 [V3-6]** `DraftIn` (`ai/router.py`) gains
   `instruction_text: str = ""`.
-- [ ] **T051 [V3-6]** `generate_draft(...)` gains `instruction_text: str =
+- [x] **T051 [V3-6]** `generate_draft(...)` gains `instruction_text: str =
   ""`, stores it on `AIGeneration.instruction_text` (T013), and — when
   non-empty — appends one `{"role": "operator_instruction", "content":
   instruction_text}` entry to `history` immediately before calling
   `provider.generate(...)` — `plan.md` §9. Never appended when empty (no
-  behavior change for existing regenerate/manual-draft calls).
-- [ ] **T052 [V3-6]** `draft()` endpoint threads `payload.instruction_text`
-  through to `generate_draft`.
-- [ ] **T053 [V3-6]** `record_event`'s existing `ai.draft_generated`/
+  behavior change for existing regenerate/manual-draft calls). Extracted
+  as a small pure `build_llm_history()` helper for testability.
+- [x] **T052 [V3-6]** `draft()` endpoint threads `payload.instruction_text`
+  through to `generate_draft`. **Also fixed a real, pre-existing V2 gap
+  discovered while doing this**: `draft()` never actually computed/passed
+  `prior_generation_id`, so the "second Gerar rascunho call = regenerate"
+  linkage V2's own `spec.md`/`acceptance.md` §C.7 claimed was already
+  working was silently never wired (confirmed empirically — two manual
+  drafts in a row both had `prior_generation_id: null`; V2's
+  `acceptance.md` Execution record's §C evidence list omits this specific
+  check, and `smoke_n2.py` never asserted it). Fixed by computing the
+  conversation's current latest non-`FAILED` generation id in `draft()`
+  and passing it through — scoped to this endpoint only (not
+  `evaluate_automatic_trigger`'s `AUTOMATIC` path or `select_evidence`'s
+  `MANUAL_EVIDENCE` path, which are distinct trigger types, not
+  "regenerate"). This was a blocking prerequisite for V3-1's `regenerate`/
+  `regenerate-with-instruction` tags to ever fire correctly.
+- [x] **T053 [V3-6]** `record_event`'s existing `ai.draft_generated`/
   `ai.draft_abstained` payload (inside `generate_draft`) gains
   `"instruction_text"` — no new event type, per `plan.md` §19.
-- [ ] **T054 [V3-6]** `prompts/rag_answer.md`: one short paragraph
-  documenting that an `operator_instruction`-role entry is operator
-  steering, not customer speech, must be followed, and must never be
-  echoed verbatim into `draft_text`.
-- [ ] **T055 [P] [V3-6]** `OperatorPage`: add a free-text "Instrução para
-  regenerar" box next to the existing manual-search box, sent as
+- [x] **T054 [V3-6]** `prompts/rag_answer.md`: new "Operator steering
+  instruction" section documenting that an `operator_instruction`-role
+  entry is operator steering, not customer speech, must be followed, and
+  must never be echoed verbatim into `draft_text`.
+- [x] **T055 [P] [V3-6]** `OperatorPage`: free-text "Instrução para
+  regenerar (opcional)" box next to "Gerar rascunho", sent as
   `instruction_text` combined with (not replacing) current
   message-selection/manual-search-text state.
-- [ ] **T056** `DeterministicTestGenerationProvider`/
-  `OpenAIGenerationProvider` test asserting the `operator_instruction`
-  history entry is passed through unmodified and never leaks into
-  `draft_text`. Test asserting `trigger`/`prior_generation_id` logic is
-  unaffected (regenerate-with-instruction is a `MANUAL_DRAFT` regenerate
-  call, not a new trigger enum value).
+- [x] **T056** `test_ai_providers.py`: `build_llm_history` unit tests
+  (empty instruction leaves history untouched by identity; non-empty
+  appends exactly one `operator_instruction`-role entry) plus a
+  fake-`OpenAI`-client test asserting the instruction reaches the request
+  payload and never appears in `result.draft_text`. `trigger`/
+  `prior_generation_id` unaffected — regenerate-with-instruction stays a
+  `MANUAL_DRAFT` call, no new trigger enum value (confirmed by T052's live
+  check below).
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`.
+**Live verification** (real HTTP + real OpenAI, real browser — same
+substitution rationale as prior phases): two consecutive manual drafts on
+the same selection — draft2 (instruction "Responda em francês") has
+`prior_generation_id === draft1.id` (T052's fix confirmed) and
+`instruction_text` round-trips correctly; the model's response actually
+switched to French, proving the instruction reaches and steers the LLM,
+not just that a field is stored. Frontend input box verified end-to-end
+via Playwright against the rebuilt containers (screenshot captured,
+French-language draft rendered in the UI).
+
+**Gate:** backend `ruff`/`mypy` (38 files clean; `mypy customer_care` is
+the project's actual gate per `Makefile`, not `tests/`, which has one
+unrelated pre-existing untyped-`SimpleNamespace`-assignment note)/`pytest`
+(37/37). frontend `eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`.
+**Passed.**
 
 ## Phase 6 — Guided knowledge-CRUD inputs (rest) and transformar em Q&A
 [V3-8, V3-1×V3-8]

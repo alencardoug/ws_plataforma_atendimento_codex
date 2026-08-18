@@ -258,6 +258,7 @@ export function OperatorPage() {
   const [draft, setDraft] = useState<Draft | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfig | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [instructionText, setInstructionText] = useState("");
   const [searchEvidence, setSearchEvidence] = useState<Evidence[]>([]);
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [showRequestDebug, setShowRequestDebug] = useState(false);
@@ -374,7 +375,7 @@ export function OperatorPage() {
     if (!selected || !canGenerate) return;
     setDraft(await api<Draft>(`/operator/conversations/${selected.id}/drafts`, {
       method: "POST",
-      body: JSON.stringify({ selected_message_ids: [...selectedMessageIds], manual_search_text: searchQuery }),
+      body: JSON.stringify({ selected_message_ids: [...selectedMessageIds], manual_search_text: searchQuery, instruction_text: instructionText }),
     }, token));
   };
   const clearMessageSelection = () => setSelectedMessageIds(new Set());
@@ -471,6 +472,7 @@ export function OperatorPage() {
     <aside className="card" aria-label="IA e evidências">
       <h2>IA / Evidências</h2>
       {aiEligible && <div className="stack" style={{ gap: "var(--space-2)" }}>
+        <label htmlFor="instruction-text">Instrução para regenerar (opcional)<input id="instruction-text" value={instructionText} onChange={(event) => setInstructionText(event.target.value)} placeholder="ex.: seja mais formal" /></label>
         <button disabled={!canGenerate} onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>
         <button type="button" className="btn-secondary" onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>
       </div>}
