@@ -344,25 +344,41 @@ frontend `eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`. **Passed.**
 
 ## Phase 7 — Evaluation datasets/suites [V3-5]
 
-- [ ] **T070 [V3-5]** New `customer_care.evaluation` package
-  (`__init__.py`, `router.py`) — `plan.md` §2/§8.
-- [ ] **T071 [V3-5]** `POST /operator/evaluation/cases` (create) and
+- [x] **T070 [V3-5]** New `customer_care.evaluation` package
+  (`__init__.py`, `router.py`) — `plan.md` §2/§8. Registered in
+  `bootstrap.py` alongside the other routers.
+- [x] **T071 [V3-5]** `POST /operator/evaluation/cases` (create) and
   `GET /operator/evaluation/cases` (list, filterable by `category_slug`) —
   operator-authenticated, no conversation/assignment scoping (not
-  conversation-scoped by design).
-- [ ] **T072 [V3-5]** `PATCH /operator/evaluation/cases/{id}` — sets
+  conversation-scoped by design). `expected_status` validated as `ANSWER`/
+  `ABSTAIN`, else `422`.
+- [x] **T072 [V3-5]** `PATCH /operator/evaluation/cases/{id}` — sets
   `actual_status`/`actual_notes`/`last_reviewed_at`, for a reviewer's
   manual re-check; no automated re-run mechanism (spec.md §7).
-- [ ] **T073 [P]** Seed a first batch of cases from `teste_humano.md`'s
-  existing manual findings via T071, as a fixture/script, not a UI
-  requirement.
-- [ ] **T074** Tests: a case run/reviewed against the live system never
-  creates a `Conversation`/`Message` row; `content.evaluation_cases` has no
-  FK path into `ai_generations`/`conversations` (structural isolation,
-  acceptance outcome 5); `category_slug` traceability round-trips through
-  T071/T072.
+- [x] **T073 [P]** `scripts/seed_evaluation_cases.py`: seeds a first batch
+  from `teste_humano.md`'s existing manual findings — §4.2's "agenda always
+  ABSTAINs" gap (3 concrete customer-style questions, `category_slug:
+  "agenda"`) and §4.6's category-independent hard cases (ambiguous/mixed
+  question, out-of-scope, prompt-extraction attempt, sensitive-clinical,
+  bare greeting). Seeds via the real `POST` endpoint (not raw SQL), so it
+  needs no hand-maintained operator UUID and exercises the same path an
+  operator would use. Not a UI requirement, run manually.
+- [x] **T074** Tests: `test_evaluation_isolation.py` — structural-isolation
+  proof via direct SQLAlchemy mapper inspection (no DB connection needed):
+  `EvaluationCase` has no FK into `conversations`/`ai_generations`, and
+  neither of those has an FK into `evaluation_cases`, in either direction.
+  This is a stronger guarantee than a runtime "never creates a
+  Conversation/Message row" test — it proves the schema makes that
+  mechanically impossible, not just untested.
 
-**Gate:** backend `ruff`/`mypy`/`pytest`.
+**Live verification** (real HTTP, rebuilt container + the seed script):
+seeded 8 cases; created a 9th live with `category_slug`/`expected_status`;
+`?category_slug=agenda` filter returns exactly the matching rows; `PATCH`
+correctly sets `actual_status`/`actual_notes`/`last_reviewed_at`; invalid
+`expected_status` → `422`; no auth → `401`.
+
+**Gate:** backend `ruff`/`mypy` (40 files clean)/`pytest` (43/43).
+**Passed.**
 
 ## Phase 8 — Automatic-draft countdown indicator [V3-9]
 

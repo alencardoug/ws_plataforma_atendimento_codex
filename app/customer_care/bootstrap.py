@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from customer_care.anonymous_access.router import router as anonymous_router
 from customer_care.ai.router import router as ai_router
 from customer_care.auth.router import router as auth_router
+from customer_care.evaluation.router import router as evaluation_router
 from customer_care.infrastructure.database import check_database
 from customer_care.knowledge.router import router as knowledge_crud_router
 from customer_care.operator_workspace.router import router as operator_router
@@ -26,6 +27,7 @@ def create_app() -> FastAPI:
     application.include_router(rag_router, prefix=api_prefix)
     application.include_router(ai_router, prefix=api_prefix)
     application.include_router(knowledge_crud_router, prefix=api_prefix)
+    application.include_router(evaluation_router, prefix=api_prefix)
 
     @application.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:
