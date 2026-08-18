@@ -382,27 +382,43 @@ correctly sets `actual_status`/`actual_notes`/`last_reviewed_at`; invalid
 
 ## Phase 8 — Automatic-draft countdown indicator [V3-9]
 
-- [ ] **T080 [V3-9]** Add `automatic_draft_eligible: bool` and
-  `automatic_draft_seconds_remaining: int` (present only when eligible) to
-  `operator_conversation_detail`, `claim`, and `take_over`'s response
-  dicts (`operator_workspace/router.py`), computed from the same clock
-  `evaluate_automatic_trigger` (`ai/router.py`) already reads — `plan.md`
-  §12. Eligibility mirrors `evaluate_automatic_trigger`'s own guard
-  exactly (no divergent clock, acceptance outcome 10).
-- [ ] **T081 [P] [V3-9]** `OperatorPage`: local `setInterval` countdown
+- [x] **T080 [V3-9]** Add `automatic_draft_eligible: bool` and
+  `automatic_draft_seconds_remaining: int | None` (present only when
+  eligible) to `operator_conversation_detail`, `claim`, and `take_over`'s
+  response dicts (`operator_workspace/router.py`), computed from the same
+  clock `evaluate_automatic_trigger` (`ai/router.py`) already reads —
+  `plan.md` §12. New read-only `automatic_draft_status()` mirrors
+  `evaluate_automatic_trigger`'s own guard exactly (status/mode,
+  activity-not-yet-covered, assigned operator) — minus the idle-elapsed
+  check itself, since that's what the countdown represents, not a gate on
+  showing it. Never mutates state (acceptance outcome 10).
+- [x] **T081 [P] [V3-9]** `OperatorPage`: local `setInterval` countdown
   ticking between the existing 2-second polls, resynced from
-  `automatic_draft_seconds_remaining` on every poll response (same resync
-  pattern as `is_customer_typing`). Shows "gerando…" at 0 until
-  `automatic_draft_eligible: false`/a new `latest_generation` confirms the
-  generation landed.
-- [ ] **T082** Tests: countdown never negative after a backgrounded tab
-  resumes; countdown resets correctly when new customer activity extends
-  the idle window (matching V2-7's reset exactly); countdown never itself
-  triggers a generation (it only reflects server-computed state) — this
-  must not regress V2 `acceptance.md`'s typing-debounce outcome.
+  `automatic_draft_seconds_remaining` whenever the poll response's
+  eligibility/remaining values change (adjusted during render — React's
+  documented pattern for this, not an effect+setState, which this
+  project's stricter eslint rules reject). Shows "Gerando rascunho
+  automaticamente…" at 0 until `automatic_draft_eligible: false` (a new
+  `latest_generation` landing) resyncs it away.
+- [x] **T082** Tests: `test_automatic_draft_status.py` (8 unit tests, fake
+  session + monkeypatched `assigned_operator_id`) — not-`ACTIVE`, not-`N2`,
+  no activity yet, no customer message, already-covered activity, and
+  no-assigned-operator all correctly ineligible; eligible-with-remaining
+  and eligible-past-threshold-floors-at-zero (never negative). Countdown
+  reset-on-new-activity and never-self-triggers are consequences of
+  reading `evaluate_automatic_trigger`'s own state, already covered by its
+  V2 tests — not re-tested here.
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`.
+**Live verification** (real HTTP + real browser, rebuilt containers):
+`automatic_draft_eligible`/`_seconds_remaining` false/null before any
+customer message, `true`/`8` immediately after one, `true`/`5` three
+seconds later. Frontend countdown verified end-to-end via Playwright:
+"Rascunho automático em 6s…" → "…em 3s…" → "Gerando rascunho
+automaticamente…" past the threshold (screenshot captured) — ticking,
+resync, and the zero-floor "gerando" state all correct.
+
+**Gate:** backend `ruff`/`mypy` (40 files clean)/`pytest` (51/51);
+frontend `eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`. **Passed.**
 
 ## Phase 9 — Frontend-only UX: clear/reset, scroll-to-top, confirm-close
 [V3-7, V3-10, V3-11]

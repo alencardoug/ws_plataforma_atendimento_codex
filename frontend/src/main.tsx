@@ -38,6 +38,10 @@ interface OperatorConversation extends CustomerConversation {
   effective_mode: MaturityMode;
   is_customer_typing?: boolean;
   latest_generation?: Draft | null;
+  // V3-9: present whenever there is customer activity not yet covered by a
+  // generation — mirrors evaluate_automatic_trigger's own guard exactly.
+  automatic_draft_eligible?: boolean;
+  automatic_draft_seconds_remaining?: number | null;
 }
 
 interface ConversationSummary {
@@ -270,6 +274,7 @@ export function OperatorPage() {
   const [markedIncorrectIds, setMarkedIncorrectIds] = useState<Set<string>>(new Set());
   const [escalatedIds, setEscalatedIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
+  const [countdown, setCountdown] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setItems(await api<ConversationSummary[]>("/operator/conversations?scope=all", {}, token));
@@ -312,6 +317,29 @@ export function OperatorPage() {
       window.clearInterval(timer);
     };
   }, [load, token]);
+
+  // V3-9: resyncs from the server on every poll response (`selected`
+  // changes), never a locally-invented clock — client-clock drift never
+  // compounds since this only ever overwrites, never accumulates. Adjusted
+  // during render (React's documented pattern for "reset state when some
+  // other value changes"), guarded by comparing against the previously
+  // seen source values — not an effect+setState, which this project's
+  // stricter eslint rules reject as a cascading-render risk.
+  const [countdownSource, setCountdownSource] = useState<{ eligible?: boolean; remaining?: number | null }>({});
+  if (countdownSource.eligible !== selected?.automatic_draft_eligible || countdownSource.remaining !== selected?.automatic_draft_seconds_remaining) {
+    setCountdownSource({ eligible: selected?.automatic_draft_eligible, remaining: selected?.automatic_draft_seconds_remaining });
+    setCountdown(selected?.automatic_draft_eligible ? (selected?.automatic_draft_seconds_remaining ?? null) : null);
+  }
+
+  // Ticks once a second between polls. Depends on countdownActive (not
+  // countdown itself) so the interval is only re-created when switching
+  // between "showing" and "hidden," never restarted every tick.
+  const countdownActive = countdown !== null;
+  useEffect(() => {
+    if (!countdownActive) return;
+    const timer = window.setInterval(() => setCountdown((current) => (current === null ? null : Math.max(0, current - 1))), 1000);
+    return () => window.clearInterval(timer);
+  }, [countdownActive]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -457,6 +485,7 @@ export function OperatorPage() {
       {selected ? <>
         <h1>Conversa {selected.effective_mode}</h1>
         {selected.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}
+        {countdown !== null && <p aria-live="polite" className="typing-indicator">{countdown > 0 ? `Rascunho automático em ${countdown}s…` : "Gerando rascunho automaticamente…"}</p>}
         <button type="button" className="btn-ghost" onClick={clearMessageSelection}>Desmarcar conversas</button>
         <div className="messages">
           {selected.messages.length === 0 && <p className="empty-state">Sem mensagens nesta conversa ainda.</p>}

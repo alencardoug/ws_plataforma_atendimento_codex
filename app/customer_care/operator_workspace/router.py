@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Request
 from sqlalchemy import func, select, text
 
-from customer_care.ai.router import evaluate_automatic_trigger, evidence_for_generation, generation_dict, is_customer_typing, latest_generation_dict
+from customer_care.ai.router import automatic_draft_status, evaluate_automatic_trigger, evidence_for_generation, generation_dict, is_customer_typing, latest_generation_dict
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id, customer_projection
 from customer_care.infrastructure.models import (
@@ -37,6 +37,11 @@ def summary(conversation: Conversation) -> dict:
     return {"id": conversation.id, "status": conversation.status, "effective_mode": conversation.effective_mode, "created_at": conversation.created_at, "last_message_at": conversation.last_message_at, "unread_customer_messages": 0}
 
 
+def automatic_draft_fields(session: DbSession, conversation: Conversation) -> dict:
+    eligible, seconds_remaining = automatic_draft_status(session, conversation)
+    return {"automatic_draft_eligible": eligible, "automatic_draft_seconds_remaining": seconds_remaining}
+
+
 @router.get("/runtime-config")
 def runtime_config(operator: CurrentOperator) -> dict:
     settings = get_settings()
@@ -64,7 +69,7 @@ def list_conversations(
 def operator_conversation_detail(conversation_id: UUID, operator: CurrentOperator, session: DbSession) -> dict:
     conversation = require_assignment(session, conversation_id, operator.id)
     evaluate_automatic_trigger(session, conversation)
-    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/claim")
@@ -83,7 +88,7 @@ def claim(conversation_id: UUID, operator: CurrentOperator, session: DbSession, 
     conversation.status = "ACTIVE"
     record_event(session, "conversation.claimed", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"active_count_after": active_count + 1})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/release", response_model=ConversationSummaryOut)
@@ -124,7 +129,7 @@ def take_over(conversation_id: UUID, operator: CurrentOperator, session: DbSessi
     conversation.taken_over_at = datetime.now(UTC)
     record_event(session, "conversation.taken_over", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"from_mode": "N2", "to_mode": "N1"})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation)}
+    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=OperatorMessageOut, status_code=201)

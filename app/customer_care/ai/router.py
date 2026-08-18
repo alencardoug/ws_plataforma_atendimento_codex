@@ -341,6 +341,27 @@ def is_customer_typing(conversation: Conversation) -> bool:
     return datetime.now(UTC) - conversation.last_customer_typing_at < timedelta(seconds=TYPING_GRACE_SECONDS)
 
 
+def automatic_draft_status(session: DbSession, conversation: Conversation) -> tuple[bool, int | None]:
+    """V3-9: eligibility mirrors evaluate_automatic_trigger's own guard
+    exactly (plan.md §12), except the idle-elapsed check itself — that's
+    what the countdown represents, not a gate on showing it. Read-only:
+    never mutates state or triggers a generation. Callers must call this
+    after evaluate_automatic_trigger so `conversation` reflects the latest
+    auto_draft_covers_through_message_id."""
+    if conversation.status != "ACTIVE" or conversation.effective_mode != "N2":
+        return False, None
+    if not conversation.last_customer_activity_at:
+        return False, None
+    newest_customer_id = session.scalar(select(Message.id).where(Message.conversation_id == conversation.id, Message.author_type == "CUSTOMER").order_by(Message.created_at.desc()))
+    if not newest_customer_id or newest_customer_id == conversation.auto_draft_covers_through_message_id:
+        return False, None
+    if not assigned_operator_id(session, conversation.id):
+        return False, None
+    elapsed = (datetime.now(UTC) - conversation.last_customer_activity_at).total_seconds()
+    remaining = max(0, round(AUTOMATIC_TRIGGER_IDLE_SECONDS - elapsed))
+    return True, remaining
+
+
 def evaluate_automatic_trigger(session: DbSession, conversation: Conversation) -> None:
     """V2-7 automatic/instant trigger: lazily evaluated as a side effect of the
     operator's conversation-detail poll and of the customer's typing heartbeat
