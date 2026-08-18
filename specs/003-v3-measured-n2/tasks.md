@@ -285,37 +285,62 @@ unrelated pre-existing untyped-`SimpleNamespace`-assignment note)/`pytest`
 ## Phase 6 — Guided knowledge-CRUD inputs (rest) and transformar em Q&A
 [V3-8, V3-1×V3-8]
 
-- [ ] **T060 [V3-8]** `GET /operator/knowledge/dynamic-tables` returns
+- [x] **T060 [V3-8]** `GET /operator/knowledge/dynamic-tables` returns
   `list(ALLOWLISTED_TABLES.keys())` (`knowledge/dynamic_binding.py`) —
   `plan.md` §11.
-- [ ] **T061 [V3-8]**
+- [x] **T061 [V3-8]**
   `GET /operator/knowledge/dynamic-tables/{table}/columns` — 404 if
   `table` not in `ALLOWLISTED_TABLES`; else
   `sqlalchemy.inspect(ALLOWLISTED_TABLES[table][0]).columns` (live,
   allowlist-scoped introspection, resolved 2026-08-18) — `plan.md` §11/§18.
-- [ ] **T062 [P] [V3-8]** `KnowledgeAdminPage`: `Tabela` becomes a
+- [x] **T062 [P] [V3-8]** `KnowledgeAdminPage`: `Tabela` becomes a
   `<select>` fed by T060; `Filtro`/`Colunas de saída` become
-  multi-select/key-value builders fed by T061, replacing hand-typed JSON.
+  key-value builders (column `<select>` + value/variable-name input + "add",
+  removable badges) fed by T061, replacing hand-typed JSON.
   `validate_binding` (`knowledge/router.py`) unchanged — remains the
   authoritative server-side check.
-- [ ] **T063 [V3-1×V3-8]** Frontend-only "Transformar em Q&A" button on any
-  generation `classify_generation` (T030) tags `edit`: opens
-  `KnowledgeAdminPage`'s existing create-entry form pre-filled with
-  `question` (the customer message the generation answered, with the same
-  latest-customer-message fallback `select_evidence` already uses for
-  `MANUAL_EVIDENCE`/no-`triggering_message_id` generations),
-  `answer_markdown` (the sent `Message.body`), and `category` (the
-  generation's `category_slug`, if set). No new endpoint — submits through
-  the existing `POST /operator/knowledge/qa`, so the operator's
-  explicit-confirm requirement (acceptance outcome 9a) is enforced by the
-  existing create flow.
-- [ ] **T064** Tests: T061 404s for a non-allowlisted table name and never
-  reaches raw SQL; T063's pre-fill matches the source generation/message
-  exactly; no `content.qa_entries` row is created without the operator
-  submitting the pre-filled form.
+- [x] **T063 [V3-1×V3-8]** Frontend-only "Transformar em Q&A" button on any
+  generation whose sent text differs from its draft (an `edit`, matching
+  `classify_generation`'s own criterion): opens `KnowledgeAdminPage`'s
+  existing create-entry form pre-filled with `question` (the customer
+  message the generation answered, with the same latest-customer-message
+  fallback `select_evidence` already uses for `MANUAL_EVIDENCE`/no-
+  `triggering_message_id` generations), `answer_markdown` (the sent
+  `Message.body`), and `category` (the generation's `category_slug`, if
+  set). No new endpoint — submits through the existing
+  `POST /operator/knowledge/qa`, so the operator's explicit-confirm
+  requirement (acceptance outcome 9a) is enforced by the existing create
+  flow. Backend: new `qa_transform_prefill()` in
+  `conversations/projections.py` computes the pre-fill server-side (single
+  source of truth, same logic `classify_generation`/`select_evidence`
+  already use) and attaches it to each `OPERATOR` message's
+  `include_generation_id=True` projection as `qa_transform` (`null` unless
+  edited). Frontend: `OperatorPage` hands the pre-fill to
+  `KnowledgeAdminPage` via a one-time `sessionStorage` read/clear (React's
+  sanctioned lazy-`useState`-initializer pattern, not an effect+setState or
+  a ref-during-render — both were tried and rejected by this project's
+  stricter React-Compiler-era eslint rules) and navigates there.
+- [x] **T064** Tests: `test_qa_transform.py` (4 unit tests: no-transform on
+  an unedited send, prefill from the triggering message, the
+  no-`triggering_message_id` fallback, and a `null`-category case).
+  T061's 404 for a non-allowlisted table (including an injection-shaped
+  name) and T063's live pre-fill/creation verified live instead of via a
+  DB-backed pytest integration test (same substitution rationale as prior
+  phases).
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; frontend
-`eslint`/`tsc --noEmit`/`vitest`/`vite build`.
+**Live verification** (real HTTP + real browser, rebuilt containers):
+`dynamic-tables`/`.../columns` endpoints correct, including a SQL-
+injection-shaped table name still 404ing before any query runs; the
+guided `Tabela`/`Filtro`/`Colunas de saída` UI (table select → live column
+options → add filter/output-column → removable badges) verified end-to-end
+via Playwright (screenshot captured). Full "transformar em Q&A" flow
+verified with a real edited send: pre-filled question/answer/category
+correct on `KnowledgeAdminPage`, and submitting created the new
+`content.qa_entries` row (visible in the list) — never before that
+explicit submit.
+
+**Gate:** backend `ruff`/`mypy` (38 files clean)/`pytest` (41/41);
+frontend `eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`. **Passed.**
 
 ## Phase 7 — Evaluation datasets/suites [V3-5]
 

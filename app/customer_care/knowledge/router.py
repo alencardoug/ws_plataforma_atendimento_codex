@@ -3,7 +3,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 
 from customer_care.audit.service import record_event
 from customer_care.infrastructure.models import Category, KnowledgeChunk, KnowledgeDocument, QADynamicBinding, QAEntry
@@ -173,6 +173,31 @@ def create_category(payload: CreateCategoryIn, operator: CurrentOperator, sessio
     record_event(session, "knowledge.category_created", "OPERATOR", actor_id=operator.id, payload={"slug": payload.slug})
     session.commit()
     return category_dict(category)
+
+
+# --- Dynamic-binding table/column introspection (V3-8) --------------------
+
+
+@router.get("/dynamic-tables")
+def list_dynamic_tables(operator: CurrentOperator) -> list[str]:
+    """Reads ALLOWLISTED_TABLES directly — the dropdown can never diverge
+    from the actual allowlist (plan.md §11)."""
+    return list(ALLOWLISTED_TABLES.keys())
+
+
+@router.get("/dynamic-tables/{table}/columns")
+def list_dynamic_table_columns(table: str, operator: CurrentOperator) -> list[dict]:
+    """Resolved 2026-08-18 to live introspection via
+    sqlalchemy.inspect(...) on the allowlisted model — never a raw
+    information_schema query against an arbitrary table name. 404 before
+    any introspection happens for a table not in the allowlist (plan.md
+    §11/§18)."""
+    allowlisted = ALLOWLISTED_TABLES.get(table)
+    if not allowlisted:
+        raise api_error(404, "NOT_FOUND", f"'{table}' is not an allowlisted dynamic-binding table")
+    model, _order_column = allowlisted
+    mapper = inspect(model)
+    return [{"column": column.name, "type": str(column.type)} for column in mapper.columns]
 
 
 # --- Q&A -----------------------------------------------------------------

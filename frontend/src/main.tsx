@@ -1,6 +1,6 @@
 import React, { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Link, NavLink, Navigate, Route, Routes, useNavigate } from "react-router-dom";
 import "./styles.css";
 
 const API = "/api/v1";
@@ -22,6 +22,10 @@ interface Message {
   // Operator-only (V3-1): absent on CustomerPage's shared projection —
   // an AI generation stays an internal artifact, never customer-visible.
   source_generation_id?: string | null;
+  // Operator-only (V3-1×V3-8): present only when this message differs from
+  // the draft that produced it (an "edit"), pre-filling the "transformar em
+  // Q&A" flow.
+  qa_transform?: { question: string; answer: string; category_slug: string | null } | null;
 }
 
 interface CustomerConversation {
@@ -249,6 +253,7 @@ export function CustomerPage() {
 }
 
 export function OperatorPage() {
+  const navigate = useNavigate();
   const [token, setToken] = useState(() => sessionStorage.getItem("operator_token") || "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -351,6 +356,13 @@ export function OperatorPage() {
     if (!selected) return;
     await api(`/operator/conversations/${selected.id}/generations/${generationId}/escalate`, { method: "POST" }, token);
     setEscalatedIds((current) => new Set(current).add(generationId));
+  };
+  // V3-1×V3-8: no new endpoint — hands the server-computed pre-fill to
+  // KnowledgeAdminPage's existing create-entry form via sessionStorage, a
+  // one-time handoff read (and cleared) on that page's mount.
+  const transformToQA = (prefill: { question: string; answer: string; category_slug: string | null }) => {
+    sessionStorage.setItem("qa_transform_prefill", JSON.stringify(prefill));
+    navigate("/operator/knowledge");
   };
   const send = async (event: FormEvent) => {
     event.preventDefault();
@@ -457,6 +469,7 @@ export function OperatorPage() {
             {message.source_generation_id && <div className="message-taxonomy-actions">
               <button type="button" className="btn-ghost" disabled={markedIncorrectIds.has(message.source_generation_id)} onClick={() => void markIncorrect(message.source_generation_id as string).catch((caught) => setError(errorMessage(caught)))}>{markedIncorrectIds.has(message.source_generation_id) ? "✓ Marcado como incorreto" : "Marcar como incorreto"}</button>
               <button type="button" className="btn-ghost" disabled={escalatedIds.has(message.source_generation_id)} onClick={() => void escalateGeneration(message.source_generation_id as string).catch((caught) => setError(errorMessage(caught)))}>{escalatedIds.has(message.source_generation_id) ? "✓ Sinalizado (lacuna de conteúdo)" : "Sinalizar lacuna de conteúdo"}</button>
+              {message.qa_transform && <button type="button" className="btn-ghost" onClick={() => transformToQA(message.qa_transform as NonNullable<Message["qa_transform"]>)}>Transformar em Q&amp;A</button>}
             </div>}
           </article>)}
         </div>
@@ -518,6 +531,11 @@ interface Category {
   is_active: boolean;
 }
 
+interface DynamicTableColumn {
+  column: string;
+  type: string;
+}
+
 interface ClinicalDocumentItem {
   document_id: string;
   title: string;
@@ -543,16 +561,34 @@ export function KnowledgeAdminPage() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
 
+  // V3-1×V3-8 "transformar em Q&A": one-time handoff from OperatorPage. A
+  // lazy useState initializer (not a ref, not an effect) is React's
+  // sanctioned way to run one-off setup exactly once on mount — same
+  // pattern this component already uses for reading the operator token
+  // above — so this consumes (reads and clears) the handoff exactly once,
+  // never re-applying it on a later visit/reload.
+  const [prefill] = useState(() => {
+    const raw = sessionStorage.getItem("qa_transform_prefill");
+    if (raw) sessionStorage.removeItem("qa_transform_prefill");
+    return raw ? (JSON.parse(raw) as { question: string; answer: string; category_slug: string | null }) : null;
+  });
+
   const [categories, setCategories] = useState<Category[]>([]);
-  const [qaCategory, setQaCategory] = useState("");
+  const [qaCategory, setQaCategory] = useState(prefill?.category_slug ?? "");
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [newCategorySlug, setNewCategorySlug] = useState("");
   const [newCategoryLabel, setNewCategoryLabel] = useState("");
-  const [qaQuestion, setQaQuestion] = useState("");
-  const [qaAnswer, setQaAnswer] = useState("");
+  const [qaQuestion, setQaQuestion] = useState(prefill?.question ?? "");
+  const [qaAnswer, setQaAnswer] = useState(prefill?.answer ?? "");
+  const [dynamicTables, setDynamicTables] = useState<string[]>([]);
   const [qaBindingTable, setQaBindingTable] = useState("");
-  const [qaBindingFilter, setQaBindingFilter] = useState("{}");
-  const [qaBindingColumns, setQaBindingColumns] = useState("[]");
+  const [tableColumns, setTableColumns] = useState<DynamicTableColumn[]>([]);
+  const [bindingFilter, setBindingFilter] = useState<Record<string, string>>({});
+  const [bindingOutputColumns, setBindingOutputColumns] = useState<{ column: string; variable_name: string }[]>([]);
+  const [filterColumnDraft, setFilterColumnDraft] = useState("");
+  const [filterValueDraft, setFilterValueDraft] = useState("");
+  const [outputColumnDraft, setOutputColumnDraft] = useState("");
+  const [outputVariableDraft, setOutputVariableDraft] = useState("");
 
   const [docTitle, setDocTitle] = useState("");
   const [docContent, setDocContent] = useState("");
@@ -564,8 +600,40 @@ export function KnowledgeAdminPage() {
     // V3-8: category list stays live — fetched every load, never a fixed
     // copy, so it can never drift from what other operators just created.
     setCategories(await api<Category[]>("/operator/knowledge/categories", {}, token));
+    setDynamicTables(await api<string[]>("/operator/knowledge/dynamic-tables", {}, token));
     setLoaded(true);
   }, [token]);
+
+  const selectBindingTable = async (table: string) => {
+    setQaBindingTable(table);
+    setBindingFilter({});
+    setBindingOutputColumns([]);
+    setFilterColumnDraft("");
+    setOutputColumnDraft("");
+    setTableColumns(table ? await api<DynamicTableColumn[]>(`/operator/knowledge/dynamic-tables/${table}/columns`, {}, token) : []);
+  };
+  const addFilter = () => {
+    if (!filterColumnDraft || !filterValueDraft) return;
+    setBindingFilter((current) => ({ ...current, [filterColumnDraft]: filterValueDraft }));
+    setFilterColumnDraft("");
+    setFilterValueDraft("");
+  };
+  const removeFilter = (column: string) => {
+    setBindingFilter((current) => {
+      const next = { ...current };
+      delete next[column];
+      return next;
+    });
+  };
+  const addOutputColumn = () => {
+    if (!outputColumnDraft || !outputVariableDraft) return;
+    setBindingOutputColumns((current) => [...current, { column: outputColumnDraft, variable_name: outputVariableDraft }]);
+    setOutputColumnDraft("");
+    setOutputVariableDraft("");
+  };
+  const removeOutputColumn = (column: string) => {
+    setBindingOutputColumns((current) => current.filter((item) => item.column !== column));
+  };
 
   const createCategory = async () => {
     const created = await api<Category>("/operator/knowledge/categories", { method: "POST", body: JSON.stringify({ slug: newCategorySlug, label: newCategoryLabel }) }, token);
@@ -588,16 +656,14 @@ export function KnowledgeAdminPage() {
 
   const createQA = async (event: FormEvent) => {
     event.preventDefault();
-    const dynamic_binding = qaBindingTable.trim()
-      ? { source_table: qaBindingTable, filter: JSON.parse(qaBindingFilter || "{}"), output_columns: JSON.parse(qaBindingColumns || "[]"), row_limit: 4 }
+    const dynamic_binding = qaBindingTable
+      ? { source_table: qaBindingTable, filter: bindingFilter, output_columns: bindingOutputColumns, row_limit: 4 }
       : null;
     await api("/operator/knowledge/qa", { method: "POST", body: JSON.stringify({ category: qaCategory, question: qaQuestion, answer_markdown: qaAnswer, dynamic_binding }) }, token);
     setQaCategory("");
     setQaQuestion("");
     setQaAnswer("");
-    setQaBindingTable("");
-    setQaBindingFilter("{}");
-    setQaBindingColumns("[]");
+    await selectBindingTable("");
     await loadAll();
   };
 
@@ -653,9 +719,38 @@ export function KnowledgeAdminPage() {
         <label htmlFor="qa-answer">Resposta<textarea id="qa-answer" value={qaAnswer} onChange={(event) => setQaAnswer(event.target.value)} required /></label>
         <fieldset>
           <legend>Vínculo dinâmico (opcional)</legend>
-          <label htmlFor="qa-binding-table">Tabela<input id="qa-binding-table" value={qaBindingTable} onChange={(event) => setQaBindingTable(event.target.value)} /></label>
-          <label htmlFor="qa-binding-filter">Filtro (JSON)<input id="qa-binding-filter" value={qaBindingFilter} onChange={(event) => setQaBindingFilter(event.target.value)} /></label>
-          <label htmlFor="qa-binding-columns">Colunas de saída (JSON)<input id="qa-binding-columns" value={qaBindingColumns} onChange={(event) => setQaBindingColumns(event.target.value)} /></label>
+          <label htmlFor="qa-binding-table">Tabela
+            <select id="qa-binding-table" value={qaBindingTable} onChange={(event) => void selectBindingTable(event.target.value).catch((caught) => setError(errorMessage(caught)))}>
+              <option value="">Nenhuma (resposta estática)</option>
+              {dynamicTables.map((table) => <option key={table} value={table}>{table}</option>)}
+            </select>
+          </label>
+          {qaBindingTable && <>
+            <div className="stack" style={{ gap: "var(--space-2)" }}>
+              <span className="message-author">Filtro</span>
+              {Object.entries(bindingFilter).map(([column, value]) => <span key={column} className="badge badge-active">{column} = {value} <button type="button" className="btn-ghost" onClick={() => removeFilter(column)} aria-label={`Remover filtro ${column}`}>×</button></span>)}
+              <div className="stack" style={{ gap: "var(--space-2)", flexDirection: "row" }}>
+                <select aria-label="Coluna do filtro" value={filterColumnDraft} onChange={(event) => setFilterColumnDraft(event.target.value)}>
+                  <option value="">Coluna…</option>
+                  {tableColumns.map((col) => <option key={col.column} value={col.column}>{col.column} ({col.type})</option>)}
+                </select>
+                <input aria-label="Valor do filtro" value={filterValueDraft} onChange={(event) => setFilterValueDraft(event.target.value)} placeholder="valor" />
+                <button type="button" className="btn-ghost" onClick={addFilter}>Adicionar filtro</button>
+              </div>
+            </div>
+            <div className="stack" style={{ gap: "var(--space-2)" }}>
+              <span className="message-author">Colunas de saída</span>
+              {bindingOutputColumns.map((item) => <span key={item.column} className="badge badge-active">{item.column} → {"{{" + item.variable_name + "}}"} <button type="button" className="btn-ghost" onClick={() => removeOutputColumn(item.column)} aria-label={`Remover coluna ${item.column}`}>×</button></span>)}
+              <div className="stack" style={{ gap: "var(--space-2)", flexDirection: "row" }}>
+                <select aria-label="Coluna de saída" value={outputColumnDraft} onChange={(event) => setOutputColumnDraft(event.target.value)}>
+                  <option value="">Coluna…</option>
+                  {tableColumns.map((col) => <option key={col.column} value={col.column}>{col.column} ({col.type})</option>)}
+                </select>
+                <input aria-label="Nome da variável" value={outputVariableDraft} onChange={(event) => setOutputVariableDraft(event.target.value)} placeholder="nome da variável" />
+                <button type="button" className="btn-ghost" onClick={addOutputColumn}>Adicionar coluna</button>
+              </div>
+            </div>
+          </>}
         </fieldset>
         <button>Adicionar pergunta e resposta</button>
       </form>

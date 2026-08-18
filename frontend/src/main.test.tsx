@@ -179,6 +179,9 @@ describe("V1 routes", () => {
         if (url.endsWith("/operator/knowledge/categories") && (!init || init.method === undefined)) {
           return { ok: true, json: async () => [{ slug: "geral", label: "Geral", is_active: true }] };
         }
+        if (url.endsWith("/operator/knowledge/dynamic-tables") && (!init || init.method === undefined)) {
+          return { ok: true, json: async () => [] };
+        }
         throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
       }),
     );

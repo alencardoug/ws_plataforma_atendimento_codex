@@ -3,7 +3,21 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from customer_care.infrastructure.models import Conversation, Message, MessageCitation
+from customer_care.infrastructure.models import AIGeneration, Conversation, Message, MessageCitation
+
+
+def qa_transform_prefill(session: Session, conversation: Conversation, message: Message, generation: AIGeneration) -> dict | None:
+    """V3-1×V3-8 "transformar em Q&A": only for a generation classified
+    `edit` (sent text differs from the draft) — pre-fill data for
+    KnowledgeAdminPage's existing create-entry form. `question` uses the
+    same triggering-message fallback `select_evidence` already uses for
+    MANUAL_EVIDENCE/no-triggering-message generations (plan.md §11)."""
+    if generation.draft_text == message.body:
+        return None
+    triggering: Message | None = session.get(Message, generation.triggering_message_id) if generation.triggering_message_id else None
+    if not triggering:
+        triggering = session.scalar(select(Message).where(Message.conversation_id == conversation.id, Message.author_type == "CUSTOMER").order_by(Message.created_at.desc()))
+    return {"question": triggering.body if triggering else "", "answer": message.body, "category_slug": generation.category_slug}
 
 
 def customer_projection(session: Session, conversation: Conversation, include_generation_id: bool = False) -> dict:
@@ -21,6 +35,8 @@ def customer_projection(session: Session, conversation: Conversation, include_ge
             item["citations"] = [{"title": c.display_title, "section": c.display_section, "url": c.display_url} for c in citations]
             if include_generation_id:
                 item["source_generation_id"] = message.source_generation_id
+                generation = session.get(AIGeneration, message.source_generation_id) if message.source_generation_id else None
+                item["qa_transform"] = qa_transform_prefill(session, conversation, message, generation) if generation else None
         result.append(item)
     return {"id": conversation.id, "status": conversation.status, "messages": result, "created_at": conversation.created_at, "closed_at": conversation.closed_at}
 
