@@ -145,6 +145,17 @@ export function RequestDebugDialog({ messages, onClose }: { messages: RequestMes
   </dialog>;
 }
 
+// V3-11: purely a client-side guard in front of the existing close
+// endpoint on both surfaces — no backend/API change. Shared between
+// CustomerPage and OperatorPage so the copy stays identical.
+function CloseConfirmPrompt({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return <div className="close-confirm" role="alertdialog" aria-label="Confirmar encerramento">
+    <p>Deseja encerrar a conversa?</p>
+    <button type="button" className="btn-danger" onClick={onConfirm}>Encerrar conversa</button>
+    <button type="button" className="btn-ghost" onClick={onCancel}>Retornar e continuar conversa</button>
+  </div>;
+}
+
 export function CustomerPage() {
   const [id, setId] = useState(() => sessionStorage.getItem("conversation_id") || "");
   const [token, setToken] = useState(() => sessionStorage.getItem("conversation_token") || "");
@@ -152,6 +163,7 @@ export function CustomerPage() {
   const [text, setText] = useState("");
   const [error, setError] = useState("");
   const [tokenCopied, setTokenCopied] = useState(false);
+  const [confirmingClose, setConfirmingClose] = useState(false);
 
   const copyToken = async () => {
     try {
@@ -211,6 +223,7 @@ export function CustomerPage() {
   };
 
   const close = async () => {
+    setConfirmingClose(false);
     const closed = await api<CustomerConversation>(`/public/conversations/${id}`, { method: "POST" }, token);
     setConversation(closed);
     sessionStorage.removeItem("conversation_id");
@@ -250,7 +263,9 @@ export function CustomerPage() {
         <label htmlFor="customer-message">Mensagem<textarea id="customer-message" value={text} onChange={(event) => setText(event.target.value)} required disabled={conversation?.status === "CLOSED"} /></label>
         <button disabled={conversation?.status === "CLOSED"}>Enviar</button>
       </form>
-      {conversation?.status !== "CLOSED" && <button type="button" className="btn-ghost" onClick={() => void close().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>}
+      {conversation?.status !== "CLOSED" && (confirmingClose
+        ? <CloseConfirmPrompt onConfirm={() => void close().catch((caught) => setError(errorMessage(caught)))} onCancel={() => setConfirmingClose(false)} />
+        : <button type="button" className="btn-ghost" onClick={() => setConfirmingClose(true)}>Encerrar conversa</button>)}
       {error && <p role="alert">{error}</p>}
     </div>
   </main>;
@@ -273,6 +288,7 @@ export function OperatorPage() {
   const [showRequestDebug, setShowRequestDebug] = useState(false);
   const [markedIncorrectIds, setMarkedIncorrectIds] = useState<Set<string>>(new Set());
   const [escalatedIds, setEscalatedIds] = useState<Set<string>>(new Set());
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState<number | null>(null);
 
@@ -366,6 +382,7 @@ export function OperatorPage() {
     setShowRequestDebug(false);
     setMarkedIncorrectIds(new Set());
     setEscalatedIds(new Set());
+    setConfirmingClose(false);
   };
   const claim = async (conversationId: string) => {
     await api<OperatorConversation>(`/operator/conversations/${conversationId}/claim`, { method: "POST" }, token);
@@ -426,6 +443,7 @@ export function OperatorPage() {
   };
   const closeConversation = async () => {
     if (!selected) return;
+    setConfirmingClose(false);
     await api<ConversationSummary>(`/operator/conversations/${selected.id}/close`, { method: "POST" }, token);
     setSelected(null);
     setDraft(null);
@@ -447,6 +465,22 @@ export function OperatorPage() {
       method: "POST",
       body: JSON.stringify({ conversation_id: selected.id }),
     }, token));
+    // V3-10: scoped to evidence selection only (not "Gerar rascunho"/
+    // regenerate-with-instruction) — fires only here, inside this click
+    // handler, never inside a useEffect keyed on poll-refreshed state, so
+    // the 2-second poll's unrelated re-renders can never re-trigger it.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  // V3-7: purely client-side reset, independent of message-selection state
+  // ("desmarcar conversas", V2-4). No server round-trip, no durable row
+  // touched — HCR/V3-1 metrics do not distinguish "generated and
+  // discarded" from "never generated" for V3 (spec.md's resolution).
+  const clearDraftAndSearch = () => {
+    setDraft(null);
+    setSearchEvidence([]);
+    setSearchQuery("");
+    setInstructionText("");
+    setShowRequestDebug(false);
   };
 
   if (!token) {
@@ -507,7 +541,9 @@ export function OperatorPage() {
             <label htmlFor="operator-reply">Resposta<textarea id="operator-reply" value={text} onChange={(event) => setText(event.target.value)} required /></label>
             <button>Enviar</button>
           </form>
-          <button type="button" className="btn-ghost" onClick={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))}>Encerrar conversa</button>
+          {confirmingClose
+            ? <CloseConfirmPrompt onConfirm={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))} onCancel={() => setConfirmingClose(false)} />
+            : <button type="button" className="btn-ghost" onClick={() => setConfirmingClose(true)}>Encerrar conversa</button>}
         </> : <p className="is-loading">Esta conversa está encerrada.</p>}
       </> : <p className="empty-state">Selecione uma conversa na fila para começar.</p>}
     </section>
@@ -517,6 +553,7 @@ export function OperatorPage() {
         <label htmlFor="instruction-text">Instrução para regenerar (opcional)<input id="instruction-text" value={instructionText} onChange={(event) => setInstructionText(event.target.value)} placeholder="ex.: seja mais formal" /></label>
         <button disabled={!canGenerate} onClick={() => void generate().catch((caught) => setError(errorMessage(caught)))}>Gerar rascunho</button>
         <button type="button" className="btn-secondary" onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>
+        {(draft || searchEvidence.length > 0) && <button type="button" className="btn-ghost" onClick={clearDraftAndSearch}>Limpar</button>}
       </div>}
       {selected && searchAvailable && <form onSubmit={(event) => void search(event).catch((caught) => setError(errorMessage(caught)))}>
         <label htmlFor="manual-search">Busca manual<input id="manual-search" value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} required /></label>

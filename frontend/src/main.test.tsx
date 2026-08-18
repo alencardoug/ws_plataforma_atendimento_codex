@@ -307,4 +307,73 @@ describe("V1 routes", () => {
     expect(await screen.findByText("Pergunta administrativa")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Selecionar" })).toBeNull();
   });
+
+  it("requires confirmation before closing the customer's own conversation, and cancelling sends no request (V3-11)", async () => {
+    sessionStorage.setItem("conversation_id", "conv-1");
+    sessionStorage.setItem("conversation_token", "SUB3B4GC");
+    const closeCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/public/conversations/conv-1") && (!init || init.method === undefined)) {
+          return { ok: true, json: async () => ({ id: "conv-1", status: "ACTIVE", messages: [] }) };
+        }
+        if (url.endsWith("/public/conversations/conv-1") && init?.method === "POST") {
+          closeCalls.push(url);
+          return { ok: true, json: async () => ({ id: "conv-1", status: "CLOSED", messages: [] }) };
+        }
+        throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: "Encerrar conversa" }));
+
+    expect(await screen.findByText("Deseja encerrar a conversa?")).toBeInTheDocument();
+    expect(closeCalls).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole("button", { name: "Retornar e continuar conversa" }));
+    expect(closeCalls).toHaveLength(0);
+    expect(await screen.findByRole("button", { name: "Encerrar conversa" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Encerrar conversa" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Encerrar conversa" }));
+    await waitFor(() => expect(closeCalls).toHaveLength(1));
+  });
+
+  it("requires confirmation before closing on the operator surface too (V3-11)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const conversationDetail = { id: "conv-1", status: "ACTIVE", effective_mode: "N2", messages: [] };
+    const closeCalls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-1", status: "ACTIVE", effective_mode: "N2" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-1")) {
+          return { ok: true, json: async () => conversationDetail };
+        }
+        if (url.endsWith("/operator/conversations/conv-1/close") && init?.method === "POST") {
+          closeCalls.push(url);
+          return { ok: true, json: async () => ({ id: "conv-1", status: "CLOSED" }) };
+        }
+        throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Encerrar conversa" }));
+
+    expect(await screen.findByText("Deseja encerrar a conversa?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retornar e continuar conversa" }));
+    expect(closeCalls).toHaveLength(0);
+    expect(await screen.findByRole("button", { name: "Encerrar conversa" })).toBeInTheDocument();
+  });
 });

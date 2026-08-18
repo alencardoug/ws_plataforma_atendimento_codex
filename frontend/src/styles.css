@@ -257,3 +257,15 @@ a { color: var(--brand-700); }
 .debug-message { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); margin: var(--space-3) 0; background: var(--surface-sunken); }
 .debug-message strong { display: block; margin-bottom: var(--space-2); color: var(--text-muted); text-transform: uppercase; font-size: var(--font-size-small); }
 .debug-message pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, monospace; font-size: var(--font-size-small); margin: 0; }
+
+.close-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: flex-start;
+  border: 1px solid var(--danger-100);
+  background: var(--danger-100);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.close-confirm p { margin: 0; font-weight: 600; }

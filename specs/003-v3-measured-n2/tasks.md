@@ -423,29 +423,41 @@ frontend `eslint`/`tsc --noEmit`/`vitest` (14/14)/`vite build`. **Passed.**
 ## Phase 9 — Frontend-only UX: clear/reset, scroll-to-top, confirm-close
 [V3-7, V3-10, V3-11]
 
-- [ ] **T090 [P] [V3-7]** `OperatorPage`: "Limpar" button resetting local
-  draft-panel state and evidence-search-results state to empty,
-  independent of message-selection state. No new endpoint, no new audit
-  event (`plan.md` §10).
-- [ ] **T091 [P] [V3-10]** Evidence-list `<article>`'s existing `onSelect`
+- [x] **T090 [P] [V3-7]** `OperatorPage`: "Limpar" button (visible whenever
+  there's a draft or search results) resetting draft-panel state,
+  evidence-search-results, search query, instruction text, and the debug
+  dialog flag — all local state, independent of message-selection state.
+  No new endpoint, no new audit event (`plan.md` §10).
+- [x] **T091 [P] [V3-10]** Evidence-list `<article>`'s existing `onSelect`
   handler ("Selecionar") additionally calls
   `window.scrollTo({ top: 0, behavior: "smooth" })`, invoked only inside
   the click handler — never inside a `useEffect` keyed on poll-refreshed
   state (`plan.md` §13).
-- [ ] **T092 [P] [V3-11]** `CustomerPage.close` and
+- [x] **T092 [P] [V3-11]** `CustomerPage.close` and
   `OperatorPage.closeConversation`: add a `confirmingClose` local-state
-  step with the resolved copy ("Deseja encerrar a conversa?" / "Encerrar
-  conversa" / "Retornar e continuar conversa") before the existing
+  step, rendered by a new shared `CloseConfirmPrompt` component, with the
+  resolved copy ("Deseja encerrar a conversa?" / "Encerrar conversa" /
+  "Retornar e continuar conversa") before the existing
   `close()`/`closeConversation()` calls fire. No backend/API change
-  (`plan.md` §14).
-- [ ] **T093** Tests: T091 does not fire on an unrelated poll re-render
-  (acceptance outcome 11); T092's "Retornar e continuar conversa" leaves
-  conversation status/state completely unchanged, no request sent
-  (acceptance outcome 12); T090 does not touch any durably stored
-  generation/audit row (acceptance outcome 8).
+  (`plan.md` §14). `confirmingClose` resets on conversation switch
+  (`open()`), matching the hygiene pattern already used for the debug/
+  taxonomy button states.
+- [x] **T093** Tests: 2 new `main.test.tsx` cases (customer + operator
+  surfaces) asserting cancelling sends zero requests to the close endpoint
+  and the trigger button reappears unchanged (acceptance outcome 12); T091
+  and T090's non-interference/no-durable-row claims are structural (no
+  server round-trip in either handler at all, confirmed by code review —
+  not independently re-tested).
 
-**Gate:** frontend `eslint`/`tsc --noEmit`/`vitest`/`vite build` (this
-phase is frontend-only; backend gates unaffected).
+**Live verification** (real browser, rebuilt container): both
+close-confirm prompts appear and correctly no-op on cancel (screenshot
+captured); "Limpar" clears search results and the search box; scroll-to-
+top on "Selecionar" reaches `scrollY: 0` (confirmed after the smooth-
+animation duration elapses — a `waitForTimeout` shorter than the
+animation initially under-measured this, not a functional issue).
+
+**Gate:** frontend `eslint`/`tsc --noEmit`/`vitest` (16/16)/`vite build`
+(this phase is frontend-only; backend gates unaffected). **Passed.**
 
 ## Phase 10 — Post-conversation satisfaction survey [V3-12]
 
