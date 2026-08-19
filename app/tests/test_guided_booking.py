@@ -26,7 +26,6 @@ from customer_care.infrastructure.models import (
 from customer_care.knowledge.embeddings import DeterministicTestEmbeddingProvider
 from customer_care.scheduling.guided_booking import (
     GB_CPF_INPUT_REDACTION,
-    GB_PAYMENT_INPUT_REDACTION,
     advance_guided_booking,
     interpret_cpf_reply,
     interpret_payment_reply,
@@ -331,8 +330,10 @@ class TestAdvanceGuidedBooking:
 
 
 class TestRedaction:
-    """D-033: GB's own CPF/payment replies must never reach durable
-    storage raw — same rule AA-10 already applies to its own script."""
+    """D-033: GB's own CPF reply must never reach durable storage raw —
+    same rule AA-10 already applies to its own script. The payment-
+    confirmation reply is deliberately *not* redacted (human decision,
+    2026-08-19) — kept verbatim for that step."""
 
     def test_pending_redaction_step_awaiting_cpf(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
@@ -348,7 +349,7 @@ class TestRedaction:
             assert pending_redaction_step(db, conversation) == "AWAITING_CPF"
             assert persisted_customer_body(db, conversation, "123.456.789-10") == GB_CPF_INPUT_REDACTION
 
-    def test_pending_redaction_step_awaiting_payment(self, conversation_with_generation, operator_id) -> None:
+    def test_payment_reply_is_kept_verbatim_not_redacted(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
         session_factory = get_session_factory()
         with session_factory() as db:
@@ -359,8 +360,8 @@ class TestRedaction:
         with session_factory() as db:
             conversation = db.get(Conversation, conversation_id)
             assert conversation is not None
-            assert pending_redaction_step(db, conversation) == "AWAITING_PAYMENT"
-            assert persisted_customer_body(db, conversation, "sim") == GB_PAYMENT_INPUT_REDACTION
+            assert pending_redaction_step(db, conversation) is None
+            assert persisted_customer_body(db, conversation, "sim") == "sim"
 
     def test_no_redaction_outside_gb_cpf_payment_steps(self, conversation_with_generation) -> None:
         conversation_id, _generation_id, _descriptions = conversation_with_generation

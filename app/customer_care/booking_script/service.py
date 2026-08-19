@@ -18,7 +18,7 @@ class BookingScriptStep(str, Enum):
     AWAITING_PAYMENT = "AWAITING_PAYMENT"
 
 
-CPF_INPUT_REDACTION = "[CPF informado na simulação — conteúdo não armazenado]"
+CPF_INPUT_REDACTION = "[CPF informado na simulação — dado utilizado na janela de contexto da conversa, não armazenado nos bancos de dados]"
 PAYMENT_INPUT_REDACTION = "[Resposta de pagamento da simulação — conteúdo não armazenado]"
 
 

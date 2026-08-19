@@ -17,7 +17,7 @@ from sqlalchemy import select
 from customer_care.bootstrap import create_app
 from customer_care.infrastructure.database import get_session_factory
 from customer_care.infrastructure.models import Message
-from customer_care.scheduling.guided_booking import GB_CPF_INPUT_REDACTION, GB_PAYMENT_INPUT_REDACTION
+from customer_care.scheduling.guided_booking import GB_CPF_INPUT_REDACTION
 
 
 def run() -> None:
@@ -128,13 +128,16 @@ def run() -> None:
     assert paid_draft["draft_text"] not in [m["body"] for m in operator_messages_before], "GB output must never reach the customer without an explicit operator send"
     operator_send(paid_draft)
 
-    # D-033 redaction: the raw CPF/payment replies must never reach durable storage.
+    # D-033 redaction (narrowed 2026-08-19, human decision): only the raw
+    # CPF reply must never reach durable storage. The payment-confirmation
+    # reply is deliberately kept verbatim — not sensitive the same way.
     with get_session_factory()() as db:
         bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == UUID(conversation_id))).all()]
         assert GB_CPF_INPUT_REDACTION in bodies, bodies
-        assert GB_PAYMENT_INPUT_REDACTION in bodies, bodies
-        for raw_input in ("Ah 123456a8910", "tabom 123.456..789.10", "Então, não paguei", "tabom simm paguei"):
-            assert raw_input not in bodies, bodies
+        for raw_cpf_input in ("Ah 123456a8910", "tabom 123.456..789.10"):
+            assert raw_cpf_input not in bodies, bodies
+        for raw_payment_input in ("Então, não paguei", "tabom simm paguei"):
+            assert raw_payment_input in bodies, bodies
 
     close = client.post(f"/api/v1/operator/conversations/{conversation_id}/close", headers=headers)
     assert close.status_code == 200, close.text

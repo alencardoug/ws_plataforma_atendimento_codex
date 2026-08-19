@@ -59,14 +59,20 @@ _ORDINAL_WORDS: dict[str, int] = {
     "terceira": 3, "terceiro": 3,
     "quarta": 4, "quarto": 4,
 }
-_ORDINAL_DIGIT = re.compile(r"\b([1-4])\b")
+# The optional [ºª°]? suffix must sit *inside* the trailing \b, not after
+# it: "º"/"ª" (MASCULINE/FEMININE ORDINAL INDICATOR) are Unicode category
+# Lo ("letter, other") — word characters as far as \b is concerned — so a
+# bare r"\b([1-4])\b" never matches "3º opção" at all (no word/non-word
+# transition exists between "3" and "º"). Found via real testing, 2026-08-19.
+_ORDINAL_DIGIT = re.compile(r"\b([1-4])[ºª°]?\b")
 
-# D-033: raw CPF/payment replies never reach durable storage for the GB
-# flow either — same non-retention rule AA-10 already applies to its own
-# script (spec.md §5 AA-10), extended here since GB now asks the same two
-# sensitive questions via a parallel, N2-draft-based path.
-GB_CPF_INPUT_REDACTION = "[CPF informado na simulação — conteúdo não armazenado]"
-GB_PAYMENT_INPUT_REDACTION = "[Resposta de pagamento da simulação — conteúdo não armazenado]"
+# D-033: raw CPF replies never reach durable storage for the GB flow
+# either — same non-retention rule AA-10 already applies to its own script
+# (spec.md §5 AA-10), extended here since GB now asks the same question
+# via a parallel, N2-draft-based path. The payment-confirmation reply is
+# deliberately *not* redacted (human decision, 2026-08-19) — it is not
+# sensitive the way a CPF is, and is kept verbatim for this step.
+GB_CPF_INPUT_REDACTION = "[CPF informado na simulação — dado utilizado na janela de contexto da conversa, não armazenado nos bancos de dados]"
 
 
 def _parse_ordinal_choice(text: str) -> int | None:
@@ -200,32 +206,32 @@ def _latest_operator_message_trigger(session: Session, conversation: Conversatio
 
 
 def pending_redaction_step(session: Session, conversation: Conversation) -> str | None:
-    """005/D-033: mirrors AA-10's own `booking_script_step`-keyed redaction
-    check (`booking_script/service.py::persisted_customer_body`), scoped to
-    GB's parallel CPF/payment flow instead. Returns `"AWAITING_CPF"` /
-    `"AWAITING_PAYMENT"` / `None` — same vocabulary AA-10 uses, so the one
-    call site in `anonymous_access/router.py` reads naturally against
-    both."""
+    """005/D-033, narrowed 2026-08-19 (human decision): only the CPF reply
+    is redacted — the payment-confirmation reply ("sim"/"não" and free-
+    form variants) is not sensitive the way a CPF is, and the human
+    explicitly asked to keep it verbatim for this step. Mirrors AA-10's
+    own `booking_script_step`-keyed redaction check
+    (`booking_script/service.py::persisted_customer_body`), scoped to GB's
+    own CPF step only. Returns `"AWAITING_CPF"` / `None` — reuses AA-10's
+    vocabulary for the one value that still applies."""
     if conversation.booking_script_step is not None:
         return None
     trigger = _latest_operator_message_trigger(session, conversation)
     if trigger == "GUIDED_SLOT_SELECTION":
         return "AWAITING_CPF"
-    if trigger == "GUIDED_CPF_CONFIRMED":
-        return "AWAITING_PAYMENT"
     return None
 
 
 def persisted_customer_body(session: Session, conversation: Conversation, raw_body: str) -> str:
-    """The only durable value for a customer message while GB's own CPF/
-    payment steps are pending — parsing still receives the request-local
-    raw value (via `interpret_cpf_reply`/`interpret_payment_reply` below),
-    only the stored `Message.body` is redacted."""
+    """The only durable value for a customer message while GB's own CPF
+    step is pending — parsing still receives the request-local raw value
+    (via `interpret_cpf_reply` below), only the stored `Message.body` is
+    redacted. The payment-confirmation reply is stored verbatim (human
+    decision, 2026-08-19) — `interpret_payment_reply` still reads it the
+    same way regardless, since it never depended on this function."""
     step = pending_redaction_step(session, conversation)
     if step == "AWAITING_CPF":
         return GB_CPF_INPUT_REDACTION
-    if step == "AWAITING_PAYMENT":
-        return GB_PAYMENT_INPUT_REDACTION
     return raw_body
 
 

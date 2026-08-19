@@ -438,6 +438,38 @@ export function OperatorPage() {
     const data = await api<{ created_d1: number; created_d7: number; already_sufficient: boolean; message: string }>("/operator/scheduling/ensure-availability", { method: "POST" }, token);
     setAvailabilityMessage(data.message);
   };
+  // Ops/testing convenience: `items` (scope=all) already scopes its ACTIVE
+  // rows to this operator's own assignments server-side, so every close()
+  // on an already-active conversation is authorized by construction. A
+  // WAITING one has no assignment yet — close() requires one
+  // (require_assignment), so each is claimed immediately before its own
+  // close call. Both loops are sequential, one conversation at a time (not
+  // Promise.all): for WAITING rows specifically, this also keeps this
+  // operator's active count low at every instant — each newly-claimed
+  // conversation is closed again before the next claim, so the V1
+  // max-4-active limit is never actually at risk regardless of how many
+  // WAITING conversations exist. One failure doesn't abort the rest; the
+  // queue list only reloads once, at the end.
+  const closeAllConversations = async () => {
+    const activeIds = items.filter((conversation) => conversation.status === "ACTIVE").map((conversation) => conversation.id);
+    const waitingIds = items.filter((conversation) => conversation.status === "WAITING").map((conversation) => conversation.id);
+    const total = activeIds.length + waitingIds.length;
+    if (total === 0) return;
+    if (!window.confirm(`Encerrar ${total} conversa(s) (${activeIds.length} ativa(s), ${waitingIds.length} aguardando)?`)) return;
+    for (const conversationId of activeIds) {
+      await api<ConversationSummary>(`/operator/conversations/${conversationId}/close`, { method: "POST" }, token);
+    }
+    for (const conversationId of waitingIds) {
+      await api<OperatorConversation>(`/operator/conversations/${conversationId}/claim`, { method: "POST" }, token);
+      await api<ConversationSummary>(`/operator/conversations/${conversationId}/close`, { method: "POST" }, token);
+    }
+    if (selectedId && (activeIds.includes(selectedId) || waitingIds.includes(selectedId))) {
+      setSelected(null);
+      setDraft(null);
+      setSearchEvidence([]);
+    }
+    await load();
+  };
   // V3-1: reachable from any message in the rendered history, not only the
   // latest draft. Idempotent server-side; the local Set only drives this
   // session's button feedback, reset on conversation switch (open()).
@@ -563,6 +595,7 @@ export function OperatorPage() {
         <StatusBadge status={conversation.status} />{" "}
         <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>
       </button>)}
+      <button type="button" className="btn-ghost" onClick={() => void closeAllConversations().catch((caught) => setError(errorMessage(caught)))}>Encerrar todas as conversas</button>
       <button type="button" className="btn-ghost" onClick={() => void ensureAvailability().catch((caught) => setError(errorMessage(caught)))}>Garantir disponibilidade (D+1/D+7)</button>
       {availabilityMessage && <p role="status" aria-live="polite">{availabilityMessage}</p>}
     </aside>
