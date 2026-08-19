@@ -3,10 +3,13 @@
 This is the executable definition of DONE for this feature, supplementary to
 `spec.md` §4. It extends V1/V2/V3's own acceptance packages (unchanged) and
 does not repeat scenarios this feature leaves untouched. Revised 2026-08-18
-same day as the spec's second clarification round — the query path (§A-C)
-and the seed action (§D-F) are now two clearly separated pieces with
-different triggers and different write permissions — and again the same
-day after the fourth round added the generalist specialty (AA-3a, §0).
+three times the same day: after the second round split the query path
+(§A-C) and the seed action (§D-F) into two clearly separated pieces with
+different triggers and different write permissions; after the fourth round
+added the generalist specialty (AA-3a, §0); after the fifth round added
+the booking script (AA-10, §L-O) — the one section group in this document
+that verifies an exception to Constitution Article III rather than an
+ordinary feature behavior.
 
 ## 0. Environment [AA-3a]
 
@@ -123,7 +126,71 @@ day after the fourth round added the generalist specialty (AA-3a, §0).
    the exact number needed — a negative test proves it cannot be made to
    over-create by calling it repeatedly or concurrently (§D.4).
 
-## J. V1/V2/V3 regression spot-check [outcome 10]
+## L. Booking script: exact scripted flow [AA-10, outcome 10]
+
+1. The full happy-path sequence (`spec.md` AA-10) plays out verbatim: both
+   valid-on-first-try steps (CPF, payment) produce exactly the specified
+   messages in order, with zero operator action.
+2. The invalid-CPF-then-valid branch: "123456a8910" (10 digits) produces
+   "CPF inválido..." and the flow stays on the same step; "123.456..789.10"
+   (11 digits) then produces "CPF 123.456.789-10 confirmado" and advances.
+3. The não-then-sim branch: "Então, não paguei" re-asks the identical
+   payment question (not a modified prompt, not an escalated one); "tabom
+   simm paguei" then advances to "Verificando pagamento".
+4. The script never runs LLM inference at any step — every message is a
+   literal, pre-written string (interpolated only with the formatted CPF
+   or the real seeded price).
+
+## M. Booking script: input parsing correctness [AA-10, outcome 11-12]
+
+1. `extract_cpf()`: any message yielding exactly 11 digits after removing
+   non-digit characters is valid; 10 or 12 digits is invalid; the
+   *real* Brazilian CPF check-digit algorithm is never applied — a
+   digit sequence that would fail real CPF validation still passes here
+   if it has exactly 11 digits (proving this is format-only, matching the
+   human's explicit "é uma simulação" instruction).
+2. `extract_payment_confirmation()`: every "sim" variant the human listed
+   affirms; every "não" variant, any unrecognized reply, and any reply
+   matching both patterns simultaneously all fail to affirm and cause a
+   re-ask with no retry limit — verified with at least 10 consecutive
+   non-affirmative replies still re-asking correctly (no hidden cap).
+
+## N. Booking script: no real persistence [AA-10, outcome 13]
+
+1. After a full run (success, or either retry branch), no table anywhere
+   in the database contains the raw CPF digits/formatted value or the raw
+   payment-question reply text — checked directly against
+   `Conversation`, `Message`, and `AuditEvent`.
+2. Only `Conversation.booking_script_step` changes during the flow, and it
+   only ever holds one of its two enumerated values or `NULL` — enforced
+   at the database level by a `CHECK` constraint, not only in application
+   code.
+3. No `scheduling.appointments`/`schedule_slots.status` row is created or
+   changed by the script — "Agendamento realizado" is a sentence, not a
+   state transition (§G already covers this structurally; this item
+   confirms it live, end to end, through the actual script).
+
+## O. Booking script: autonomous-send containment [AA-10, outcome 14]
+
+1. A structural test enumerates every `Message(author_type="OPERATOR",
+   ...)` construction site in the codebase and confirms each one (other
+   than `send_scripted_message`) is reached only through a function with
+   an authenticated-operator dependency in its call chain.
+2. `send_scripted_message` is imported only within `booking_script/` —
+   grep-verified, not just asserted.
+3. Every message it sends carries `Message.autonomous_source =
+   "booking_script"` and a corresponding
+   `booking_script.autonomous_message_sent` audit event — a single query
+   against either can enumerate every autonomously-sent message in the
+   system, completely, with nothing missed.
+4. `advance_booking_script()` is called from exactly one place
+   (`send_customer_message()`) — not the typing-heartbeat endpoint, not
+   any GET/poll path, not any operator-authenticated endpoint.
+5. A message expressing booking intent in a conversation with no prior
+   resolved `appointment_availability` generation never starts the
+   script — the trigger cannot fire out of context.
+
+## P. V1/V2/V3 regression spot-check [outcome 15]
 
 - the full pre-existing `smoke_*` suite (V1/V2/V3) passes unmodified
   against the rebuilt backend image;
@@ -131,11 +198,13 @@ day after the fourth round added the generalist specialty (AA-3a, §0).
   precedent to this feature) passes unmodified;
 - the pre-existing frontend suite (`v1.spec.ts`/`v2.spec.ts`/`v3.spec.ts`,
   `main.test.tsx`'s existing tests) is unaffected by this feature's new
-  button and endpoint — `eslint`/`tsc`/`vitest`/`vite build` all still pass,
-  and no existing Playwright scenario's behavior changes (the new button
-  lives outside any conditional those scenarios exercise).
+  button, endpoint, and booking script — `eslint`/`tsc`/`vitest`/
+  `vite build` all still pass, and no existing Playwright scenario's
+  behavior changes (the new button lives outside any conditional those
+  scenarios exercise; the booking script only reacts to messages
+  containing its own specific trigger phrasing).
 
-## K. Quality gates
+## Q. Quality gates
 
 - backend `ruff`/`mypy customer_care`/`pytest` all pass, including every
   new test file this feature adds;
@@ -144,10 +213,12 @@ day after the fourth round added the generalist specialty (AA-3a, §0).
   the first plan draft;
 - `contracts/openapi.yaml` (new file for this package) documents the one
   new `POST /operator/scheduling/ensure-availability` route and matches the
-  live route table — the query path itself still needs no contract entry
-  (unchanged, no new/changed customer-facing route or response schema for
-  it);
-- no material spec/plan/code divergence remains (`analysis.md`).
+  live route table — the query path itself and the booking script still
+  need no contract entry (unchanged, no new/changed customer-facing route
+  or response schema for either);
+- no material spec/plan/code divergence remains (`analysis.md`), including
+  a specific re-check that AA-10's autonomous-send exception has not
+  spread beyond `booking_script/` (`analysis.md` §10-11).
 
 ## Execution record
 

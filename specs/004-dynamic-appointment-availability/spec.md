@@ -5,8 +5,10 @@
 planning, tasks, analysis, and acceptance coverage required before
 implementation
 **Authorized for specification:** 2026-08-18
-**Scope:** read-only appointment-availability consultation, plus one
-explicit operator-triggered demo-seeding action (see §6)
+**Scope:** read-only appointment-availability consultation, one explicit
+operator-triggered demo-seeding action, and one narrowly-scoped simulated
+identity/payment-confirmation script authorized under Constitution
+Amendment 1.1.0 (see §6)
 
 ## 1. Purpose
 
@@ -235,11 +237,81 @@ action:
    (reusing `professional_specialties.appointment_duration_minutes` for
    that professional, so `ends_at` is always correct), and report how many
    were created.
-5. This is the **only** write path in this entire feature — the query path
-   (AA-2) never writes. It is reachable only by an authenticated,
+5. This was originally the *only* write path in this feature; AA-10 below
+   (added in a later round the same day) adds a second, materially
+   different one. The query path (AA-2) still never writes under any
+   circumstance. This action is reachable only by an authenticated,
    assignment-independent operator action (not conversation-scoped — this
    button is not about any one customer), audited like every other
    operator action (AA-7).
+
+### AA-10 — Simulated identity/payment-confirmation script (added 2026-08-18, Constitution Amendment 1.1.0)
+
+A fixed, deterministic, scripted conversation flow that plays out after a
+customer expresses intent to book one of the real slots AA-1..AA-9 showed
+them. **This is the one place in this entire codebase where a
+customer-visible message is sent without a per-message operator click** —
+narrowly authorized by Constitution Amendment 1.1.0 (`DECISIONS.md`
+D-031), strictly bounded to the fixed template messages below, never
+LLM-composed, never LLM-rewritten. See §5 item 11 for the full
+clarification record and the tradeoff the human was shown before choosing
+this over the one-click-per-message alternative.
+
+**Exact script** (human-specified verbatim; every "Operador:" line below
+is sent automatically, no operator click — every "Cliente:" line is real
+customer input the script reacts to):
+
+```
+Operador: "Agendamento realizado"
+Operador: "Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos"
+Cliente:  "Ah 123456a8910"                          [10 digits after stripping non-digits -> invalid]
+Operador: "CPF inválido. Informe um número válido de 11 dígitos"
+Cliente:  "tabom 123.456..789.10"                    [11 digits after stripping non-digits -> valid]
+Operador: "CPF 123.456.789-10 confirmado"
+Operador: "O valor da consulta é {valor real da especialidade discutida}"
+Operador: "O valor foi pago? Responda sim ou não"
+Cliente:  "Então, não paguei"                         [not "sim" -> re-ask, unlimited retries]
+Operador: "O valor foi pago? Responda sim ou não"
+Cliente:  "tabom simm paguei"                         ["sim" detected -> proceed]
+Operador: "Verificando pagamento"
+Operador: "Pagamento verificado"
+Operador: "Agendamento realizado com sucesso. Há algo mais que posso ajudar?"
+[flow ends]
+```
+
+Sub-mechanics:
+
+- **CPF parsing** (Pydantic-validated): strip every non-digit character
+  from the customer's message; valid iff exactly 11 digits remain —
+  **never the real Brazilian CPF check-digit algorithm**, any 11-digit
+  sequence passes, matching the human's explicit "é uma simulação"
+  framing. Formats as `###.###.###-##` for the confirmation message.
+- **Payment confirmation parsing**: case-insensitive regex for "sim"
+  variants (`sim`, `Sim`, `SIM`, `simm`, ...) versus "não" variants
+  (`não`, `nao`, `Não`, ...), word-boundary-aware so it works embedded in
+  a full sentence ("Então, não paguei", "tabom simm paguei"). Only an
+  affirmative match advances the flow; anything else (negative, unclear,
+  no match, or an ambiguous message matching both) re-asks the identical
+  question, with no retry limit.
+- **Trigger**: deterministic keyword detection of booking intent in a
+  customer message (e.g. "quero marcar", "pode agendar"), only considered
+  while no script is already in progress for that conversation.
+- **Price**: the real `professional_specialties.fixed_price_cents` for
+  whichever specialty the customer's most recent resolved
+  `appointment_availability` generation (AA-1..AA-9) was about — reuses
+  data this feature already reads, no new price source.
+- **No real reservation, payment, or identity persistence**: the CPF and
+  the payment yes/no answer are used only to decide the next scripted
+  message and are never written to any table — not `identity.patients`,
+  not a new table, nowhere (Constitution Article VI). No
+  `scheduling.appointments`/`schedule_slots.status` row is created or
+  changed either — "reserva" (actually holding a slot) is explicitly
+  **not** handled by this script (still deferred, `spec.md` §6) — this is
+  a conversational simulation only, not a functional booking system.
+- **Transient flow-position state**: which step a conversation is on
+  *is* persisted server-side (so an operator's page reload mid-flow
+  doesn't lose it) but as ordinary mutable relational state, not an
+  audited durable fact — see `data-model.md` §7.
 
 ## 4. Acceptance outcomes to develop into executable tests
 
@@ -283,7 +355,32 @@ action:
    08:00-18:00, and never creates more than the exact number needed to
    reach 1×`d1`/3×`d7` — a negative test proves it cannot be made to
    over-create by calling it repeatedly or concurrently.
-10. All V1/V2/V3 acceptance outcomes this spec's baseline lists as
+10. The booking script (AA-10): the exact scripted sequence in AA-10's
+    example plays out verbatim, including both retry branches (invalid
+    CPF once, then valid; "não" once, then "sim") — the happy path is the
+    expectation, but both retry branches must also work correctly, per
+    the human's own framing ("a expectativa é o fluxo de sucesso, com
+    capacidade de lidar com as variações citadas").
+11. The booking script's CPF check accepts any exactly-11-digit sequence
+    extracted from the customer's message (ignoring punctuation/letters
+    mixed in) and rejects anything else — never the real CPF check-digit
+    algorithm.
+12. The booking script's payment question is re-asked, unchanged, for any
+    reply that isn't recognized as an affirmative "sim" variant — including
+    an explicit "não", gibberish, or a reply matching neither — with no
+    retry limit, never advancing on anything but a clear "sim".
+13. Neither the CPF nor the payment yes/no answer is ever persisted to any
+    table — a negative test proves this structurally (no column/table
+    exists to hold either raw value) — only the current script *step*
+    (an enum-like marker, not the customer's actual input) is persisted.
+14. **The autonomous-send mechanism this script uses is provably scoped to
+    only this one flow** — a negative test proves no other message path in
+    the system can be triggered without an authenticated operator action
+    (re-confirming Article III holds everywhere else, Constitution
+    Amendment 1.1.0's own bound). Every autonomously-sent message is
+    audited with a distinct event type that a reviewer can use to tell it
+    apart from an operator-sent one at a glance.
+15. All V1/V2/V3 acceptance outcomes this spec's baseline lists as
     preserved still pass unmodified (spot-check, not a full rerun).
 
 ## 5. Decisions resolved with the human (2026-08-18)
@@ -361,25 +458,75 @@ action:
     as new seed data via a small migration — the one schema-adjacent
     change in this otherwise read/seed-existing-data-only feature.
 
+**Fifth round (2026-08-18, same day) — a new, materially different
+outcome:**
+
+11. **A static, scripted simulation of the identity/payment/booking-
+    confirmation flow was requested** — explicitly *not* real reservation
+    (`spec.md` §6 still excludes actually holding/booking a slot), but a
+    conversational simulation that asks for a CPF (format-only validated),
+    shows the real price, and asks for payment confirmation, following an
+    exact scripted sequence the human specified verbatim (AA-10).
+12. **Whether each scripted message still requires an explicit operator
+    click was raised as a first-class question**, because the human's
+    first answer ("rodar automaticamente, sem clique por mensagem") would
+    have been a direct conflict with Constitution Article III — the one
+    invariant that has never had an exception across V1, V2, V3, or any
+    N3/N4 autonomy discussion. The alternative (one-click-per-message via
+    the existing quick-approve action, nearly as fast operationally, zero
+    constitutional impact) was explained in full before asking again.
+13. **The human, now informed of exactly what Article III protects and
+    that no prior exception exists anywhere in this project, explicitly
+    chose to authorize a narrow constitutional exception** rather than the
+    zero-impact alternative — **Constitution Amendment 1.1.0**
+    (`.specify/memory/constitution.md`, `DECISIONS.md` D-031). The
+    exception is bound as tightly as the human's own request allows: only
+    this one script's fixed templates, never LLM-composed, no real
+    persistence of the booking/payment/identity data involved.
+14. **Trigger, price source, and packaging were confirmed**: the script
+    starts on deterministic detection of booking intent in a customer
+    message (not an operator action); the displayed price reuses this
+    feature's own already-seeded `professional_specialties` data for
+    whichever specialty was being discussed; this outcome is added to the
+    existing `004-dynamic-appointment-availability` package as an
+    extension (not a new package), per the human's explicit choice.
+
 ## 6. Explicitly out of scope unless newly approved
 
 - holding, reserving, confirming, rescheduling, or cancelling appointments
-  (`scheduling.appointments`/`appointment_events` writes) — unchanged from
-  `ROADMAP.md`'s existing deferral;
-- CPF, customer identity/profile persistence, consent capture
-  (`identity.*` writes);
-- payment (`billing.*`, the `payment_simulator` resolver);
+  — actually marking a `schedule_slots`/`scheduling.appointments` row as
+  held/booked (`scheduling.appointments`/`appointment_events` writes) —
+  unchanged from `ROADMAP.md`'s existing deferral; AA-10's script *talks
+  about* a booking having happened, it never creates one;
+- CPF, customer identity/profile *persistence*, consent capture
+  (`identity.*` writes) — AA-10 *asks for and format-validates* a CPF but
+  never stores it anywhere, which is a materially different, much
+  narrower thing than this exclusion, still fully intact;
+- payment *processing* (`billing.*`, the `payment_simulator` resolver,
+  any real payment integration) — AA-10 *asks whether payment happened*
+  and reacts to the answer, but never processes, verifies, or records a
+  real payment; "Verificando pagamento"/"Pagamento verificado" are fixed
+  strings, not a real check against anything;
 - price lookup (`price_lookup` resolver) and insurance lookup
   (`insurance_lookup` resolver) — structurally similar read-only patterns,
   but not authorized by this cycle; each would need its own explicit
-  authorization the same way this feature just received one;
-- any booking/hold/identity/payment-confirmation Q&A content (§5 item 3);
+  authorization the same way this feature just received one for AA-1..AA-9
+  (AA-10's own price display reuses already-authorized seeded data, not
+  the `price_lookup` resolver);
+- any booking/hold/identity/payment-confirmation Q&A content describing
+  behavior beyond AA-10's exact script (§5 item 3) — e.g. losing a
+  protocol number, booking for a minor, booking for someone else, remain
+  unimplemented and untouched;
 - the seed action (AA-9) creating/counting slots for any specialty other
   than "however many happen to exist" — it is a flat, specialty-agnostic
   count, not a per-specialty guarantee (that distinction is deliberate, not
   an oversight — see `plan.md`);
-- autonomous AI-to-customer send in any form — unchanged N4/Era-C exclusion;
-- N3 governed autonomy/policy enforcement — unchanged V4 exclusion;
+- autonomous AI-to-customer send **outside AA-10's one narrowly-authorized
+  script** — Constitution Amendment 1.1.0 is explicit that it does not
+  extend to any other outbound message in the system; every other
+  send path keeps the unmodified Article III rule;
+- N3 governed autonomy/policy enforcement — unchanged V4 exclusion, and
+  Amendment 1.1.0 explicitly does not set precedent for this;
 - the specialist-escalation workflow — unchanged V5 exclusion;
 - real patient data — unchanged Constitution Article VI exclusion.
 
@@ -388,15 +535,21 @@ action:
 - `plan.md` with the resolver's exact architecture (dispatch mechanism, the
   deterministic keyword-extraction vocabulary, audit event shape), the seed
   action's exact algorithm (AA-9), the new endpoint and operator-workspace
-  button, security, and testing decisions;
-- `data-model.md` documenting the one new migration (AA-3a: the seeded
-  generalist specialty/professionals/professional_specialties rows — data
-  only, no new column/table) and confirming no other change to the dormant
+  button, the booking script's exact state machine and autonomous-send
+  mechanism (AA-10), security, and testing decisions;
+- `data-model.md` documenting **two** new migrations — AA-3a's data-only
+  one (the seeded generalist specialty/professionals/professional_specialties
+  rows) and AA-10's schema one (a transient flow-position column plus a
+  marker distinguishing an autonomously-sent message from an
+  operator-sent one) — and confirming no other change to the dormant
   `scheduling`/`identity`/`billing` tables' shape beyond the query path's
-  ordinary reads and the seed action's `schedule_slots` inserts;
+  ordinary reads and the two write paths' (AA-9, AA-10) documented inserts;
 - a `contracts/openapi.yaml` delta for the new
   `POST /operator/scheduling/ensure-availability` endpoint (AA-9) — the
-  query path itself still needs no contract change (unchanged from the
-  first round; matches V2-6's no-new-route precedent for that part only);
+  query path itself and AA-10's script still need no contract change
+  (AA-10 has no new endpoint of its own — it reacts to the existing
+  customer-message endpoint — matching V2-6's no-new-route precedent);
 - `tasks.md`, `acceptance.md`, and a cross-artifact `analysis.md` before any
-  implementation, per `AGENTS.md`'s required SDD flow.
+  implementation, per `AGENTS.md`'s required SDD flow — `analysis.md`
+  especially must re-verify AA-10's autonomous-send mechanism cannot leak
+  into any other message path, given how exceptional it is.

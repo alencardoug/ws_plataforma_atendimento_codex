@@ -456,6 +456,164 @@ of §8's entry list) since the human specified the exact scenario;
 `tasks.md` T070 seeds them verbatim, alongside the new `oncologia-geral`
 migration (§3, `data-model.md` §5) they depend on.
 
+## 8b. AA-10 — Booking script: the one exception to Article III
+
+This is architecturally unlike everything else in this plan — every prior
+section describes a *draft* that still needs an explicit operator send.
+This section describes the one mechanism in the whole codebase authorized
+to skip that (Constitution Amendment 1.1.0, `DECISIONS.md` D-031), so it
+gets extra scrutiny: a dedicated module, a dedicated audit event, and
+negative tests proving the exception cannot leak beyond its exact bounds.
+
+### Module
+
+New module `app/customer_care/booking_script/` — deliberately its own
+domain, not a submodule of `scheduling/` (it orchestrates conversation
+flow and message-sending, only *reading* one piece of `scheduling` data —
+the price — same relationship `ai/` already has to `knowledge/`):
+
+- `booking_script/__init__.py`
+- `booking_script/parsing.py` — pure functions, no database, no I/O:
+  - `extract_cpf(text: str) -> str | None` — a Pydantic model with a
+    field validator: strip every non-digit character
+    (`re.sub(r"\D", "", text)`), require exactly 11 digits remain (never
+    the real CPF check-digit algorithm), format as `###.###.###-##` on
+    success, return `None` on validation failure (caught, not raised past
+    this function — the caller decides what to do with "invalid").
+  - `extract_payment_confirmation(text: str) -> bool | None` —
+    case-insensitive, word-boundary regex: `r"\bsim+\b"` for affirmative
+    (matches "sim", "Sim", "SIM", "simm", ...), `r"\bn[ãa]o\b"` for
+    negative (matches "não", "nao", "Não", ...). Returns `True` only on an
+    affirmative-only match; `False`/`None` (negative, no match, or both
+    matched — ambiguous, treated as unrecognized) all mean "not yet
+    confirmed," handled identically by the caller (re-ask).
+  - `detect_booking_intent(text: str) -> bool` — same small
+    keyword-substring style as `scheduling/availability.py`'s
+    `extract_parameters()` ("quero marcar", "pode agendar", "vou querer
+    esse horário", "confirma esse horário", ...) — deliberately a
+    separate, smaller vocabulary from `SPECIALTY_KEYWORDS`, not reused
+    from it (a different question: "does this customer want to book?" vs.
+    "which specialty?").
+- `booking_script/service.py` — the state machine and the one exceptional
+  send path:
+  - `advance_booking_script(session, conversation, customer_message) ->
+    None` — the single entry point (§ "Trigger" below).
+  - `send_scripted_message(session, conversation, body, request_id) ->
+    Message` — constructs an `author_type="OPERATOR"` `Message` directly
+    (no `send_operator_message`, no operator-auth dependency — there is no
+    operator in this call's context), sets the new
+    `Message.autonomous_source = "booking_script"` (`data-model.md` §7),
+    and records the new `booking_script.autonomous_message_sent` audit
+    event (§ "Audit" below). **This is the only function in the entire
+    codebase allowed to create a customer-visible `Message` without an
+    authenticated operator dependency in its call chain** — grep-able,
+    single-purpose, never imported anywhere except `booking_script/`
+    itself.
+
+### State machine
+
+```python
+class BookingScriptStep(str, Enum):
+    AWAITING_CPF = "AWAITING_CPF"
+    AWAITING_PAYMENT = "AWAITING_PAYMENT"
+    # None (Conversation.booking_script_step) means "not started" or "finished"
+
+def advance_booking_script(session: Session, conversation: Conversation, customer_message: Message) -> None:
+    step = conversation.booking_script_step
+    if step is None:
+        if not detect_booking_intent(customer_message.body):
+            return
+        if not has_recent_resolved_availability(session, conversation):
+            return  # never start the script out of context — needs a real slot to have been shown first
+        send_scripted_message(session, conversation, "Agendamento realizado")
+        send_scripted_message(session, conversation, "Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos")
+        conversation.booking_script_step = BookingScriptStep.AWAITING_CPF
+        return
+
+    if step == BookingScriptStep.AWAITING_CPF:
+        cpf = extract_cpf(customer_message.body)
+        if cpf is None:
+            send_scripted_message(session, conversation, "CPF inválido. Informe um número válido de 11 dígitos")
+            return  # stays on AWAITING_CPF, no retry limit
+        send_scripted_message(session, conversation, f"CPF {cpf} confirmado")
+        price = lookup_recent_specialty_price(session, conversation)  # §4/§4b's already-seeded data
+        send_scripted_message(session, conversation, f"O valor da consulta é {format_price(price)}")
+        send_scripted_message(session, conversation, "O valor foi pago? Responda sim ou não")
+        conversation.booking_script_step = BookingScriptStep.AWAITING_PAYMENT
+        return
+
+    if step == BookingScriptStep.AWAITING_PAYMENT:
+        if extract_payment_confirmation(customer_message.body) is not True:
+            send_scripted_message(session, conversation, "O valor foi pago? Responda sim ou não")
+            return  # stays on AWAITING_PAYMENT, no retry limit, regardless of "não" vs. unrecognized
+        send_scripted_message(session, conversation, "Verificando pagamento")
+        send_scripted_message(session, conversation, "Pagamento verificado")
+        send_scripted_message(session, conversation, "Agendamento realizado com sucesso. Há algo mais que posso ajudar?")
+        conversation.booking_script_step = None  # flow complete, reset — a later "quero marcar" can start fresh
+        return
+```
+
+`has_recent_resolved_availability()` checks for an `AIGeneration` on this
+conversation with `dynamic_pattern_used=true` and a resolver of
+`appointment_availability` (i.e., a real successful AA-1..AA-9 answer) —
+this is the concrete form of AA-10's own framing, "after a customer
+expresses intent to book one of the real slots AA-1..AA-9 showed them."
+`lookup_recent_specialty_price()` reads that same generation's
+`category_slug` and joins to `ProfessionalSpecialty.fixed_price_cents`
+(§3) — no new price source, reuses exactly what AA-1..AA-9 already read.
+
+No artificial delay between "Verificando pagamento" and "Pagamento
+verificado" — both send immediately in the same call. Adding a fake wait
+would need a background timer/scheduler, which Constitution Article VIII
+forbids without a measured need; none exists for a demo simulation.
+
+### Trigger: hooked into the existing customer-message endpoint
+
+`anonymous_access/router.py`'s `send_customer_message()` gains one call,
+right before its existing `session.commit()`:
+
+```python
+message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=payload.body)
+session.add(message)
+session.flush()
+conversation.last_message_at = message.created_at
+conversation.last_customer_activity_at = message.created_at
+record_event(session, "message.customer_received", ...)
+advance_booking_script(session, conversation, message)  # new
+session.commit()
+```
+
+Same transaction, same request — no debounce, no background job (unlike
+V2-7's AI-draft trigger, whose debounce exists specifically to batch
+LLM-costly generations; this script never calls an LLM, so there is
+nothing to batch). Not hooked into the typing-heartbeat endpoint or any
+GET/poll path — this script only ever reacts to an actual submitted
+customer message, never to typing activity or an operator's page load.
+
+### Audit
+
+One new event type, `booking_script.autonomous_message_sent` — payload
+`{conversation_id, message_id, step}` (the step the flow was *on* when
+this message was sent — e.g. `"AWAITING_CPF"` for the "CPF inválido"
+retry). **Never the customer's raw CPF or their raw payment-question
+reply** (Article VI). This event type's entire purpose is to be
+grep-able/reportable on its own: any audit review can answer "which
+messages in this system were ever sent without an operator's click" with
+one query — `SELECT * FROM audit_events WHERE event_type =
+'booking_script.autonomous_message_sent'` — and get a complete,
+exhaustive answer, by construction (§ "Prohibited shortcuts" repeats this
+as a hard boundary).
+
+### What is never persisted
+
+- The raw CPF digits/formatted value — used once, in-memory, to build the
+  confirmation message, then discarded. Not on `Conversation`, not in the
+  audit payload, not anywhere.
+- The raw payment-question reply text or the parsed `True`/`False` —
+  same treatment. Only `Conversation.booking_script_step` persists, and
+  it is an enum-like marker of *position in the script*, not of any
+  customer-supplied value.
+
 ## 9. Security
 
 - The query path is reachable only through the exact same authenticated-
@@ -484,6 +642,28 @@ migration (§3, `data-model.md` §5) they depend on.
   queried, or referenced anywhere in this feature's code — a negative test
   (acceptance outcome 7) proves this structurally via module-level
   introspection, not just behaviorally.
+- **`send_scripted_message()` (§8b) is the only place in the entire
+  codebase that constructs a customer-visible `Message` without an
+  authenticated-operator dependency anywhere in its call chain.** A
+  structural test (acceptance outcome 14) greps every other
+  `Message(author_type="OPERATOR", ...)` construction site in the codebase
+  and asserts each one is reached only through a function that has
+  `CurrentOperator` (or an equivalent already-authenticated context) in
+  its parameter list — proving the exception is contained to exactly one
+  function, not a pattern that quietly spread.
+- `advance_booking_script()` is called from exactly one place
+  (`send_customer_message()`) — not from the typing-heartbeat endpoint,
+  not from any GET/poll path, not from the operator-authenticated message
+  endpoints. It never fires for a conversation with no prior resolved
+  `appointment_availability` generation (guards against a stray "quero
+  marcar" in an unrelated conversation ever starting the script).
+- `booking_script/parsing.py`'s functions take only the customer's own
+  message text as input, return only a validated/normalized value or
+  `None`/`False` — no raw customer text ever reaches
+  `send_scripted_message()`'s `body` parameter (every scripted message is
+  a fixed template string, at most interpolated with the *feature's own*
+  data — the formatted CPF, the real seeded price — never verbatim
+  customer input).
 
 ## 10. Testing implementation
 
@@ -529,6 +709,40 @@ LLM/embedding provider).
 - Frontend: `main.test.tsx` gains a test for the new button — click calls
   the endpoint, renders the returned message, works with no conversation
   selected.
+- `test_booking_script_parsing.py` — pure unit tests, no database:
+  `extract_cpf()` on the human's own two examples ("123456a8910" → `None`,
+  "123.456..789.10" → `"123.456.789-10"`), plus a clean 11-digit input, a
+  10-digit input, a 12-digit input, an empty string; `extract_payment_confirmation()`
+  on the human's own two examples ("Então, não paguei" → `False`/not-`True`,
+  "tabom simm paguei" → `True`), plus "sim", "Sim", "SIM", "não", "nao",
+  "Não", a message containing neither, and a message containing both
+  (must not resolve `True`); `detect_booking_intent()` on several phrasings
+  and a negative (an unrelated message).
+- `test_booking_script_flow.py` — integration tests against a real (test)
+  database, driving `advance_booking_script()` message-by-message: the
+  full happy path produces exactly the human's script verbatim; the
+  invalid-CPF-then-valid branch; the não-then-sim branch (asserting the
+  payment question repeats verbatim, not a modified prompt); a message
+  with booking intent but no prior resolved availability generation never
+  starts the script; a second "quero marcar" after a completed flow starts
+  a fresh one (state correctly reset to `None`); **every sent message has
+  `autonomous_source = "booking_script"` and a corresponding
+  `booking_script.autonomous_message_sent` audit event with no raw
+  CPF/payment-reply text in its payload**; the raw CPF and payment answer
+  are never found in any table afterward (`Conversation`, `Message`,
+  `AuditEvent` all checked).
+- `test_booking_script_containment.py` — the structural negative test from
+  §9: every other `Message(author_type="OPERATOR", ...)` construction site
+  in the codebase is reached only through an authenticated-operator
+  dependency; `send_scripted_message` is imported only within
+  `booking_script/`.
+- `smoke_v4_booking_script.py` — real end-to-end HTTP smoke: a real
+  customer conversation, resolve availability (AA-1..AA-9) for real, send
+  a booking-intent message, confirm the script's first two messages
+  appear with no operator action; walk the full CPF/payment happy path via
+  real customer message posts, confirm the exact final message; confirm
+  no `identity.*`/`billing.*`/`scheduling.appointments` row was created at
+  any point.
 
 ## 11. Performance
 
@@ -541,32 +755,51 @@ handful of milliseconds, triggered only by an explicit operator click, never
 automatically, never on the customer-facing hot path. No caching, no
 background job, no new infrastructure — consistent with every other V1-V3
 decision to avoid infrastructure until a measured need exists (Constitution
-Article VIII; none exists here at demo scale).
+Article VIII; none exists here at demo scale). The booking script
+(`advance_booking_script()`) runs synchronously inside the existing
+customer-message request — a handful of string operations and at most 6
+`INSERT`s (the human's script's longest single reaction, the CPF-confirmed
+step) — negligible, no batching/queueing needed at demo scale.
 
 ## 12. Deliverables
 
-- `app/alembic/versions/`: one new, additive, forward-only migration
-  seeding the `oncologia-geral` generalist specialty/professionals/
-  professional_specialties rows (AA-3a, `data-model.md` §5)
+- `app/alembic/versions/`: two new, additive, forward-only migrations —
+  one seeding the `oncologia-geral` generalist specialty/professionals/
+  professional_specialties rows (AA-3a, `data-model.md` §5), one adding
+  `Conversation.booking_script_step` and `Message.autonomous_source`
+  (AA-10, `data-model.md` §7)
 - `app/customer_care/scheduling/__init__.py`, `models.py`,
   `availability.py` (query, read-only), `seeding.py` (AA-9 write path),
   `router.py` (new endpoint)
+- `app/customer_care/booking_script/__init__.py`, `parsing.py`,
+  `service.py` (AA-10 — the one Article III exception)
 - `ai/router.py`: `NAMED_RESOLVERS` dispatch, `dynamic_pattern_result()`
   signature gains `query_text`, both call sites updated
+- `anonymous_access/router.py`: `send_customer_message()` gains the one
+  call to `advance_booking_script()`
 - `bootstrap.py`: register `scheduling_router`
 - `frontend/src/main.tsx`: one new button + status line in `OperatorPage`
+  (AA-9); no frontend change for AA-10 — its messages render through the
+  conversation view exactly like any other `Message` row (a small
+  "automático" badge is a nice-to-have, not required — see `tasks.md`)
 - `contracts/openapi.yaml` (new file for this package): the one new
-  `POST /operator/scheduling/ensure-availability` route
+  `POST /operator/scheduling/ensure-availability` route — AA-10 adds no
+  route of its own
 - `docs/architecture/EVENT_CATALOG.md`: note on `ai.dynamic_pattern_resolved`'s
-  two new optional payload fields, plus a new row for
-  `scheduling.availability_seeded`
+  two new optional payload fields; new rows for
+  `scheduling.availability_seeded` and
+  `booking_script.autonomous_message_sent` (the latter flagged prominently
+  as the one event type marking a non-operator-gated send)
 - Q&A content cleanup script (§8) — soft-deactivates the 5 out-of-scope
   `agenda` entries, keeps/edits the in-scope ones
 - `app/tests/test_appointment_availability_keywords.py`,
   `test_appointment_availability_resolver.py`,
-  `test_appointment_seeding.py`, `smoke_v4_appointment_availability.py`
+  `test_appointment_seeding.py`, `smoke_v4_appointment_availability.py`,
+  `test_booking_script_parsing.py`, `test_booking_script_flow.py`,
+  `test_booking_script_containment.py`, `smoke_v4_booking_script.py`
 - `frontend/src/main.test.tsx`: one new test for the button
-- `data-model.md`, `tasks.md`, `acceptance.md`, `analysis.md`,
+- `.specify/memory/constitution.md` (already amended, D-031), `spec.md`,
+  `data-model.md`, `tasks.md`, `acceptance.md`, `analysis.md`,
   `checklists/{requirements,security,traceability}.md`
 
 ## 13. Prohibited shortcuts
@@ -592,5 +825,31 @@ Article VIII; none exists here at demo scale).
   authorized future feature;
 - no new scheduler/cron/background-job process — the seed action is
   triggered only by an explicit, authenticated operator click;
-- no customer-facing endpoint or customer-visible UI change — the one new
-  endpoint/button is operator-only.
+- no customer-facing endpoint for AA-9 — that button/endpoint stays
+  operator-only (AA-10 has no endpoint at all, see below);
+- **`send_scripted_message()` (AA-10) must never be called from anywhere
+  outside `booking_script/service.py`'s own `advance_booking_script()`** —
+  no other module, no other trigger, no future feature may reuse it "since
+  it's already there." Constitution Amendment 1.1.0 authorizes exactly one
+  script, not a general-purpose autonomous-send utility;
+- **no message body passed to `send_scripted_message()` may ever be built
+  from customer-supplied text** — only the fixed template strings from
+  `spec.md` AA-10's script, at most interpolated with this feature's own
+  data (the formatted CPF, the real seeded price). If a future change to
+  this script ever needs to echo something the customer said, that is by
+  definition no longer "a fixed, human-authored template" and falls
+  outside the amendment — stop and get new authorization first, per
+  `CLAUDE.md`'s stop conditions;
+- **no LLM call anywhere in `booking_script/`** — the entire point of the
+  amendment's narrow scope is that these messages are 100% deterministic
+  and pre-written; introducing an LLM call here (even just to "phrase it
+  more naturally") would combine autonomous send with unreviewed generated
+  content, which is categorically outside what was authorized;
+- the real Brazilian CPF check-digit algorithm must never be implemented
+  here — `extract_cpf()` stays a pure digit-count check, matching the
+  human's explicit "é uma simulação" framing; implementing real validation
+  would misrepresent this as doing more than it does;
+- no `scheduling.appointments`/`schedule_slots.status` write from
+  `booking_script/` — "Agendamento realizado" is a scripted sentence, not
+  a real state change; a real booking write would silently cross into
+  D-026's still-deferred feature through the back door.

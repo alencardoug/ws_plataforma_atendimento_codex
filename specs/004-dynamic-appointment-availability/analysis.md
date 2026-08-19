@@ -231,13 +231,104 @@ it gets the same rigor as any other new-data decision in this codebase.
   trade a real deployment might revisit, not a concern for this synthetic
   demo (Constitution Article VI).
 
-## 9. Verdict (current)
+## 9. Verdict (third design, superseded — see §10-11)
+
+No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
+`tasks.md`, and `acceptance.md` as of this review. This verdict covered
+the design through the fourth clarification round (the generalist
+specialty). It was superseded the same day by the fifth round, which adds
+a materially different kind of outcome — see §10.
+
+## 10. Revision review — fifth clarification round: the booking script and Constitution Amendment 1.1.0 (2026-08-18, same day)
+
+This round is categorically different from every prior one in this
+package: it is the first time any artifact in this entire project
+authorizes a customer-visible message to be sent without an authenticated
+operator action. That makes this review's job different too — not just
+"is the design internally consistent" (§2-9's method) but "is the
+exception this design implements airtight, and does it leak."
+
+### What was checked, and how
+
+- **The constitutional text itself** (`.specify/memory/constitution.md`
+  Amendment 1.1.0) was read against `plan.md` §8b/§13 line by line: every
+  bound the amendment states (fixed templates only, never LLM-composed,
+  no real persistence, does not extend to any other outbound path) has a
+  corresponding, specific enforcement mechanism in the plan — not just a
+  restated promise. Table:
+
+  | Amendment bound | Plan.md enforcement |
+  |---|---|
+  | "fixed, human-authored template set... never LLM-composed" | `advance_booking_script()`'s every `send_scripted_message()` call site uses a literal string, interpolated only with this feature's own data (CPF format, seeded price) — no LLM/embedding provider is imported anywhere in `booking_script/` (§13) |
+  | "does not extend to any other outbound message" | `send_scripted_message()` is called from exactly one place (`advance_booking_script()`), itself called from exactly one place (`send_customer_message()`); a dedicated structural test (T096) greps every other operator-message construction site in the codebase |
+  | "no real booking, payment, or identity persistence" | no new column holds a CPF or payment answer — only `booking_script_step`, an enum-like position marker (`data-model.md` §7); no `scheduling.appointments`/`schedule_slots.status` write anywhere in `booking_script/` (§13) |
+- **The `CHECK` constraints in the new migration** (`data-model.md` §7)
+  were verified to enumerate the *only* legal values at the database
+  level, not just in Python — so even a future bug in application code
+  cannot write an unauthorized `booking_script_step`/`autonomous_source`
+  value; the database itself refuses it.
+- **The trigger's scope was checked for false positives**: `plan.md` §8b's
+  `has_recent_resolved_availability()` guard was added specifically so a
+  stray "quero marcar" in an unrelated conversation (one that never saw a
+  real availability answer) cannot start the script — re-derived from
+  `spec.md` AA-10's own intro sentence ("after a customer expresses intent
+  to book one of the real slots AA-1..AA-9 showed them"), not invented
+  independently.
+- **Audit traceability was checked for the specific claim `plan.md` §8b
+  makes** — that a reviewer can enumerate every autonomously-sent message
+  in the system with one query. Confirmed: `messages.autonomous_source`
+  (queryable directly) and `booking_script.autonomous_message_sent`
+  (queryable via the existing audit-event table) both independently answer
+  that question, redundantly, so neither being incomplete alone hides
+  anything.
+- **The decision record was checked against what actually happened in
+  this conversation**: `DECISIONS.md` D-031 states the human was shown the
+  one-click-per-message alternative and its zero constitutional impact
+  before choosing the exception, and was asked to confirm a second time
+  after that explanation. Both are factually accurate to how this
+  clarification round actually unfolded, not a retroactively cleaned-up
+  account.
+- **`spec.md` §6's exclusion list was re-checked for internal
+  contradiction** with the new AA-10 outcome — found and fixed three
+  places where "CPF/payment/identity" and "autonomous send" were
+  previously stated as flatly excluded (accurate before this round, wrong
+  after it); each was rewritten to state the *narrower* thing that remains
+  excluded (real persistence, real payment processing, every *other*
+  outbound path) rather than deleting the exclusion outright.
+
+### New residual risks from this revision
+
+- **This is the first exception to a previously-absolute rule in this
+  project.** Even though it is narrowly bound today, its mere existence
+  changes the shape of a future "can we make X automatic too" request —
+  the next such request can no longer be answered with "there has never
+  been an exception," only "there is exactly one, this narrow, for this
+  reason." Worth naming explicitly so a future reviewer doesn't
+  under-weight how deliberately this one was scoped.
+- **`booking_script_step`'s `CHECK` constraint enumerates exactly 2
+  values today.** Any future extension of the script (a new step) needs
+  its own migration to widen that constraint — a good thing (forces
+  deliberate schema review before the script can grow), but worth flagging
+  so it isn't mistaken for an oversight if a future change trips it.
+- **The generalist specialty's price (`data-model.md` §5, R$600) is the
+  number AA-10's script will actually display** for a "primeira consulta"
+  booking — this is the first place in the feature where AA-3a's pricing
+  choice has a second-order customer-facing effect beyond the availability
+  answer itself; still a reasonable, deliberately-lower-than-the-others
+  number, not a new concern, just newly load-bearing.
+
+## 11. Verdict (current)
 
 No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
 `tasks.md`, and `acceptance.md` as of this latest review; §2's finding and
-§6's and §8's re-checks/fixes are all repaired in place before any
-implementation began. `checklists/requirements.md`'s final item
+§6's/§8's/§10's re-checks/fixes are all repaired in place before any
+implementation began. Every bound Constitution Amendment 1.1.0 states has
+a specific, checked enforcement mechanism (§10's table) — this is not a
+promise resting on prose alone. `checklists/requirements.md`'s final item
 ("cross-artifact analysis reports no material contradiction") is satisfied
 by this document. This feature is ready to move from artifact authoring
 into `tasks.md` Phase 1 implementation, per `AGENTS.md`'s required SDD
-flow.
+flow. Given AA-10's exceptional nature, `tasks.md` Phase 10/T082 must
+re-run this containment review one more time against the *real*
+implementation before the feature can be declared DONE — a stronger bar
+than this package's other outcomes get.

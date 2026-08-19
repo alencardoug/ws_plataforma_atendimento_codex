@@ -1,15 +1,16 @@
 # Data Model: Dynamic Appointment Availability
 
-No schema change (no new table/column/index/constraint) is required —
-every table this feature reads or writes already exists
-(`db/init/001_schema.sql`, applied before Alembic history began, preserved
-as-is per V1 `plan.md` §1). **One data-only migration is still needed**
-(§5, added 2026-08-18): seeding a new generalist specialty, the same kind
-of reference data `db/init/002_seed_and_schedule.sql` already contains for
-the original 3 specialties — it just can't go in that frozen file, so it
-goes in a migration instead. This document records the new SQLAlchemy ORM
-mappings this feature adds, that one migration, and confirms nothing else
-about the existing schema's shape changes.
+The `scheduling` schema's existing tables need no shape change — every
+table AA-1..AA-9 read or write already exists (`db/init/001_schema.sql`,
+applied before Alembic history began, preserved as-is per V1 `plan.md`
+§1). **Two new migrations are needed**, from two different clarification
+rounds: §5's data-only one (seeding the new generalist specialty, AA-3a —
+the same kind of reference data `db/init/002_seed_and_schedule.sql`
+already contains for the original 3 specialties, just added the correct
+way since that file stays frozen) and §7's real schema one (two additive,
+nullable columns supporting AA-10's booking script). This document records
+the new SQLAlchemy ORM mappings this feature adds, both migrations, and
+confirms nothing else about the existing schema's shape changes.
 
 ## 1. New ORM mappings (`app/customer_care/scheduling/models.py`)
 
@@ -129,10 +130,63 @@ Idempotent by construction for a migration (`INSERT` with fixed UUIDs, run
 exactly once by Alembic's own bookkeeping — no `ON CONFLICT` needed here,
 unlike the runtime seed action's repeatable insert in §2).
 
-## 6. New audit event
+## 6. New audit event (AA-9)
 
 `scheduling.availability_seeded` (`customer_service.audit_events`, no
 schema change — the existing generic audit-event table, same as every
 other event type). Payload: `operator_id`, `created_d1`, `created_d7`,
 `already_sufficient`. Emitted by `scheduling/router.py`'s one endpoint,
 never by the query path.
+
+## 7. New migration: booking-script columns (AA-10)
+
+A real schema change — the first (and only) one this feature makes beyond
+AA-3a's data-only migration. Forward-only, `downgrade()` raises, matching
+this codebase's convention.
+
+```sql
+ALTER TABLE customer_service.conversations
+  ADD COLUMN booking_script_step text NULL
+  CHECK (booking_script_step IS NULL OR booking_script_step IN ('AWAITING_CPF', 'AWAITING_PAYMENT'));
+
+ALTER TABLE customer_service.messages
+  ADD COLUMN autonomous_source text NULL
+  CHECK (autonomous_source IS NULL OR autonomous_source IN ('booking_script'));
+```
+
+- **`conversations.booking_script_step`** — transient flow-position
+  marker (`plan.md` §8b). `NULL` means "no script in progress" (either
+  never started, or just completed and reset). A `CHECK` constraint
+  enumerates the only two valid in-progress values at the database level,
+  not just in application code — a third, unauthorized step value can
+  never be written even by a future bug. **Never holds the customer's CPF
+  or payment answer** — only which fixed prompt the conversation is
+  waiting on. Mutable relational state (Constitution Article IX's
+  "normal transactional state," not a fact requiring audit immutability),
+  the same category as `Conversation.status`/`effective_mode` already are.
+- **`messages.autonomous_source`** — `NULL` for every message in the
+  system except the ones `booking_script/service.py`'s
+  `send_scripted_message()` creates, which get `'booking_script'`. A
+  `CHECK` constraint again enumerates the only legal value at the database
+  level — this column existing at all, with exactly one legal non-null
+  value, is itself part of how Constitution Amendment 1.1.0's narrow scope
+  is enforced structurally, not just documented. This is the field the
+  frontend's optional "automático" badge (`tasks.md`) would key off, and
+  the field `acceptance.md`'s containment tests query directly.
+
+Both columns are additive and nullable — no backfill needed, no existing
+row's meaning changes, unrelated to AA-3a's migration (kept as two
+separate migrations, `plan.md` §12, since they address unrelated concerns
+authorized in different clarification rounds).
+
+## 8. New audit event (AA-10)
+
+`booking_script.autonomous_message_sent` (`customer_service.audit_events`,
+no schema change). Payload: `conversation_id`, `message_id`, `step` (the
+script step in effect when this message was sent). **Never the customer's
+raw CPF or raw payment-question reply, and never the sent message's own
+body** (redundant with `messages.body`, and keeping it out of the audit
+payload removes any temptation to search audit logs for customer-adjacent
+text here). This is the one event type in the entire catalog that exists
+specifically so a reviewer can enumerate every customer-visible message
+ever sent without an operator's click, in one query — see `plan.md` §8b.

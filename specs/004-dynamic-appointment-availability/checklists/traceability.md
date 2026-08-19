@@ -3,10 +3,9 @@
 Maps `spec.md` §3's confirmed outcomes to `tasks.md` phases/tasks and
 `acceptance.md` sections. V1/V2/V3's own traceability is unchanged and
 still governs everything this feature leaves untouched. Revised 2026-08-18
-twice more: once for the split into a read-only query path and a separate
-operator-triggered seed action (AA-9), and again after AA-3a (the seeded
-generalist specialty) replaced the original "no specialty → unfiltered"
-design.
+three times: for the split into a read-only query path and a separate
+operator-triggered seed action (AA-9); for AA-3a (the seeded generalist
+specialty); for AA-10 (the booking script) and Constitution Amendment 1.1.0.
 
 | Outcome | Primary tasks | Acceptance area |
 |---|---|---|
@@ -16,10 +15,11 @@ design.
 | AA-3a Seeded generalist specialty, not an unfiltered fallback | T009, T020, T031 | 0, B |
 | AA-4 Structured, timezone-aware evidence | T030 | A |
 | AA-5 Deterministic template rendering, never LLM-composed | T030 | A |
-| AA-6 Explicit operator send only | (unchanged V1 invariant) | J |
+| AA-6 Explicit operator send only (except AA-10) | (unchanged V1 invariant) | P |
 | AA-7 Append-only audit with safe provenance | T042, T051 | (security checklist) |
 | AA-8 Manual fallback for unavailable/empty/failed data | T030, T031 | F |
 | AA-9 Explicit, idempotent, operator-triggered D+1/D+7 seeding | T040, T041, T042, T060, T061 | D, E, I |
+| AA-10 Simulated identity/payment script (Constitution Amendment 1.1.0) | T090-T098 | L, M, N, O |
 
 ## `spec.md` §4 acceptance outcomes to `acceptance.md` sections
 
@@ -34,24 +34,30 @@ design.
 | 7 | No booking/identity/billing access | G |
 | 8 | Unimplemented-resolver regression | H |
 | 9 | Seed endpoint authorization + creation bounds | I |
-| 10 | V1/V2/V3 regression spot-check (incl. frontend gates) | J |
+| 10 | Booking script exact scripted flow | L |
+| 11 | Booking script CPF parsing correctness | M |
+| 12 | Booking script payment-confirmation parsing correctness | M |
+| 13 | Booking script never persists CPF/payment answer | N |
+| 14 | Booking script autonomous-send containment | O |
+| 15 | V1/V2/V3 regression spot-check (incl. frontend gates) | P |
 
 ## Non-functional coverage
 
 | Requirement | Primary tasks/tests | Acceptance area |
 |---|---|---|
-| No new infrastructure (Article VIII) | T040, `plan.md` §4b/§11 | E |
+| No new infrastructure (Article VIII) | T040, T093, `plan.md` §4b/§8b/§11 | E |
 | `scheduling` schema shape unchanged (D-024 dormancy preserved) | T010, `data-model.md` | G |
-| New migration applies cleanly, additive only | T009, `data-model.md` §5 | 0 |
+| New migrations apply cleanly, additive only | T009, T090, `data-model.md` §5/§7 | 0 |
 | Idempotency + bounded creation under concurrent seed calls | T041 | D |
-| Audit coverage for the resolver and the seed action | T042, T051 | (security checklist) |
-| Frontend button accessibility/behavior | T060, T061 | J |
+| Audit coverage for the resolver, seed action, and booking script | T042, T051, T093 | (security checklist) |
+| Frontend button accessibility/behavior | T060, T061 | J/P |
+| Autonomous-send containment (Constitution Amendment 1.1.0) | T096, `analysis.md` §10 | O |
 
 ## Executable evidence (populated as tasks land)
 
 | Coverage | Evidence |
 |---|---|
-| Migration correctness (4 specialties, 12 professionals) | `app/tests/test_appointment_availability_*.py` (planned, T011) |
+| Migration correctness (4 specialties, 12 professionals; booking-script columns) | `app/tests/test_appointment_availability_*.py` (T011), migration itself (T090) |
 | ORM mapping correctness | `app/tests/test_appointment_availability_*.py` (planned, T011) |
 | Deterministic keyword extraction (incl. generalist default) | `app/tests/test_appointment_availability_keywords.py` (planned, T021) |
 | Query-path correctness + no-write structural proof | `app/tests/test_appointment_availability_resolver.py` (planned, T031) |
@@ -59,3 +65,7 @@ design.
 | Dispatch/regression (generic path + unimplemented resolvers) | `app/tests/smoke_v2_dynamic_pattern.py` unmodified (planned check, T052) |
 | Seed endpoint auth + button behavior | `frontend/src/main.test.tsx` (planned, T061) |
 | End-to-end real HTTP smoke (query + seed) | `app/tests/smoke_v4_appointment_availability.py` (planned, T071) |
+| CPF/payment/booking-intent parsing correctness | `app/tests/test_booking_script_parsing.py` (planned, T092) |
+| Booking script full flow + non-persistence | `app/tests/test_booking_script_flow.py` (planned, T095) |
+| Autonomous-send containment (structural) | `app/tests/test_booking_script_containment.py` (planned, T096) |
+| End-to-end real HTTP smoke (booking script) | `app/tests/smoke_v4_booking_script.py` (planned, T097) |
