@@ -1,49 +1,327 @@
-# Plano de Teste Humano — Pós-V2
+# Plano de Teste Humano — Pós-V3 + Dynamic Appointment Availability
 
-**Preparado:** 2026-08-17
-**Estado do sistema:** V2 completo e implantado (`PROJECT_STATE.md`). Este
-documento é para você, humano, testar manualmente — não é um plano de
-automação.
+**Preparado:** 2026-08-17 · **Atualizado:** 2026-08-19
+**Estado do sistema:** V1, V2, V3 ("Measured N2") e a feature "Dynamic
+Appointment Availability" (004) estão todas **DONE** e implantadas em
+produção nesta atualização (`PROJECT_STATE.md`). Este documento é para
+você, humano, testar manualmente — não é um plano de automação.
 
-Antes de começar: eu limpei 12 registros de Q&A de teste (categorias
-`e2e-*`/`smoke-*`) que meus próprios testes automatizados deixaram ativos no
-banco durante a Fase 11. Isso não deveria mais aparecer nas suas buscas.
+**URL de produção:** `https://plataforma-atendimento-prod.web.app`
+(cliente em `/customer`, operador em `/operator` e
+`/operator/knowledge`). Espere alguns segundos de "cold start" na
+primeira requisição após um período ocioso (`min-instances=0` no Cloud
+Run) — não é bug.
+
+---
+
+## 0. O que há de novo desde a última vez (leia isto primeiro)
+
+Você já testou a V2 (Seção 2 antiga, preservada abaixo como Seção 5). Desde
+então foram implementadas **duas coisas separadas**:
+
+### V3 — "Measured N2": mais controle e visibilidade sobre o N2
+
+- **Ações novas sobre um rascunho de IA**: "Aprovação rápida", "Regenerar
+  com instrução", "Marcar como incorreto", "Escalar" (sinal de lacuna de
+  conteúdo, não roteamento para humano) e "Transformar em Q&A" a partir de
+  uma edição.
+- **Indicador de contagem regressiva** do rascunho automático (V2 já tinha
+  o rascunho automático; agora ele mostra quanto falta).
+- **Confirmação antes de encerrar** conversa (cliente e operador).
+- **Pesquisa de satisfação** pós-conversa, do lado do cliente.
+- **Campos guiados** na tela de conhecimento (categoria via combo box,
+  vínculo dinâmico via dropdown de tabela/colunas em vez de texto livre).
+- **Métricas somente-leitura** — não é uma tela nova, são consultas SQL
+  documentadas em `docs/metrics/v3_queries.sql` (Human Correction Rate,
+  taxa de abstenção, volume por categoria, resultado da pesquisa de
+  satisfação).
+- **Casos de avaliação** — um jeito durável de registrar pergunta/evidência
+  esperada por categoria, via API (`/operator/evaluation/cases`), sem tela
+  própria ainda. Sua planilha de teste manual (Seção 6 abaixo) agora tem um
+  lugar real para virar dado persistente.
+
+### Dynamic Appointment Availability (004) — agenda real (sintética) pela primeira vez
+
+Antes, **toda** pergunta sobre agenda/horário resultava em abstenção
+silenciosa (era o "achado concreto" da Seção 4.2 da versão anterior deste
+documento). Agora existe um resolvedor read-only real para uma categoria:
+
+- Perguntas de agenda (ex.: "tem horário amanhã à tarde para oncologia
+  geral?") podem retornar uma **resposta real com dados sintéticos** —
+  especialidade, profissional, data/hora, preço — em vez de abstenção,
+  desde que existam vagas cadastradas.
+- Um **botão do operador** ("Garantir disponibilidade (D+1/D+7)") garante
+  que sempre existam vagas simuladas para a especialidade "oncologia
+  geral" amanhã e daqui a 7 dias.
+- Um **fluxo simulado de confirmação de agendamento** (CPF fictício +
+  confirmação de pagamento) que — **única exceção em todo o sistema** —
+  envia mensagens ao cliente automaticamente, sem clique do operador. É
+  script fixo, nunca gerado por IA, e não persiste CPF/pagamento reais nem
+  cria uma reserva de verdade. Toda mensagem enviada por esse fluxo aparece
+  marcada com um selo "automático" na tela do operador.
+
+Teste a Seção 3 (V3) e a Seção 4 (agendamento dinâmico) primeiro — são as
+novidades. A Seção 5 (checklist funcional V1/V2, ainda válido) e a Seção 6
+(avaliação de RAG) continuam como referência de regressão.
 
 ---
 
 ## 1. Como usar este documento
 
-Três blocos, em ordem de prioridade decrescente para o seu objetivo atual:
+Cinco blocos, em ordem de prioridade decrescente:
 
-1. **Seção 4 primeiro** — é a que você pediu com mais ênfase (RAG). Contém um
-   achado concreto que já explica parte do comportamento "não refinado" que
-   você notou, antes mesmo de você tocar em tom/prompt.
-2. **Seção 2** — checklist funcional do que existe hoje, para confirmar que
-   nada quebrou e para você conhecer a superfície de teste (inclui a tela de
-   Registros de conhecimento que você pediu).
-3. **Seção 3** — o que vale testar/registrar já pensando em V3, para não
-   perder trabalho que você fizer agora.
+1. **Seção 3** — o que testar da V3 (feedback do operador, métricas, casos
+   de avaliação).
+2. **Seção 4** — o que testar da disponibilidade dinâmica de agendamento
+   (resolvedor real + fluxo simulado de confirmação).
+3. **Seção 5** — checklist funcional V1/V2, para confirmar que nada
+   quebrou (regressão).
+4. **Seção 6** — avaliação e melhoria do RAG, incluindo o achado sobre
+   `agenda` (agora parcialmente resolvido pela Seção 4).
+5. **Seção 7** — como registrar o que você encontrar (agora com um destino
+   real: `/operator/evaluation/cases`, não só planilha).
 
 ---
 
-## 2. Teste funcional do estado atual (V2)
+## 2. Ambiente
 
-Suba o ambiente (`docker compose up -d`) e use as credenciais do operador que
-você provisionou (`python -m customer_care.auth.seed_operator`, ver
-`OPERATIONS.md`).
+Você pode testar contra produção (URL no topo) ou localmente
+(`docker compose up -d`) com as credenciais do operador que você
+provisionou (`python -m customer_care.auth.seed_operator`, ver
+`OPERATIONS.md`). Em produção, use a conta de operador criada durante o
+provisionamento (ver `DEPLOYMENT.md`) — não é a mesma senha do ambiente
+local.
 
-### 2.1 Cliente (`/customer`)
+---
+
+## 3. Teste funcional da V3 ("Measured N2")
+
+### 3.1 Aprovação rápida (V3-2)
+
+- [ ] Gere um rascunho ("Gerar rascunho" ou automático). Sem editar nada,
+  use a ação de **aprovação rápida** — a mensagem deve chegar ao cliente
+  idêntica ao rascunho, com um clique só, e continuar sendo um envio
+  explícito do operador (não automático).
+- [ ] Confirme que aprovação rápida e "editar e enviar" ficam visualmente
+  distinguíveis (não é o mesmo botão).
+
+### 3.2 Regenerar com instrução (V3-6)
+
+- [ ] Com um rascunho gerado, use o campo de instrução livre (ex.: "seja
+  mais formal", "inclua o horário de atendimento") e regenere. O novo
+  rascunho deve refletir a instrução.
+- [ ] Confirme que a instrução em si **não** aparece em nenhuma tela do
+  cliente — é um campo interno/auditado, igual ao texto de busca manual já
+  era na V2.
+
+### 3.3 Marcar como incorreto e escalar (V3-1)
+
+- [ ] Em qualquer mensagem do histórico (não só a mais recente), marque
+  como "incorreto". Confirme que isso não desfaz nem reenvia nada — é só
+  uma marcação retroativa.
+- [ ] Use "Escalar" numa conversa onde a base de conhecimento realmente não
+  cobre a pergunta. Confirme que isso **não** cria fila nem roteamento para
+  atendente humano — é um sinal de lacuna de conteúdo (alimenta V3-5/V3-8),
+  não um handoff (isso continua sendo trabalho futuro da V5).
+
+### 3.4 Transformar edição em Q&A (V3-1 + V3-8)
+
+- [ ] Edite manualmente um rascunho antes de enviar (texto enviado
+  diferente do rascunho — isso já é classificado como `edit`
+  automaticamente, sem você escolher nada).
+- [ ] A partir dessa conversa, use "Transformar em Q&A". Confirme que o
+  formulário guiado abre **pré-preenchido**: pergunta = mensagem do
+  cliente, resposta = o texto que você realmente enviou, categoria =
+  sugestão default da categoria da conversa.
+- [ ] Confirme que nada é criado automaticamente — você precisa revisar e
+  confirmar explicitamente antes de o registro de Q&A existir de verdade.
+
+### 3.5 Campos guiados em `/operator/knowledge` (V3-8)
+
+- [ ] Ao criar/editar um Q&A, o campo "categoria" agora é um combo box
+  alimentado por um registro real (não texto livre) — mas ainda permite
+  criar uma categoria nova explicitamente.
+- [ ] O campo "Tabela" do vínculo dinâmico agora é um dropdown das tabelas
+  liberadas no allowlist do servidor (hoje inclui `knowledge_dynamic_fixture`
+  e, com a feature 004, o que for exposto do schema `scheduling`) — não dá
+  mais para digitar um nome de tabela inválido e só descobrir o erro depois
+  de salvar.
+- [ ] "Filtro"/"Colunas de saída" agora mostram as colunas reais da tabela
+  selecionada (introspecção ao vivo), em vez de JSON digitado à mão.
+
+### 3.6 Contagem regressiva do rascunho automático (V3-9)
+
+- [ ] Digite uma mensagem do lado do cliente e não envie. No operador,
+  além do "Cliente está digitando…", deve aparecer uma contagem regressiva
+  até o rascunho automático disparar (~8s de ociosidade).
+- [ ] Ao chegar a zero, deve aparecer um estado "gerando…" — a contagem não
+  fica parada em "0" como se nada estivesse acontecendo (o disparo real
+  pode levar mais um ou dois segundos por não haver um scheduler dedicado).
+
+### 3.7 Rolagem ao selecionar evidência (V3-10)
+
+- [ ] Faça uma busca manual com vários resultados, role a página para
+  baixo, clique "Selecionar" num resultado. A página deve voltar ao topo
+  automaticamente para mostrar o rascunho gerado.
+- [ ] Confirme que "Gerar rascunho" e "Regenerar com instrução" **não**
+  disparam essa rolagem (é escopo só da seleção de evidência).
+
+### 3.8 Confirmar antes de encerrar (V3-11)
+
+- [ ] Nos dois lados (cliente e operador), clique "Encerrar conversa" e
+  confirme que aparece um prompt "Deseja encerrar a conversa?" com opções
+  para confirmar ou voltar. Escolher "voltar" não deve mudar nada no
+  estado da conversa.
+
+### 3.9 Pesquisa de satisfação (V3-12)
+
+- [ ] Encerre uma conversa do lado do cliente. Deve aparecer uma pesquisa
+  opcional: nota de 1 a 5 (com emojis verde→vermelho) e uma pergunta
+  sim/não ("Sua necessidade foi resolvida?").
+- [ ] Confirme que responder é opcional — a conversa já foi encerrada antes
+  da pesquisa aparecer, e ignorá-la não trava nada.
+- [ ] Confirme que o lado do operador **não** tem um prompt equivalente
+  (é só do cliente, por desenho).
+
+### 3.10 Limpar rascunho/busca (V3-7)
+
+- [ ] Com um rascunho gerado e/ou resultados de busca manual na tela, use o
+  botão de limpar. O painel de rascunho e os resultados de busca devem
+  voltar a vazio, sem afetar a seleção de mensagens (isso continua sendo
+  "Desmarcar conversas", separado).
+
+### 3.11 Métricas somente-leitura (V3-3/V3-4)
+
+Não há tela nova — são consultas SQL documentadas. Rode:
+
+```
+psql "$DATABASE_URL" -f docs/metrics/v3_queries.sql
+```
+
+- [ ] Confirme que retornam: taxa de abstenção (geral e por categoria),
+  Human Correction Rate (`edit` / (`edit` + `approve`), geral e por
+  categoria), volume de geração por gatilho/categoria, e o resultado da
+  pesquisa de satisfação (nota média e taxa de resolução).
+- [ ] Confirme que o arquivo não tem nenhum `INSERT`/`UPDATE`/`DELETE` —
+  é somente-leitura por construção, não só por convenção de UI.
+
+### 3.12 Casos de avaliação (V3-5)
+
+Ainda sem tela própria — via API, com o token do operador:
+
+```
+curl -X POST "$BASE_URL/api/v1/operator/evaluation/cases" \
+  -H "Authorization: Bearer $OPERATOR_TOKEN" -H "Content-Type: application/json" \
+  -d '{"category_slug": "...", "question": "...", "expected_evidence_ids": [...]}'
+```
+
+- [ ] Crie um caso a partir de uma pergunta real que você já testou na
+  Seção 6. Confirme que ele fica isolado de conversas de produção — não
+  deve aparecer nas métricas da Seção 3.11 nem em nenhuma tela de cliente.
+- [ ] Lembre-se: V3 só guarda o caso. Não existe reexecução automática
+  ainda — isso é trabalho futuro.
+
+---
+
+## 4. Disponibilidade dinâmica de agendamento (feature 004)
+
+### 4.1 Garantir vagas simuladas (ação do operador)
+
+- [ ] Na tela `/operator` (não vinculada a uma conversa específica), clique
+  "Garantir disponibilidade (D+1/D+7)".
+- [ ] Primeira vez (ou se já faltavam vagas): deve relatar quantas vagas
+  foram criadas amanhã (D+1) e daqui a 7 dias (D+7) para a especialidade
+  "oncologia geral" — dentro do horário comercial (08:00–18:00,
+  `America/Sao_Paulo`).
+- [ ] Clique de novo imediatamente: deve relatar "já tem 4 vagas
+  disponíveis" (1 em D+1 + 3 em D+7) e **não criar nada novo** — é
+  idempotente.
+- [ ] Clique várias vezes rápido (dois cliques quase simultâneos, se
+  conseguir) — não deve duplicar vagas (serialização via lock).
+
+### 4.2 Resposta real via resolvedor (caminho do cliente)
+
+- [ ] Como cliente, pergunte algo como "tem horário amanhã à tarde?" ou
+  "quero marcar uma consulta, mas não sei qual especialidade" (sem nomear
+  especialidade — deve cair no generalista "oncologia geral" da AA-3a, não
+  numa busca sem filtro).
+- [ ] Do lado do operador, gere o rascunho. A resposta deve conter dados
+  reais e específicos: especialidade, profissional, data/hora, preço — sem
+  ser uma reescrita de LLM (texto de template, não "natural"/parafraseado).
+- [ ] Pergunte também nomeando uma especialidade existente e um período
+  ("de manhã"/"à tarde") — confirme que o filtro realmente restringe o
+  resultado.
+- [ ] Pergunte por uma especialidade/dia sem vaga cadastrada — deve cair em
+  abstenção/fallback manual, **nunca** inventar uma vaga.
+- [ ] Confirme que o rascunho continua sendo interno — só chega ao cliente
+  se o operador clicar enviar (isso não muda pela feature 004; só o
+  fluxo do item 4.3 abaixo é a exceção documentada).
+
+### 4.3 Fluxo simulado de confirmação (a única exceção de envio automático do sistema)
+
+Isso é a única automação de envio ao cliente sem clique do operador em
+todo o sistema (Emenda 1.1.0 da Constituição, D-031) — vale testar com
+atenção ao script exato:
+
+- [ ] Como cliente, após ver uma vaga real (passo 4.2), expresse intenção
+  de agendar (ex.: "quero marcar", "pode agendar essa consulta").
+- [ ] O sistema deve enviar automaticamente: `"Agendamento realizado"`,
+  depois `"Informe seu CPF - é uma simulação, informe qualquer número de 11
+  dígitos"` — sem o operador precisar clicar em nada.
+- [ ] Responda com um CPF inválido (ex.: `"Ah 123456a8910"`, que só tem 10
+  dígitos após remover não-dígitos) — deve pedir novamente, dizendo que o
+  CPF é inválido.
+- [ ] Responda com 11 dígitos em qualquer formato (ex.: `"tabom
+  123.456.789.10"`) — deve confirmar formatado como `123.456.789-10`.
+  **Confirme que este NÃO é o algoritmo real de dígito verificador de CPF**
+  — qualquer sequência de 11 dígitos passa (é simulação, documentado).
+- [ ] Em seguida, deve informar o valor real da especialidade discutida no
+  passo 4.2 e perguntar se foi pago (sim/não).
+- [ ] Responda algo que não seja afirmativo (ex.: `"não paguei"`) — deve
+  perguntar de novo, sem limite de tentativas.
+- [ ] Responda algo com "sim" embutido numa frase (ex.: `"tabom simm
+  paguei"`) — deve reconhecer como afirmativo e avançar para
+  `"Verificando pagamento"` → `"Pagamento verificado"` →
+  `"Agendamento realizado com sucesso. Há algo mais que posso ajudar?"`.
+- [ ] No lado do operador, cada uma dessas mensagens automáticas deve
+  aparecer com o selo **"automático"** (tooltip: "Enviada automaticamente
+  pelo fluxo de agendamento simulado, sem clique do operador") —
+  visualmente distinguível de uma mensagem enviada manualmente.
+- [ ] **Confirme que nenhuma reserva real foi criada**: nenhuma vaga muda
+  de status, não existe uma tabela de agendamentos populada — é só
+  conversa simulada. O CPF/confirmação de pagamento que você digitou não
+  deve reaparecer em nenhum outro lugar do sistema (auditoria, outra
+  conversa, etc.) além da própria mensagem de confirmação formatada que o
+  script mostrou.
+
+### 4.4 O que continua fora de escopo (verificação negativa)
+
+- [ ] Nenhum outro `dynamic_resolver` (`price_lookup`, `payment_simulator`,
+  `insurance_lookup`) responde — devem continuar abstendo exatamente como
+  antes desta feature.
+- [ ] Não existe tela de CRUD para especialidades/profissionais/vagas
+  individuais — só o botão "Garantir disponibilidade" e o resolvedor
+  read-only. Isso é deliberado (deferido para futuro trabalho separado).
+- [ ] O fluxo simulado (4.3) só começa depois de uma vaga real ter sido
+  mostrada — não dá para pular direto para "quero marcar" sem antes ver
+  uma disponibilidade real na conversa.
+
+---
+
+## 5. Checklist funcional do estado atual (V1/V2 — regressão)
+
+### 5.1 Cliente (`/customer`)
 
 - [ ] Iniciar conversa gera um código de 8 caracteres, sempre visível, com
   botão "Copiar" funcionando (sem clipboard, aparece aviso para copiar
   manualmente).
 - [ ] Enviar mensagem aparece na conversa; encerrar conversa funciona e
-  desabilita o envio.
+  desabilita o envio (agora passando pela confirmação da Seção 3.8).
 - [ ] Abrir a mesma conversa em duas abas diferentes usando IDs diferentes —
   confirme que não existe nenhum jeito de "recuperar" uma conversa a partir
   apenas do código (o código não é um login).
 
-### 2.2 Operador (`/operator`)
+### 5.2 Operador (`/operator`)
 
 - [ ] Login, fila mostra "Aguardando"/"Em atendimento" com badge colorido.
 - [ ] Reivindicar 4 conversas ativas; a 5ª deve ser rejeitada (capacidade
@@ -56,17 +334,17 @@ você provisionou (`python -m customer_care.auth.seed_operator`, ver
 - [ ] Com tudo desmarcado e busca manual vazia, "Gerar rascunho"/"Buscar
   evidências" ficam desabilitados.
 - [ ] Digite algo no campo de mensagem do cliente e **não envie** — em
-  poucos segundos aparece "Cliente está digitando…" no operador. Espere ~8s
-  sem digitar: um rascunho automático deve aparecer sozinho, sem o operador
-  clicar em nada.
+  poucos segundos aparece "Cliente está digitando…" no operador (agora com
+  a contagem regressiva da Seção 3.6).
 - [ ] "Buscar evidências": pesquise algo que bata com um Q&A administrativo
   e algo que bata com conteúdo clínico. Selecionar um resultado clínico deve
   trazer o **documento-pai inteiro**, nunca um resumo gerado por IA.
-- [ ] Envie uma resposta — confirme que ela chega no lado do cliente.
+- [ ] Envie uma resposta (manual ou via aprovação rápida, Seção 3.1) —
+  confirme que ela chega no lado do cliente.
 - [ ] "Assumir controle" muda a conversa para N1 e some com os controles de
   IA (a essa altura você está 100% manual naquela conversa).
 
-### 2.3 Registros de conhecimento (`/operator/knowledge`) — a tela que você pediu
+### 5.3 Registros de conhecimento (`/operator/knowledge`)
 
 - [ ] Criar uma pergunta e resposta simples (sem vínculo dinâmico); ela
   aparece na lista e fica encontrável em "Buscar evidências" em poucos
@@ -78,80 +356,60 @@ você provisionou (`python -m customer_care.auth.seed_operator`, ver
   real de embedding) e o novo texto passa a valer na próxima busca.
 - [ ] "Desativar" uma entrada — ela some da lista e da busca, mas gerações
   antigas que a usaram continuam íntegras (não é apagada de verdade).
-- [ ] Preencha o vínculo dinâmico (tabela/filtro/colunas) com um valor
-  qualquer que **não** seja `knowledge_dynamic_fixture` — deve ser rejeitado
-  na hora (`422`), não silenciosamente aceito. Isso é intencional: hoje só
-  existe uma tabela de teste liberada (veja a seção 4.2).
-- [ ] Repita o fluxo para um documento clínico (criar, ver seções, desativar).
+- [ ] Preencha o vínculo dinâmico usando o dropdown guiado (Seção 3.5) com
+  um valor fora do allowlist — deve ser rejeitado na hora (`422`), não
+  silenciosamente aceito.
+- [ ] Repita o fluxo para um documento clínico (criar, ver seções,
+  desativar).
 
-### 2.4 Coisas que devem continuar impossíveis (checagem de segurança rápida)
+### 5.4 Coisas que devem continuar impossíveis (checagem de segurança rápida)
 
 - [ ] Nenhum caminho manda mensagem para o cliente sem o operador clicar
-  "Enviar" explicitamente — mesmo o rascunho automático fica parado até
-  alguém agir.
+  "Enviar"/"Aprovação rápida" explicitamente — mesmo o rascunho automático
+  fica parado até alguém agir, **com a única exceção documentada e
+  visualmente marcada do fluxo simulado de agendamento (Seção 4.3)**.
+- [ ] O fluxo simulado (4.3) nunca compõe texto via LLM — são sempre os
+  mesmos templates fixos, independente do que o cliente escrever.
 - [ ] Tentar validar um token errado repetidamente (ex.: trocar o token no
   `sessionStorage` do navegador e recarregar) eventualmente resulta em
   `429`, não em `403` infinito.
 - [ ] Nenhuma tela de operador mostra a origem interna de uma evidência
-  administrativa (nomes de tabela, IDs de retrieval) para o cliente.
+  administrativa (nomes de tabela, IDs de retrieval) para o cliente —
+  incluindo as respostas do resolvedor de agenda (Seção 4.2): nunca deve
+  aparecer nome de tabela, nome do resolvedor, ou mensagem de erro interna.
 
 ---
 
-## 3. O que testar já pensando em V3
+## 6. Avaliação e melhoria do RAG
 
-O roadmap já define a V3 como **"Measured N2"** (`ROADMAP.md`), com:
-taxonomia completa de feedback do operador (aprovar/editar/regenerar/buscar/
-assumir/escalar/marcar-incorreto), "Human Correction Rate", métricas
-gerenciais somente-leitura e **conjuntos de avaliação (evaluation
-datasets/suites) organizados por categoria**.
+### 6.1 Três caminhos de resposta diferentes (agora quatro)
 
-Isso significa que o trabalho de teste que você fizer agora na Seção 4 **não
-é descartável** — se você registrar direito, ele vira o dataset seed da V3.
-Recomendações concretas para já ir se preparando:
-
-- **Registre, não só corrija.** Quando você editar uma resposta manualmente
-  porque o rascunho da IA veio ruim, anote a pergunta original + o rascunho
-  gerado + o que você mandou de fato. Isso é literalmente o "Human
-  Correction Rate" da V3, coletado à mão antes de existir automação para
-  isso.
-- **Valide a taxonomia de `category`.** A V3 promete "evaluation datasets
-  tied to categories" — as categorias que existem hoje em
-  `content.qa_entries.category` (veja a tabela na Seção 4.3) são o que será
-  usado para agrupar métricas futuramente. Se elas estiverem bagunçadas
-  (muito genéricas, sobrepostas, sem padrão), vale reorganizar agora que é
-  barato, antes que vire métrica.
-- **Anote em que ponto você quis "regenerar com instrução".** Essa ação
-  ainda não existe na V2 (só existe "Gerar rascunho" do zero) — se você
-  sentir falta dela durante o teste, isso é evidência real para priorizar
-  na V3, não uma suposição.
-- **Não teste geração automática em N1.** V3 ainda é sobre N2; não gaste
-  tempo validando comportamento de autonomia em N1, isso é V4+.
-
----
-
-## 4. Avaliação e melhoria do RAG (seção principal)
-
-### 4.1 Entenda que existem três caminhos de resposta diferentes
-
-Isso importa porque **cada caminho tem uma alavanca de qualidade diferente**
-— "melhorar o RAG" não é uma ação única, são três:
+"Melhorar o RAG" continua não sendo uma ação única — agora são **quatro**
+caminhos, cada um com sua própria alavanca de qualidade:
 
 | Caminho | Quando acontece | O que controla a qualidade final |
 |---|---|---|
 | **Documento clínico (pai)** | Evidência clínica no rank 1 | **Só o texto do chunk.** Não passa por LLM — o que está em `content_markdown` é literalmente o que vai para o operador, palavra por palavra. |
 | **Q&A administrativo (LLM)** | Evidência administrativa, sem vínculo dinâmico | O texto do Q&A (grounding) **+** o prompt (`prompts/rag_answer.md`), que define tom, tamanho, formalidade. |
-| **Padrão dinâmico** | Q&A com `dynamic_data_required=true` e vínculo configurado | O texto de `answer_markdown` com `{{variáveis}}` **+** os valores reais da tabela. Também não passa por LLM. |
+| **Padrão dinâmico (V2)** | Q&A com `dynamic_data_required=true` e vínculo de tabela configurado | O texto de `answer_markdown` com `{{variáveis}}` **+** os valores reais da tabela. Não passa por LLM. |
+| **Resolvedor de agenda (004)** | Mensagem do cliente reconhecida como pergunta de disponibilidade | Template fixo de resposta **+** os dados reais de `scheduling.schedule_slots` extraídos deterministicamente da mensagem (especialidade/data/período). Não passa por LLM. |
 
 Se uma resposta clínica está "sem refinamento", o problema está **no
-conteúdo do documento**, não no prompt — reescrever o prompt não vai mudar
-nada nesse caminho. Se uma resposta de Q&A está "sem refinamento", o
-problema pode estar nos dois lugares. Separe isso antes de mexer em
-qualquer coisa, ou você vai editar o lugar errado.
+conteúdo do documento**, não no prompt. Se uma resposta de Q&A está "sem
+refinamento", o problema pode estar nos dois lugares. Separe isso antes de
+mexer em qualquer coisa.
 
-### 4.2 Achado concreto: uma categoria inteira está sempre abstendo
+### 6.2 Achado anterior, agora parcialmente resolvido: categoria `agenda`
 
-Rodei esta consulta no banco atual (você pode rodar de novo mais tarde para
-ver como evolui):
+O achado da versão anterior deste documento (27 perguntas administrativas
+em 4 categorias sempre resultando em `ABSTAIN` por falta de vínculo
+dinâmico) segue válido para `preco`, `pagamento` e `convenio` — essas três
+continuam sem resolvedor. `agenda` agora tem uma solução real e parcial
+(Seção 4): perguntas que o extrator determinístico reconhece (especialidade
++ data/período, ou nenhuma especialidade → generalista) podem responder de
+verdade. Perguntas de agenda fora desse padrão continuam abstendo.
+
+Rode de novo para ver como evoluiu:
 
 ```sql
 SELECT qa.category, count(*) AS entries_needing_binding
@@ -162,45 +420,16 @@ GROUP BY qa.category
 ORDER BY entries_needing_binding DESC;
 ```
 
-Resultado agora:
+Para `preco`, `pagamento`, `convenio`, as mesmas três opções de antes
+continuam valendo: esperar uma feature futura equivalente à 004 para cada
+uma, reescrever como resposta estática "sempre verdadeira", ou aceitar a
+abstenção como lacuna de cobertura conhecida (e agora você pode registrar
+isso formalmente com "Escalar", Seção 3.3).
 
-| category | entradas sem vínculo |
-|---|---|
-| agenda | 14 |
-| preco | 6 |
-| pagamento | 4 |
-| convenio | 3 |
-
-**Isso significa que hoje, 27 perguntas administrativas (as 4 categorias
-acima, incluindo a maior categoria do catálogo inteiro — "agenda", com 14
-entradas) sempre resultam em `ABSTAIN` com rascunho vazio quando são a
-evidência de rank 1.** Não é um problema de tom: é ausência total de
-resposta da IA para um bloco inteiro de perguntas prováveis de cliente real
-("tem horário amanhã?", "quanto custa?", "vocês aceitam tal convênio?").
-
-Isso é esperado pelo desenho: `dynamic_binding.py` só libera a tabela de
-teste (`knowledge_dynamic_fixture`); nenhuma fonte real de agenda/preço está
-no allowlist ainda (isso é a feature futura separada "Dynamic appointment
-availability", `ROADMAP.md`/D-026 — fora do escopo da V2 por decisão sua).
-
-Três caminhos possíveis, você escolhe por categoria:
-
-1. **Esperar a feature futura de disponibilidade dinâmica** ser autorizada e
-   implementada (é a solução "de verdade" para `agenda`).
-2. **Remover `dynamic_data_required=true`** dessas entradas e reescrever
-   `answer_markdown` como uma resposta estática, "sempre verdadeira" (ex.:
-   "Consulte a agenda simulada em [tela]" em vez de citar uma data
-   específica) — vale para respostas que não mudam por linha do tempo.
-3. **Aceitar a abstenção** e garantir que os operadores saibam que, para
-   essas 4 categorias, vão sempre responder manualmente por enquanto — pelo
-   menos não é um comportamento silenciosamente quebrado, é uma lacuna de
-   cobertura conhecida.
-
-### 4.3 Roteiro de teste manual do RAG
+### 6.3 Roteiro de teste manual do RAG
 
 1. **Monte um banco de perguntas reais.** 20–40 perguntas que um cliente de
-   verdade faria, cobrindo as categorias existentes (rode a consulta abaixo
-   para ver quais existem e quantas entradas cada uma tem):
+   verdade faria, cobrindo as categorias existentes:
 
    ```sql
    SELECT category, count(*) FROM content.qa_entries
@@ -215,12 +444,10 @@ Três caminhos possíveis, você escolhe por categoria:
    - O `matched_child_excerpt` (para clínico) realmente bate com a pergunta?
 
    Só depois de confirmar que o retrieval trouxe a evidência certa, avalie a
-   geração (selecionar o item, ou "Gerar rascunho"). Se o retrieval já veio
-   errado, ajustar o prompt não vai consertar nada — o problema é o
-   conteúdo/embedding, não a composição do texto.
+   geração. Se o retrieval já veio errado, ajustar o prompt não vai
+   consertar nada.
 
-3. **Use uma rubrica simples por resposta** (arquivo de planilha, ou a
-   tabela de registro da Seção 5):
+3. **Use uma rubrica simples por resposta** (Seção 7):
 
    | Critério | Pergunta a fazer |
    |---|---|
@@ -231,51 +458,32 @@ Três caminhos possíveis, você escolhe por categoria:
    | Correção operacional | Você mandaria essa resposta sem editar? |
 
 4. **Repita depois de cada mudança** (conteúdo ou prompt) com o **mesmo**
-   banco de perguntas — sem isso você não sabe se melhorou ou só mudou.
+   banco de perguntas.
 
-### 4.4 Ajustando o retrieval (conteúdo)
+### 6.4 Ajustando o retrieval (conteúdo)
 
-- Edite diretamente pela tela `/operator/knowledge` — reescrever
-  `question`/`answer_markdown` refina tanto o que é *encontrado* (o texto
-  vira o embedding) quanto o que é *mostrado* (no caminho clínico/dinâmico,
-  é literalmente a resposta final).
+- Edite diretamente pela tela `/operator/knowledge` (agora com campos
+  guiados, Seção 3.5) — reescrever `question`/`answer_markdown` refina
+  tanto o que é *encontrado* quanto o que é *mostrado*.
 - Re-embedding é automático e só acontece quando o conteúdo realmente muda
-  (comparação por hash) — pode iterar várias vezes sem custo/risco de
-  duplicar processamento.
-- Se uma pergunta não encontra nada relevante, o problema pode ser falta de
-  cobertura (nenhum Q&A/chunk sobre aquele assunto) — crie uma entrada nova
-  em vez de tentar forçar uma existente a responder por semelhança.
-- Mantenha a taxonomia de `category` consistente (ver Seção 3) — isso ajuda
-  tanto você agora quanto a V3 depois.
+  (comparação por hash).
+- Se uma pergunta não encontra nada relevante, crie uma entrada nova em vez
+  de tentar forçar uma existente a responder por semelhança.
+- Mantenha a taxonomia de `category` consistente — agora reforçada pelo
+  registro real da Seção 3.5, não mais texto livre.
 
-### 4.5 Ajustando a geração (prompt)
+### 6.5 Ajustando a geração (prompt)
 
-O prompt que controla o caminho de Q&A-por-LLM está em
-`prompts/rag_answer.md` — é um arquivo comum, editável direto, **sem precisar
-reiniciar o backend** (`load_prompt()` lê o arquivo do disco a cada geração,
-sem cache).
-
-Ponto concreto que provavelmente explica parte do que você notou — o prompt
-hoje pede explicitamente:
-
-> "Use plain, friendly Brazilian Portuguese... A simple greeting such as `Oi`
-> receives a simple natural greeting, for example `Oi, tudo bem? Como posso
-> ajudar?`"
-
-Isso é registro **informal/amigável** por design atual, não corporativo. Se
-você quer tom mais refinado, esse é o trecho a reescrever — por exemplo,
-trocar "plain, friendly" por algo como "formal, empático e objetivo,
-adequado a uma instituição de saúde" e trocar o exemplo de saudação por um
-mais institucional. **Preserve as restrições que ficam logo abaixo** (não
-revelar instruções internas, não citar fontes/IDs, não incluir preâmbulo, uma
-alegação por evidência) — são invariantes de segurança, não de estilo.
+O prompt do caminho de Q&A-por-LLM está em `prompts/rag_answer.md` —
+editável direto, **sem precisar reiniciar o backend**
+(`load_prompt()` lê o arquivo do disco a cada geração, sem cache).
 
 Cada geração grava automaticamente qual versão exata do prompt foi usada
-(`ai_generations.prompt_version`, hash do conteúdo do arquivo) — então dá
-para comparar respostas de antes/depois do ajuste sem ambiguidade:
+(`ai_generations.prompt_version`) — dá para comparar respostas de antes/
+depois do ajuste sem ambiguidade:
 
 ```sql
-SELECT prompt_version, count(*), 
+SELECT prompt_version, count(*),
        count(*) FILTER (WHERE status = 'ABSTAIN') AS abstains
 FROM customer_service.ai_generations
 WHERE trigger IN ('MANUAL_DRAFT', 'MANUAL_EVIDENCE')
@@ -283,7 +491,7 @@ GROUP BY prompt_version
 ORDER BY count(*) DESC;
 ```
 
-### 4.6 Casos difíceis para incluir no seu banco de perguntas
+### 6.6 Casos difíceis para incluir no seu banco de perguntas
 
 - Pergunta ambígua/mistura dois assuntos numa frase só.
 - Pergunta claramente fora do escopo (deveria abster, não inventar).
@@ -292,44 +500,27 @@ ORDER BY count(*) DESC;
 - Pergunta clínica sensível (deve manter tom de orientação, nunca
   diagnóstico).
 - Saudação pura, sem pergunta real (deve responder natural, sem abster).
-- A mesma pergunta de duas formas diferentes (formal vs. coloquial) — o
-  retrieval deveria achar a mesma evidência nas duas.
-
-### 4.7 Métricas simples que já dá pra observar hoje sem esperar a V3
-
-```sql
--- taxa de abstenção geral e por motivo
-SELECT abstention_reason, count(*)
-FROM customer_service.ai_generations
-WHERE status = 'ABSTAIN'
-GROUP BY abstention_reason
-ORDER BY count(*) DESC;
-
--- taxa de abstenção por categoria de Q&A (liga geração -> evidência -> categoria)
-SELECT qa.category,
-       count(*) FILTER (WHERE g.status = 'ABSTAIN') AS abstains,
-       count(*) AS total,
-       round(100.0 * count(*) FILTER (WHERE g.status = 'ABSTAIN') / count(*), 1) AS abstain_pct
-FROM customer_service.ai_generations g
-JOIN customer_service.ai_generation_sources s ON s.ai_generation_id = g.id
-JOIN customer_service.retrieval_hits h ON h.id = s.retrieval_hit_id
-JOIN content.qa_entries qa ON qa.qa_id = h.matched_qa_id
-GROUP BY qa.category
-ORDER BY abstain_pct DESC;
-```
-
-Essas duas consultas juntas já respondem "onde a IA está falhando mais" sem
-precisar de nenhuma tela nova — a tela de métricas somente-leitura é
-trabalho da V3.
+- A mesma pergunta de duas formas diferentes (formal vs. coloquial).
+- **Nova (004):** pergunta de agenda com especialidade inexistente/mal
+  escrita — deve abster, não "chutar" a especialidade mais parecida.
+- **Nova (004):** tentar pular direto para "quero marcar" sem antes ver uma
+  vaga real na conversa — o script de confirmação não deve iniciar sozinho.
 
 ---
 
-## 5. Registrando o que você encontrar
+## 7. Registrando o que você encontrar
 
-Sugestão de tabela para ir preenchendo durante os testes (planilha, ou um
-arquivo à parte) — isso vira a base do dataset de avaliação da V3:
+Duas opções, não mutuamente exclusivas:
 
-| Data | Pergunta | Categoria | Caminho (clínico/Q&A/dinâmico) | Rascunho da IA | O que você mandaria de fato | Nota (1–5) | Ação tomada |
-|---|---|---|---|---|---|---|---|
+1. **Rápido, informal**: a mesma tabela de sempre, para anotar durante o
+   teste:
 
-Não precisa ser sofisticado agora — precisa existir e ser consistente.
+   | Data | Pergunta | Categoria | Caminho (clínico/Q&A/dinâmico/agenda) | Rascunho da IA | O que você mandaria de fato | Nota (1–5) | Ação tomada (V3-1) |
+   |---|---|---|---|---|---|---|---|
+
+2. **Durável, real**: para o que você já considerar representativo o
+   bastante para virar regressão, crie o caso via
+   `POST /operator/evaluation/cases` (Seção 3.12) — isso é o dataset seed
+   da V3 de verdade, não uma cópia dele.
+
+Não precisa ser sofisticado — precisa existir e ser consistente.
