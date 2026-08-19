@@ -50,26 +50,28 @@ correction).
 | Requirement | Primary tasks/tests | Acceptance area |
 |---|---|---|
 | No new infrastructure (Article VIII) | T040, T093, `plan.md` §4b/§8b/§11 | E |
-| `scheduling` schema shape unchanged (D-024 dormancy preserved) | T010, `data-model.md` | G |
-| New migrations apply cleanly, additive only, in order | T008, T009, T090, `data-model.md` §5/§6/§8 | 0 |
+| `scheduling` activation scoped to authorized objects; deferred schemas/tables remain absent | T008, T010, `data-model.md` §5 | 0, G |
+| Four migrations apply cleanly, additive/narrow, in order | T008, T009, T090, T093, `data-model.md` §5/§6/§8 | 0 |
 | Idempotency + bounded creation under concurrent seed calls | T041 | D |
 | Audit coverage for the resolver, seed action, and booking script | T042, T051, T093 | (security checklist) |
-| Frontend button accessibility/behavior | T060, T061 | J/P |
-| Autonomous-send containment (Constitution Amendment 1.1.0) | T096, `analysis.md` §10 | O |
+| Frontend button accessibility/behavior | T060, T061 | P |
+| Autonomous-send containment (Constitution Amendment 1.1.0) | T096, T082, `analysis.md` §18 | O |
+| Raw AA-10 input non-retention | T095, T097, T082 | N |
 
 ## Executable evidence (populated as tasks land)
 
 | Coverage | Evidence |
 |---|---|
-| Migration correctness (schema creation, 4 specialties, 12 professionals; booking-script columns) | `app/tests/test_appointment_availability_*.py` (T011), migrations themselves (T008, T009, T090) |
-| ORM mapping correctness | `app/tests/test_appointment_availability_*.py` (planned, T011) |
-| Deterministic keyword extraction (incl. generalist default) | `app/tests/test_appointment_availability_keywords.py` (planned, T021) |
-| Query-path correctness + no-write structural proof | `app/tests/test_appointment_availability_resolver.py` (planned, T031) |
-| Seed action idempotency/bounds/business-day correctness | `app/tests/test_appointment_seeding.py` (planned, T041) |
-| Dispatch/regression (generic path + unimplemented resolvers) | `app/tests/smoke_v2_dynamic_pattern.py` unmodified (planned check, T052) |
-| Seed endpoint auth + button behavior | `frontend/src/main.test.tsx` (planned, T061) |
+| Migration correctness (schema creation, 4 specialties, 12 professionals; booking-script columns/CHECK) | `app/tests/test_appointment_availability_models.py`, live Postgres catalog query, migrations T008/T009/T090/T093 |
+| ORM mapping correctness | `app/tests/test_appointment_availability_models.py` (passing) |
+| Deterministic keyword extraction (incl. generalist default) | `app/tests/test_appointment_availability_keywords.py` (passing) |
+| Query-path correctness + no-write structural proof | `app/tests/test_appointment_availability_resolver.py` (passing) |
+| Seed action idempotency/bounds/business-day correctness | `app/tests/test_appointment_seeding.py` (passing, real Postgres including concurrency) |
+| Dispatch/regression (generic path + unimplemented resolvers) | `app/tests/test_dynamic_pattern_dispatch.py` plus unmodified `smoke_v2_dynamic_pattern.py` (passing) |
+| Seed endpoint auth + button behavior | backend integration coverage and `frontend/src/main.test.tsx` (17/17 suite passing) |
 | End-to-end real HTTP smoke (query + seed) | `app/tests/smoke_v4_appointment_availability.py` (T071, passing) |
-| CPF/payment/booking-intent parsing correctness | `app/tests/test_booking_script_parsing.py` (planned, T092) |
-| Booking script full flow + non-persistence | `app/tests/test_booking_script_flow.py` (planned, T095) |
-| Autonomous-send containment (structural) | `app/tests/test_booking_script_containment.py` (planned, T096) |
-| End-to-end real HTTP smoke (booking script) | `app/tests/smoke_v4_booking_script.py` (planned, T097) |
+| CPF/payment/booking-intent parsing correctness | `app/tests/test_booking_script_parsing.py` (passing) |
+| Booking script full flow + raw-input non-retention | `app/tests/test_booking_script_flow.py` (passing) |
+| Autonomous-send containment (structural) | `app/tests/test_booking_script_containment.py` (4/4 independently rerun in T082) |
+| End-to-end real HTTP smoke (booking script) | `app/tests/smoke_v4_booking_script.py` (passing, with direct DB assertions) |
+| Full regressions | 16/16 `smoke_*.py`; Playwright 11 passed/1 intentional skip; backend 119; frontend Vitest 17 |

@@ -24,15 +24,17 @@ V2: `specs/002-v2-commercial-product-experience` — DONE (2026-08-17). See
 V3 ("Measured N2"): `specs/003-v3-measured-n2` — DONE (2026-08-18). See
 `PROJECT_STATE.md`.
 
-Dynamic appointment availability (read-only availability consultation only):
+Dynamic appointment availability (read-only resolver plus its explicitly
+bounded seed action/AA-10 simulation):
 `specs/004-dynamic-appointment-availability` — explicitly authorized by the
-human on 2026-08-18. Its `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/
-`acceptance.md`/`analysis.md` (pre-implementation) are complete and
-cross-checked (`analysis.md` §5, no unresolved contradiction); implement in
-the approved SDD dependency order (`tasks.md`'s Phase 1-6). Booking, holds,
-payment, identity persistence, and every other `dynamic_resolver` name
-besides `appointment_availability` remain explicitly out of scope — see that
-package's `spec.md` §6.
+human on 2026-08-18 and **DONE 2026-08-19**. All 10 phases passed final
+acceptance (`acceptance.md` Execution record; `analysis.md` §18). AA-10's
+fixed booking simulation is the sole Constitution Amendment 1.1.0 outbound
+exception; it performs no real booking/payment/identity persistence and is
+structurally contained to one function/one trigger. Real booking, holds,
+payment, identity persistence, scheduling CRUD, and every other
+`dynamic_resolver` besides `appointment_availability` remain out of scope —
+see that package's `spec.md` §6.
 
 ## Required SDD flow
 

@@ -18,6 +18,26 @@ class BookingScriptStep(str, Enum):
     AWAITING_PAYMENT = "AWAITING_PAYMENT"
 
 
+CPF_INPUT_REDACTION = "[CPF informado na simulação — conteúdo não armazenado]"
+PAYMENT_INPUT_REDACTION = "[Resposta de pagamento da simulação — conteúdo não armazenado]"
+
+
+def persisted_customer_body(booking_script_step: str | None, raw_body: str) -> str:
+    """Return the only customer-message body safe to persist.
+
+    V1-V3 ordinarily retain submitted customer messages. AA-10 is the
+    narrow exception for the two sensitive simulated-input steps: parsing
+    still receives the request-local raw value, while the durable Message
+    stores only a fixed disclosure marker. The initial booking-intent
+    message is not CPF/payment input and remains unchanged.
+    """
+    if booking_script_step == BookingScriptStep.AWAITING_CPF.value:
+        return CPF_INPUT_REDACTION
+    if booking_script_step == BookingScriptStep.AWAITING_PAYMENT.value:
+        return PAYMENT_INPUT_REDACTION
+    return raw_body
+
+
 def send_scripted_message(session: Session, conversation: Conversation, body: str, step: str) -> Message:
     """**The only function in the entire codebase allowed to create a
     customer-visible `Message` without an authenticated-operator
@@ -115,14 +135,14 @@ def lookup_recent_specialty_price(session: Session, conversation: Conversation) 
     )
 
 
-def advance_booking_script(session: Session, conversation: Conversation, customer_message: Message) -> None:
+def advance_booking_script(session: Session, conversation: Conversation, customer_text: str) -> None:
     """The single entry point, called only from
     `anonymous_access/router.py`'s `send_customer_message()` (Phase 9
     "Trigger"). `plan.md` §8b."""
     step = conversation.booking_script_step
 
     if step is None:
-        if not detect_booking_intent(customer_message.body):
+        if not detect_booking_intent(customer_text):
             return
         if not has_recent_resolved_availability(session, conversation):
             return  # never start the script out of context
@@ -132,7 +152,7 @@ def advance_booking_script(session: Session, conversation: Conversation, custome
         return
 
     if step == BookingScriptStep.AWAITING_CPF.value:
-        cpf = extract_cpf(customer_message.body)
+        cpf = extract_cpf(customer_text)
         if cpf is None:
             send_scripted_message(session, conversation, "CPF inválido. Informe um número válido de 11 dígitos", step=BookingScriptStep.AWAITING_CPF.value)
             return  # stays on AWAITING_CPF, no retry limit
@@ -145,7 +165,7 @@ def advance_booking_script(session: Session, conversation: Conversation, custome
         return
 
     if step == BookingScriptStep.AWAITING_PAYMENT.value:
-        if extract_payment_confirmation(customer_message.body) is not True:
+        if extract_payment_confirmation(customer_text) is not True:
             send_scripted_message(session, conversation, "O valor foi pago? Responda sim ou não", step=BookingScriptStep.AWAITING_PAYMENT.value)
             return  # stays on AWAITING_PAYMENT, no retry limit
         send_scripted_message(session, conversation, "Verificando pagamento", step=BookingScriptStep.AWAITING_PAYMENT.value)

@@ -41,9 +41,10 @@ ordinary feature behavior.
    true`, and `draft_text` containing real (synthetic) slot data — specialty
    display name, professional name, unit, a real future date/time in
    `America/Sao_Paulo`, price, and a "(simulação)" marker.
-2. Confirm no LLM/embedding provider call occurred for this generation
-   (provider mock/spy records zero invocations, or `duration_ms` is
-   consistent with a pure-database resolution).
+2. Confirm no LLM generation call occurred: `model = "not-applicable"`
+   and the bounded `duration_ms` check in the real HTTP smoke is
+   consistent with pure database resolution. Integration acceptance uses
+   the real Postgres stack, not a mocked database.
 
 ## B. Specialty filtering [AA-3, outcome 2]
 
@@ -123,9 +124,9 @@ generalist specialty most customer queries actually fall back to.
    table names anywhere in `scheduling/models.py`, `scheduling/availability.py`,
    or `scheduling/seeding.py`.
 2. Live check: after exercising both the query path and the seed action
-   end-to-end, confirm row counts in `scheduling.appointments`,
-   `identity.patients`, and `billing.payments` are unchanged (still zero,
-   or whatever they were before — never incremented).
+   end-to-end, confirm `scheduling.appointments`, `identity.patients`, and
+   `billing.payments` are absent or, if a future authorized migration has
+   created them, their row counts are unchanged — never incremented.
 
 ## H. Unimplemented-resolver regression [AA-1, outcome 8]
 
@@ -181,10 +182,12 @@ generalist specialty most customer queries actually fall back to.
 
 ## N. Booking script: no real persistence [AA-10, outcome 13]
 
-1. After a full run (success, or either retry branch), no table anywhere
-   in the database contains the raw CPF digits/formatted value or the raw
-   payment-question reply text — checked directly against
-   `Conversation`, `Message`, and `AuditEvent`.
+1. After a full run (success and both retry branches), no table contains
+   the submitted CPF/payment message bodies. The HTTP path persists fixed
+   disclosure markers for those two customer steps; check `Message` and
+   `AuditEvent` directly. The formatted CPF appears only in the exact,
+   fixed `"CPF ... confirmado"` output required by AA-10, never in a
+   structured identity/profile field or audit payload.
 2. Only `Conversation.booking_script_step` changes during the flow, and it
    only ever holds one of its two enumerated values or `NULL` — enforced
    at the database level by a `CHECK` constraint, not only in application
@@ -242,12 +245,59 @@ generalist specialty most customer queries actually fall back to.
   or response schema for either);
 - no material spec/plan/code divergence remains (`analysis.md`), including
   a specific re-check that AA-10's autonomous-send exception has not
-  spread beyond `booking_script/` (`analysis.md` §10-11).
+  spread beyond `booking_script/` (`analysis.md` §18).
 
 ## Execution record
 
-*(Populated once Phase 1-8 implementation lands, following V1/V2/V3's
-Execution-record format — evidence per section, real command output, real
-live-verification results. Not yet executed — this document currently
-records the pre-implementation acceptance protocol only, per `AGENTS.md`'s
-required SDD flow: acceptance criteria exist before implementation begins.)*
+**Executed:** 2026-08-19, against the implementation based on commit
+`1810d1a`, with the Phase 10 convergence corrections in the closing
+commit. Backend/frontend images were rebuilt with `docker compose build
+backend frontend` and recreated with `docker compose up -d
+--force-recreate backend frontend`; the real `pgvector/pgvector:pg17`
+container was healthy and Alembic reported head `20260819_0004`. No
+integration test used a mocked database.
+
+| Area | Result | Real evidence |
+|---|---|---|
+| 0 | PASS | Live Postgres: 4 specialties, 12 professionals, 3 generalist links at 60000 cents/45 min; excluded scheduling/identity/billing tables absent; both AA-10 `CHECK`s present; Alembic at `20260819_0004`. |
+| A | PASS | `smoke_v4_appointment_availability.py`: real seed + resolver returned `ANSWER`, `model=not-applicable`, real slot/price text, bounded database-only duration. |
+| B | PASS | `test_appointment_availability_keywords.py` and resolver integration tests cover named specialties and `oncologia-geral` default; smoke resolved the no-specialty query from real seeded data. |
+| C | PASS | Resolver structural no-write tests passed; source review found only SQLAlchemy `select`; repeated real-database tests did not create slots. |
+| D | PASS | Real Postgres seed tests passed for empty, partial, repeated, and concurrent calls; advisory transaction lock holds the exact 1/3 generalist target. |
+| E | PASS | Business-day/holiday, São Paulo boundary, 08:00-18:00, and inactive-generalist-professional tests passed. |
+| F | PASS | Zero-match integration path returned `ABSTAIN`/`DYNAMIC_DATA_UNAVAILABLE` without exposing the internal cause. |
+| G | PASS | Static imports and live V4 smokes confirmed no appointments/identity/billing access; all excluded tables are absent in the real database. |
+| H | PASS | V4 availability smoke confirmed `price_lookup` still abstains; `test_dynamic_pattern_dispatch.py` and unmodified `smoke_v2_dynamic_pattern.py` confirmed allowlist/generic-path regression safety. |
+| I | PASS | Endpoint integration/smoke confirmed operator bearer security and customer/anonymous rejection; repeat/concurrent bounds passed. Live OpenAPI exposes only `POST /api/v1/operator/scheduling/ensure-availability` with `operatorBearer`. |
+| L | PASS | `smoke_v4_booking_script.py` reproduced the exact 10-message autonomous script, including invalid→valid CPF and não→sim branches, with zero operator clicks. |
+| M | PASS | Parsing suite passed all CPF/payment/intent cases, including digit-count-only CPF and unlimited non-affirmative retries. |
+| N | PASS | Convergence found and repaired a false-green test: raw sensitive customer messages had previously been persisted by the baseline message path. The route now parses request-local input and persists fixed markers; real HTTP smoke plus DB assertions prove submitted CPF/payment strings are absent from `Message`/`AuditEvent`. No booking/status/identity/payment row exists. |
+| O | PASS | Independently rerun `pytest -q tests/test_booking_script_containment.py`: **4 passed**. AST proof found exactly one ungated construction (`send_scripted_message`), no external import, and exactly one trigger (`send_customer_message`). DB `messages_check` independently limits null-operator messages to `autonomous_source='booking_script'`. |
+| P | PASS | All 16 repository `smoke_*.py` scripts passed against the rebuilt stack, including V1/V2/V3 and both V4 scripts. Full Playwright: **11 passed, 1 skipped by design** (N1-only scenario). Existing E2E tests needed bounded real-provider timeouts and stable locators; no product behavior was weakened. |
+| Q | PASS | Backend `ruff`, `mypy`, and real-Postgres `pytest` passed (**119 tests**). Frontend ESLint, TypeScript, Vitest (**17 tests**), production build, and full Playwright passed. Contract/live-route and final cross-artifact checks passed. |
+
+### Full-suite inventory and execution notes
+
+- The repository contains **16** scripts matching `app/tests/smoke_*.py`:
+  `smoke_core`, `smoke_n2`, `smoke_concurrent_capacity`,
+  `smoke_ingestion_changed`, `smoke_resilience`, `smoke_real_provider`,
+  four V2 scripts, four V3 scripts, and the two V4 scripts
+  (`smoke_v4_appointment_availability.py`,
+  `smoke_v4_booking_script.py`). All 16 passed. The handoff request said
+  "3 novos smoke_v4", but commit `1810d1a` and the task/package inventory
+  contain two; execution continued only after the human explicitly said
+  "Prossiga", and this discrepancy is preserved here rather than hidden.
+- `smoke_ingestion_changed.py` intentionally exercises a changed-content
+  ingestion path. The approved corpus was restored afterward through the
+  real provider (`embedded=658`, `inserted=0`, `skipped=57`, `updated=1`).
+- Historical smoke fixtures that require an exact four-active slate were
+  run from a clean synthetic conversation state and in dependency order.
+  The reset touched only synthetic interaction tables; operators,
+  knowledge, scheduling data, and Alembic state were preserved.
+- The first full Playwright run exposed real-provider latency beyond old
+  5s/15s assertion budgets and two live-locator assumptions. The tests
+  were corrected to use bounded 20s/45s waits, capture the selected queue
+  label before polling can reorder it, and compare message bodies rather
+  than whole action-bearing panels. The final complete run passed 11/11
+  applicable scenarios; the sole skip is the suite's intentional
+  maturity-mode branch.

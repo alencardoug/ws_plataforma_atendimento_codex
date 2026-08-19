@@ -11,13 +11,16 @@ behavioral. specs/004-dynamic-appointment-availability/tasks.md T097,
 acceptance.md §L/§N/§O."""
 
 import os
+from uuid import UUID
 
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 
 from customer_care.bootstrap import create_app
+from customer_care.booking_script.service import CPF_INPUT_REDACTION, PAYMENT_INPUT_REDACTION
 from customer_care.infrastructure.database import get_session_factory
+from customer_care.infrastructure.models import AuditEvent, Message
 
 
 def _table_confirmed_empty_or_absent(schema: str, table: str) -> None:
@@ -98,6 +101,20 @@ def run() -> None:
     # (não retry) + 3 (verificando/verificado/final) — select_evidence
     # above created no Message, only an AIGeneration.
     assert len(autonomous_ids) == 10
+
+    # Outcome 13: CPF/payment inputs remain request-local. The formatted CPF
+    # in the fixed confirmation output is deliberate; submitted strings are
+    # replaced with fixed disclosure markers before Message persistence.
+    with get_session_factory()() as db:
+        conversation_uuid = UUID(conversation_id)
+        message_bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == conversation_uuid)).all()]
+        assert CPF_INPUT_REDACTION in message_bodies
+        assert PAYMENT_INPUT_REDACTION in message_bodies
+        for raw_input in ("Ah 123456a8910", "tabom 123.456..789.10", "Então, não paguei", "tabom simm paguei"):
+            assert raw_input not in message_bodies
+        payloads = [str(row.payload_json) for row in db.scalars(select(AuditEvent).where(AuditEvent.conversation_id == conversation_uuid)).all()]
+        for raw_fragment in ("123456a8910", "123.456..789.10", "não paguei", "simm paguei"):
+            assert all(raw_fragment not in payload for payload in payloads)
 
     for schema, table in (("identity", "patients"), ("billing", "payments"), ("scheduling", "appointments"), ("scheduling", "appointment_events")):
         _table_confirmed_empty_or_absent(schema, table)

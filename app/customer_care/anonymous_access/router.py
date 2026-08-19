@@ -11,7 +11,7 @@ from customer_care.ai.router import evaluate_automatic_trigger
 from customer_care.anonymous_access.rate_limit import enforce_not_locked_out, record_attempt
 from customer_care.anonymous_access.security import digest_conversation_token, issue_conversation_token
 from customer_care.audit.service import record_event
-from customer_care.booking_script.service import advance_booking_script
+from customer_care.booking_script.service import advance_booking_script, persisted_customer_body
 from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.shared.dependencies import DbSession, customer_bearer
@@ -86,13 +86,24 @@ def close_conversation(conversation: Annotated[Conversation, Depends(token_bound
 def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation, Depends(token_bound_conversation)], session: DbSession, request: Request) -> Message:
     if conversation.status == "CLOSED":
         raise api_error(409, "CONVERSATION_CLOSED", "Conversation is closed")
-    message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=payload.body)
+    # AA-10 parses CPF/payment replies only from the request-local value.
+    # At those two script steps the durable message carries a fixed marker,
+    # never the customer's raw input (spec.md outcome 13).
+    durable_body = persisted_customer_body(conversation.booking_script_step, payload.body)
+    message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=durable_body)
     session.add(message)
     session.flush()
     conversation.last_message_at = message.created_at
     conversation.last_customer_activity_at = message.created_at
-    record_event(session, "message.customer_received", "CUSTOMER", conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"message_id": str(message.id), "length": len(payload.body)})
-    advance_booking_script(session, conversation, message)  # AA-10 — same transaction, no debounce (never calls an LLM)
+    record_event(
+        session,
+        "message.customer_received",
+        "CUSTOMER",
+        conversation_id=conversation.id,
+        correlation_id=request.state.request_id,
+        payload={"message_id": str(message.id), "length": len(durable_body)},
+    )
+    advance_booking_script(session, conversation, payload.body)  # AA-10 — raw input remains request-local; never calls an LLM
     session.commit()
     session.refresh(message)
     return message

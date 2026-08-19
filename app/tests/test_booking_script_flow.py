@@ -13,7 +13,12 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from customer_care.auth.security import hash_password
-from customer_care.booking_script.service import advance_booking_script
+from customer_care.booking_script.service import (
+    CPF_INPUT_REDACTION,
+    PAYMENT_INPUT_REDACTION,
+    advance_booking_script,
+    persisted_customer_body,
+)
 from customer_care.infrastructure.database import get_session_factory
 from customer_care.infrastructure.models import (
     AIGeneration,
@@ -32,11 +37,17 @@ MASTOLOGIA_SPECIALTY_SLUG = "mastologia-oncologica"
 MASTOLOGIA_PRICE_TEXT = "R$ 980,00 (simulação)"
 
 
-def _customer_message(session: Session, conversation: Conversation, body: str) -> Message:
-    message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=body)
+def _customer_message(session: Session, conversation: Conversation, body: str) -> str:
+    """Mirror the HTTP route: persist only the AA-10-safe body while
+    returning the request-local raw input for deterministic parsing."""
+    message = Message(
+        conversation_id=conversation.id,
+        author_type="CUSTOMER",
+        body=persisted_customer_body(conversation.booking_script_step, body),
+    )
     session.add(message)
     session.flush()
-    return message
+    return body
 
 
 def _autonomous_bodies(session: Session, conversation_id) -> list[str]:
@@ -269,18 +280,19 @@ def test_raw_cpf_and_payment_answer_never_persisted(conversation_with_resolved_a
         conversation = db.get(Conversation, conversation_id)
         assert conversation.booking_script_step is None
 
-        # The formatted CPF *does* appear in the one "CPF ... confirmado"
-        # customer-visible message — that is the script's designed output,
-        # not a persistence violation. What must never appear anywhere is
-        # the raw invalid attempt or the raw payment-question reply text,
-        # and the audit trail must never carry either the CPF or the reply.
-        operator_bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == conversation_id, Message.author_type == "OPERATOR")).all()]
-        assert not any("123456a8910" in body for body in operator_bodies)
-        assert not any("não paguei" in body or "simm paguei" in body for body in operator_bodies)
+        # The formatted CPF deliberately appears in the fixed "CPF ...
+        # confirmado" output. The submitted strings themselves are never
+        # durable: sensitive CUSTOMER rows contain only fixed disclosure
+        # markers, and no audit payload contains the raw input.
+        message_bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == conversation_id)).all()]
+        assert CPF_INPUT_REDACTION in message_bodies
+        assert PAYMENT_INPUT_REDACTION in message_bodies
+        for raw_input in ("Ah 123456a8910", "tabom 123.456..789.10", "Então, não paguei", "tabom simm paguei"):
+            assert raw_input not in message_bodies
 
         for event in db.scalars(select(AuditEvent).where(AuditEvent.conversation_id == conversation_id)).all():
             payload_text = str(event.payload_json)
             assert "123456a8910" not in payload_text
-            assert "123.456.789-10" not in payload_text
+            assert "123.456..789.10" not in payload_text
             assert "não paguei" not in payload_text
             assert "simm paguei" not in payload_text

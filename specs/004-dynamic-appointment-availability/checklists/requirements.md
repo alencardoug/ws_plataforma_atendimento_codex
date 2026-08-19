@@ -34,16 +34,18 @@
 - [x] Confirmed outcomes are complete after clarification — `spec.md` uses
   numbered outcomes AA-1..AA-10 (plus AA-3a) with their behavioral
   mechanics, matching V1's FR-###/V3's outcome-numbering convention.
-- [x] Plan/tasks/data-model/acceptance coverage are complete (`plan.md`,
+- [x] Plan/tasks/data-model/acceptance coverage are complete and finalized
+  against implementation (`plan.md`,
   `tasks.md`, `data-model.md`, `acceptance.md` all written and revised
   through all five clarification rounds).
-- [x] Cross-artifact analysis reports no material contradiction
-  (`analysis.md`, 2026-08-18, revised three times more same day; 1 finding
-  repaired — `Professional.active` filtering, re-confirmed still correct
-  in the current `scheduling/seeding.py` — none outstanding). AA-10's
+- [x] Cross-artifact analysis reports no unresolved material contradiction
+  (`analysis.md` §18, 2026-08-19). The final pass repaired the AA-10
+  raw-input retention gap that prior tests had falsely marked green, in
+  addition to the earlier `Professional.active`, schema, concurrency,
+  generalist-scoping, CHECK-constraint, and message-order findings. AA-10's
   containment (the autonomous-send exception provably scoped to exactly
   one function, one trigger) is checked with its own dedicated table in
-  `analysis.md` §10, not just asserted in prose.
+  `analysis.md` §18, not just asserted in prose.
 - [x] A second finding was repaired 2026-08-19, before Phase 1
   implementation began: `spec.md` §2/`plan.md` §3/`data-model.md`
   (originally §5, now §5-§9) claimed the `scheduling` schema "already

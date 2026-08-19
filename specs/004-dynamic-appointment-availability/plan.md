@@ -1,17 +1,18 @@
 # Implementation Plan: Dynamic Appointment Availability
 
-Ratifies `spec.md`'s confirmed outcomes (AA-1..AA-9, plus AA-3a) into
+Ratifies `spec.md`'s confirmed outcomes (AA-1..AA-10, plus AA-3a) into
 concrete architecture, data-model, and testing decisions. Written after
-all four `spec.md` §5 clarification rounds were resolved with the human
+all five `spec.md` §5 clarification rounds were resolved with the human
 (2026-08-18): the first shaped AA-1..AA-8; the second narrowed AA-2 to
 purely read-only and added AA-9; the third deferred a full scheduling CRUD
 to future work and identified the "customer doesn't know which specialty"
 content gap; the fourth corrected how to close that gap — a seeded
-**generalist** specialty (AA-3a), not an unfiltered search.
+**generalist** specialty (AA-3a), not an unfiltered search; the fifth
+added AA-10's constitutionally bounded booking simulation.
 
 ## 1. Technical summary
 
-Three pieces, cleanly separated by who triggers them and what they're
+Four pieces, cleanly separated by who triggers them and what they're
 allowed to do:
 
 1. **Query path (AA-1..AA-8), purely read-only.** A new named resolver,
@@ -25,7 +26,7 @@ allowed to do:
    template-substituted answer (no LLM call, no LLM rewrite) — or aborts to
    the existing `ABSTAIN`/`DYNAMIC_DATA_UNAVAILABLE` path. **It never
    writes anything, under any circumstance.**
-2. **Seed action (AA-9), the only *runtime* write path, operator-triggered
+2. **Seed action (AA-9), the only runtime `scheduling` write path, operator-triggered
    only.** A new button on the operator workspace calls a new endpoint
    that idempotently ensures exactly 1 available slot on D+1 and 3 on D+7
    exist (business-day-aware, reusing `scheduling.next_business_day()`),
@@ -37,6 +38,12 @@ allowed to do:
    data, the same kind the original `db/init/002_seed_and_schedule.sql`
    already contains, just added the correct way (a migration) instead of
    editing that frozen file.
+4. **Booking simulation (AA-10), request-synchronous and tightly
+   contained.** Its fixed messages are the one Article III exception. It
+   writes only ordinary conversation messages, the transient flow step,
+   and append-only audit provenance; raw CPF/payment inputs remain
+   request-local and are replaced with fixed disclosure markers before a
+   customer `Message` is persisted.
 
 This is no longer a purely internal, route-less change (unlike the plan's
 first draft): AA-9 needs one new operator-only endpoint and one small
@@ -304,9 +311,9 @@ def create_slots_on(session: Session, target_date: date, needed: int) -> int:
     hour — inserting with ON CONFLICT DO NOTHING and counting only actual
     inserts (a collision on an hour/professional pair already taken just
     moves to the next candidate, never double-counts). Stops as soon as
-    `needed` real inserts have happened; with 9 seeded professionals × 10
-    business hours = 90 candidate slots, this always has enough room for
-    the small needed count (at most 3) this feature ever asks for."""
+    `needed` real inserts have happened; with the generalist specialty's
+    3 professionals × 10 business hours = 30 candidate slots, this has
+    ample room for either target's needed count (at most 3)."""
     created = 0
     pairs = active_professional_specialty_pairs(session)  # Professional.active == True only
     for hour in range(SEED_HOUR_START, SEED_HOUR_END):
@@ -546,7 +553,7 @@ the price — same relationship `ai/` already has to `knowledge/`):
     "which specialty?").
 - `booking_script/service.py` — the state machine and the one exceptional
   send path:
-  - `advance_booking_script(session, conversation, customer_message) ->
+  - `advance_booking_script(session, conversation, customer_text) ->
     None` — the single entry point (§ "Trigger" below).
   - `send_scripted_message(session, conversation, body, request_id) ->
     Message` — constructs an `author_type="OPERATOR"` `Message` directly
@@ -568,10 +575,10 @@ class BookingScriptStep(str, Enum):
     AWAITING_PAYMENT = "AWAITING_PAYMENT"
     # None (Conversation.booking_script_step) means "not started" or "finished"
 
-def advance_booking_script(session: Session, conversation: Conversation, customer_message: Message) -> None:
+def advance_booking_script(session: Session, conversation: Conversation, customer_text: str) -> None:
     step = conversation.booking_script_step
     if step is None:
-        if not detect_booking_intent(customer_message.body):
+        if not detect_booking_intent(customer_text):
             return
         if not has_recent_resolved_availability(session, conversation):
             return  # never start the script out of context — needs a real slot to have been shown first
@@ -581,7 +588,7 @@ def advance_booking_script(session: Session, conversation: Conversation, custome
         return
 
     if step == BookingScriptStep.AWAITING_CPF:
-        cpf = extract_cpf(customer_message.body)
+        cpf = extract_cpf(customer_text)
         if cpf is None:
             send_scripted_message(session, conversation, "CPF inválido. Informe um número válido de 11 dígitos")
             return  # stays on AWAITING_CPF, no retry limit
@@ -593,7 +600,7 @@ def advance_booking_script(session: Session, conversation: Conversation, custome
         return
 
     if step == BookingScriptStep.AWAITING_PAYMENT:
-        if extract_payment_confirmation(customer_message.body) is not True:
+        if extract_payment_confirmation(customer_text) is not True:
             send_scripted_message(session, conversation, "O valor foi pago? Responda sim ou não")
             return  # stays on AWAITING_PAYMENT, no retry limit, regardless of "não" vs. unrecognized
         send_scripted_message(session, conversation, "Verificando pagamento")
@@ -623,13 +630,14 @@ forbids without a measured need; none exists for a demo simulation.
 right before its existing `session.commit()`:
 
 ```python
-message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=payload.body)
+durable_body = persisted_customer_body(conversation.booking_script_step, payload.body)
+message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=durable_body)
 session.add(message)
 session.flush()
 conversation.last_message_at = message.created_at
 conversation.last_customer_activity_at = message.created_at
 record_event(session, "message.customer_received", ...)
-advance_booking_script(session, conversation, message)  # new
+advance_booking_script(session, conversation, payload.body)  # raw value remains request-local
 session.commit()
 ```
 
@@ -656,13 +664,16 @@ as a hard boundary).
 
 ### What is never persisted
 
-- The raw CPF digits/formatted value — used once, in-memory, to build the
-  confirmation message, then discarded. Not on `Conversation`, not in the
-  audit payload, not anywhere.
-- The raw payment-question reply text or the parsed `True`/`False` —
-  same treatment. Only `Conversation.booking_script_step` persists, and
-  it is an enum-like marker of *position in the script*, not of any
-  customer-supplied value.
+- The customer's raw CPF/payment-reply message bodies — both are parsed
+  from `payload.body` only in the request, while `persisted_customer_body()`
+  substitutes a fixed disclosure marker for the durable customer
+  `Message.body`. Neither raw value enters an audit payload or another
+  table. The formatted CPF does appear in the fixed, required
+  `"CPF ... confirmado"` autonomous output; it is not stored as identity
+  state and cannot be queried as a profile.
+- The parsed payment `True`/`False`. Only
+  `Conversation.booking_script_step` persists, and it is an enum-like
+  marker of *position in the script*, not of customer-supplied value.
 
 ## 9. Security
 
@@ -680,7 +691,7 @@ as a hard boundary).
   or column name reaches a query.
 - `scheduling/seeding.py`'s `create_slots_on()` can only `INSERT ...
   ON CONFLICT DO NOTHING` against `schedule_slots`, bounded by `needed`
-  (at most 3, ever, since `TARGET_D1=1`/`TARGET_D7=3`) — it cannot update
+  (at most 3 for either date, and at most 4 total from an empty state) — it cannot update
   an existing row's `status`, cannot delete, and cannot be made to
   over-create by concurrent/repeated calls (the count-then-create check
   plus the unique constraint make it self-limiting; acceptance outcome 9).
@@ -798,7 +809,7 @@ LLM/embedding provider).
 
 Query path: a single indexed `SELECT` with up to 4 joins, no write, no
 loop — negligible cost, same order of magnitude as any other retrieval
-query. Seed action: bounded by construction to at most 3 inserts per call
+query. Seed action: bounded by construction to at most 4 inserts per call
 (`TARGET_D1 + TARGET_D7 = 4`, minus whatever already exists), each an
 `INSERT ... ON CONFLICT DO NOTHING` against a unique-indexed table — a
 handful of milliseconds, triggered only by an explicit operator click, never
@@ -813,13 +824,14 @@ step) — negligible, no batching/queueing needed at demo scale.
 
 ## 12. Deliverables
 
-- `app/alembic/versions/`: three new, additive, forward-only migrations —
+- `app/alembic/versions/`: four new, additive, forward-only migrations —
   one creating the `scheduling` schema itself plus the original 3
   specialties' seed data (correction, `data-model.md` §5), one seeding the
   `oncologia-geral` generalist specialty/professionals/
   professional_specialties rows (AA-3a, `data-model.md` §6), one adding
-  `Conversation.booking_script_step` and `Message.autonomous_source`
-  (AA-10, `data-model.md` §8)
+  `Conversation.booking_script_step` and `Message.autonomous_source`,
+  and one narrowly widening the pre-existing `messages_check` constraint
+  for `autonomous_source='booking_script'` only (AA-10, `data-model.md` §8)
 - `app/customer_care/scheduling/__init__.py`, `models.py`,
   `availability.py` (query, read-only), `seeding.py` (AA-9 write path),
   `router.py` (new endpoint)

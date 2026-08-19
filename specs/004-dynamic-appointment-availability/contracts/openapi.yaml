@@ -15,9 +15,11 @@ info:
     already cover its customer-visible shape). Only AA-9's new seed action
     needs a contract entry, below.
 
-    Every V1/V2/V3 safety invariant (explicit operator send, server-side
-    citation/authorization enforcement, append-only audit, no
-    chain-of-thought persistence) is unchanged.
+    Every V1/V2/V3 safety invariant (server-side citation/authorization
+    enforcement, append-only audit, no chain-of-thought persistence) is
+    unchanged. Explicit operator send remains universal except AA-10's
+    one Constitution Amendment 1.1.0 fixed-script exception; AA-10 adds no
+    route of its own.
 servers:
   - url: http://localhost:8000/api/v1
 
@@ -28,7 +30,8 @@ paths:
       summary: Idempotently ensure demo D+1/D+7 appointment availability (AA-9) — new
       description: >-
         Computes D+1/D+7 via the existing scheduling.next_business_day(),
-        counts available scheduling.schedule_slots rows on each date, and
+        counts available scheduling.schedule_slots rows for the
+        oncologia-geral specialty on each date, and
         creates only what's missing to reach exactly 1 slot on D+1 and 3 on
         D+7, within 08:00-18:00 America/Sao_Paulo. Idempotent: if already
         sufficient, creates nothing and reports so. Not conversation-scoped

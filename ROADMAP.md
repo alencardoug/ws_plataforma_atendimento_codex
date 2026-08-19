@@ -3,10 +3,10 @@
 This roadmap preserves the long-term product vision. It is **not executable
 scope** for any entry not already implemented. The human authorized the V2
 specification cycle on 2026-08-11; **V2 is now DONE (2026-08-17)** — see
-`PROJECT_STATE.md` and `specs/002-v2-commercial-product-experience/`. All
-other entries (including the separate future "Dynamic appointment
-availability" feature below, which is not part of completed V2) remain
-roadmap only until their own Spec Kit flow is authorized and completed.
+`PROJECT_STATE.md` and `specs/002-v2-commercial-product-experience/`.
+Dynamic appointment availability is also **DONE (2026-08-19)** under its
+own package. All other entries remain roadmap only until their own Spec
+Kit flow is authorized and completed.
 
 ## Era A — Existence
 
@@ -14,17 +14,19 @@ roadmap only until their own Spec Kit flow is authorized and completed.
 
 Current scope. Anonymous web customer, operator, N1/N2, offline ingestion, dual RAG strategy, queue/capacity, audit, local Docker Compose.
 
-### Future feature — Dynamic appointment availability — Specification complete, implementation pending (2026-08-18)
+### Dynamic appointment availability — **DONE (2026-08-19)**
 
 This was intentionally separate from V2/V3, with one narrow exception (see
 below). The human authorized its own Spec Kit cycle on 2026-08-18:
 `specs/004-dynamic-appointment-availability/`. Its `spec.md`/`plan.md`/
-`data-model.md`/`tasks.md`/`acceptance.md`/pre-implementation `analysis.md`
-are complete; implementation has not yet started. See that package and
-`PROJECT_STATE.md` for status — this roadmap entry below records the
-original agreed intent that authorization was based on, not a live status.
+`data-model.md`/`tasks.md`/`acceptance.md`/`analysis.md` are complete;
+implementation and final acceptance are recorded in that package's
+Execution record and `analysis.md` §18. See `PROJECT_STATE.md` for the
+closure summary. The bullets below preserve the original agreed intent
+and deferred boundary.
 
-The cycle must begin with a safety correction: administrative evidence marked
+The cycle's prerequisite safety correction was already completed in V2:
+administrative evidence marked
 `dynamic_data_required=true` must never be passed through as a literal answer
 when its resolver is unavailable. It must produce a controlled abstention or a
 manual-service instruction without exposing internal table names, resolver
@@ -33,13 +35,13 @@ names, placeholders, or implementation guidance.
 **Scope exception (D-028, human decision 2026-08-12):** the corrective
 mechanism itself — a deterministic chunk pattern whose variables are
 substituted from live database content, used verbatim as the final response
-with no LLM rewriting for `dynamic_data_required=true` evidence — is now
-planned within the V2 specification cycle rather than waiting for this
-separate feature's authorization. Everything else below (actual booking
-operations, resolver implementations, holds/reservations) remains deferred to
-this separate future feature and still requires its own Spec Kit package.
+with no LLM rewriting for `dynamic_data_required=true` evidence — was
+implemented in V2. The now-completed availability package implemented only
+the allowlisted appointment resolver and its documented simulation; actual
+booking operations and holds/reservations remain deferred and require their
+own Spec Kit package.
 
-Planned in scope:
+Implemented scope:
 
 - allowlisted resolution of `dynamic_resolver=appointment_availability`;
 - read-only consultation of synthetic availability in PostgreSQL;

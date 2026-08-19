@@ -551,3 +551,65 @@ Finding 1. `tasks.md` Phase 9 (T093-T098) is DONE with full evidence,
 including both findings. Phases 1-9 are now DONE; Phase 10 (acceptance
 automation) remains, per this package's own Handoff note, for a fresh
 session to pick up.
+
+## 18. Phase 10 post-implementation convergence and final verdict (2026-08-19)
+
+T082 repeated the V2/V3 closure method against the real implementation,
+not merely the artifacts: each `spec.md` outcome was traced through
+`plan.md`, migrations/models/services/routes, executable tests,
+`acceptance.md`, and the live Postgres/OpenAPI surfaces. Containers were
+rebuilt from the worktree; Alembic was at `20260819_0004`; the database
+catalog showed 4 specialties/12 professionals, the generalist's exact
+price/duration, both AA-10 `CHECK` constraints, and no deferred
+appointments/identity/billing tables.
+
+### Findings and repairs
+
+| Finding | Evidence | Repair |
+|---|---|---|
+| **AA-10 raw-input non-retention was false-green.** `spec.md` outcome 13 said CPF/payment inputs were never persisted, but `send_customer_message()` created the ordinary customer `Message` with `payload.body` before calling the script. T095 inspected only operator-message bodies and audit payloads, so it could pass while the customer row retained exactly the submitted value. | Direct call-path review of `anonymous_access/router.py`; comparison with T095's query predicate. This is material because it concerns the amendment's own privacy boundary, not test wording. | Added `persisted_customer_body()`: at `AWAITING_CPF`/`AWAITING_PAYMENT`, parsing still receives request-local text but the durable customer message contains a fixed disclosure marker. T095 now inspects **all** message rows. The real HTTP booking smoke also queries `Message` and `AuditEvent` and rejects every submitted string. Spec/plan/data-model/acceptance/checklists were clarified consistently: the formatted CPF remains only in the exact fixed confirmation output the human required, never as structured identity state. |
+| Artifact count/status drift after implementation. | Implementation has four migrations (the fourth is §16's `messages_check` correction), while spec/plan/data-model still summarized three. Spec §6 retained the superseded specialty-agnostic AA-9 rule; plan summary omitted AA-10; traceability called live tests "planned" and said scheduling shape was unchanged. | Updated the governing artifacts to four migrations, generalist-scoped AA-9, four separated technical pieces, accurate write boundaries, real audit payload shape, and executed evidence. Historical revision sections remain intact. |
+| Full E2E suite contained timing/locator assumptions below the real runtime envelope. | First full Playwright run: 3 failures while DB rows showed real-provider generation durations of 5.284s and 8.741s; subsequent focused runs exposed `.first()` re-resolution after queue polling and whole-panel text comparisons that included controls. | Bounded the affected scenarios (20s/45s assertions; 90s/150s tests), captured the selected conversation label before clicking, and compared `.message-body` elements. No product assertion was removed. Final full run: 11 passed, 1 maturity-mode skip by design. |
+| Requested smoke inventory said three new V4 scripts; repository/package has two. | `git ls-tree 1810d1a` and `rg --files app/tests` both show only `smoke_v4_appointment_availability.py` and `smoke_v4_booking_script.py`. | Stopped and reported the mismatch; after the human said "Prossiga", executed both real scripts and all 14 pre-existing scripts. Recorded the discrepancy in acceptance rather than inventing coverage. |
+
+### Independent AA-10 containment re-verification
+
+The handoff's strongest instruction was executed independently after the
+implementation review:
+
+| Bound | Phase 10 evidence | Result |
+|---|---|---|
+| One exceptional construction function | AST enumeration found exactly `booking_script/service.py::send_scripted_message`; the ordinary site remains `send_operator_message(CurrentOperator, ...)`. | PASS |
+| One import/call boundary | `send_scripted_message` has no import outside `booking_script/`; `advance_booking_script` is called exactly once, from `send_customer_message`. | PASS |
+| One provenance value | Every exceptional row has `autonomous_source='booking_script'`; every send emits `booking_script.autonomous_message_sent` with IDs/step only. | PASS |
+| Database-level containment | `messages_check` permits null `operator_id` only for `author_type='OPERATOR' AND autonomous_source='booking_script'`; the autonomous-source column accepts no other non-null value. | PASS |
+| Fixed/non-LLM output | Booking module imports no AI provider; real HTTP smoke reproduced all 10 exact outputs and both retry branches with zero operator clicks. | PASS |
+| Context guard | Script starts only after a real resolved `appointment_availability` generation; dedicated negative integration test passes. | PASS |
+| Sensitive-input boundary | Raw CPF/payment submissions remain request-local and are replaced before durable customer-message insertion; HTTP smoke verifies `Message`/`AuditEvent` directly. | PASS |
+
+Command rerun specifically required by the handoff:
+
+```text
+pytest -q tests/test_booking_script_containment.py
+....  4 passed
+```
+
+### Final execution evidence
+
+- backend: `ruff` PASS; `mypy customer_care` PASS (48 source files);
+  `pytest -q` PASS (119 tests) against the real Docker Postgres;
+- frontend: ESLint PASS; `tsc --noEmit` PASS; Vitest 17/17 PASS;
+  production build PASS;
+- rebuilt Compose: Postgres 17/pgvector healthy, backend ready, frontend
+  served the new build, Alembic at head;
+- smoke: all 16 actual `smoke_*.py` scripts PASS, including real-provider
+  smoke and both V4 scripts; corpus restored through the real provider
+  after the changed-ingestion test;
+- Playwright: 11 applicable scenarios PASS, 1 N1-only branch skipped by
+  design, against the rebuilt containers;
+- OpenAPI: live operator-only route/security matches the package delta.
+
+**Final verdict: GO / DONE.** All 15 `spec.md` §4 outcomes have real
+execution evidence; T080-T082 are complete; the AA-10 exception remains
+contained to one function/one trigger and now also satisfies its raw-input
+non-retention requirement. No unresolved material divergence remains.

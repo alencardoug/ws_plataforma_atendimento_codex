@@ -21,6 +21,10 @@ function psql(sql: string): void {
 const conversationTables = "customer_service.audit_events, customer_service.message_selections, customer_service.message_citations, customer_service.ai_generation_sources, customer_service.ai_generations, customer_service.retrieval_hits, customer_service.retrieval_runs, customer_service.messages, customer_service.conversation_assignments, customer_service.conversations";
 
 test("six independent customers, capacity, hidden N2 draft, explicit send and take-over", async ({ browser }) => {
+  // Real-provider generation can exceed Playwright's 5s assertion default.
+  // Keep the scenario bounded while allowing the configured provider to
+  // complete under the same latency envelope used by the V3 acceptance spec.
+  test.setTimeout(90_000);
   test.skip(process.env.E2E_MATURITY_MODE === "N1", "N2 acceptance scenario");
   // This scenario asserts an exact 4-active/2-waiting split, so it needs a
   // conversation-table slate with zero pre-existing rows — added when V3's
@@ -81,9 +85,13 @@ test("six independent customers, capacity, hidden N2 draft, explicit send and ta
     const firstActiveLabel = await firstActiveButton.textContent();
     const selectedSessionIndex = sessions.findIndex((session) => firstActiveLabel?.includes(session.id.slice(0, 8)));
     expect(selectedSessionIndex).toBeGreaterThanOrEqual(0);
-    await firstActiveButton.click();
+    expect(firstActiveLabel).not.toBeNull();
+    // Queue polling can reorder `.first()` between reading its label and
+    // clicking it. Pin the click to the captured conversation label so the
+    // customer page asserted below is always the conversation actually open.
+    await operator.getByRole("button", { name: firstActiveLabel as string, exact: true }).click();
     await operator.getByRole("button", { name: "Gerar rascunho" }).click();
-    await expect(operator.getByText(/ANSWER|ABSTAIN/, { exact: true })).toBeVisible();
+    await expect(operator.getByText(/ANSWER|ABSTAIN/, { exact: true })).toBeVisible({ timeout: 45_000 });
     for (const page of customerPages) await expect(page.getByText(/ANSWER|ABSTAIN/, { exact: true })).toHaveCount(0);
     await operator.getByRole("button", { name: /Usar (sugestão|documento completo)/ }).click();
     const reply = operator.locator("main.workspace > section textarea");
@@ -92,7 +100,7 @@ test("six independent customers, capacity, hidden N2 draft, explicit send and ta
     await operator.locator("main.workspace > section").getByRole("button", { name: "Enviar" }).click();
     await expect(operator.getByText("Complemento revisado pelo operador.")).toBeVisible();
     await expect(customerPages[selectedSessionIndex].getByText("Complemento revisado pelo operador.")).toBeVisible({ timeout: 10_000 });
-    const operatorReply = operator.locator("main.workspace > section article .message-body").last();
+    const operatorReply = operator.locator(".message.operator .message-body").last();
     const customerReply = customerPages[selectedSessionIndex].locator("article.operator .message-body").last();
     await expect(operatorReply).toHaveCSS("white-space", "pre-wrap");
     await expect(customerReply).toHaveCSS("white-space", "pre-wrap");

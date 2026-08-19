@@ -5,7 +5,7 @@ to `scheduling.appointments`/`appointment_events`, `identity.*`, or
 `billing.*`, or implements `price_lookup`/`payment_simulator`/
 `insurance_lookup` — those remain out of scope per `spec.md` §6. The query
 path (`scheduling/availability.py`) never writes anything, under any
-circumstance. There are exactly five places anything is written in this
+circumstance. There are exactly six places anything is written in this
 feature: T008's one-time migration (creating the `scheduling` schema itself
 plus the original 3 specialties' seed data — correction, `data-model.md`
 §5, found 2026-08-19 during the post-V3 production sync: neither
@@ -13,7 +13,9 @@ plus the original 3 specialties' seed data — correction, `data-model.md`
 into any automated init path, confirmed against both the local and
 production databases), T009's one-time migration (seeding the new
 generalist specialty), T090's one-time migration (the booking-script
-columns — all three applied once by Alembic, not a runtime code path),
+columns), T093's corrective migration (the narrowly widened
+`messages_check` constraint — all four applied once by Alembic, not a
+runtime code path),
 `scheduling/seeding.py` (reachable only through the one new operator
 endpoint, Phase 4), and `booking_script/service.py`'s
 `send_scripted_message()` (reachable only through
@@ -514,11 +516,14 @@ with no database required.
   availability → script never starts; a second booking-intent message
   after a completed flow starts a fresh one; every sent message carries
   `autonomous_source = "booking_script"` and its audit event
-  (`actor_type="SYSTEM"`); the raw CPF and payment-reply text are absent
-  from every operator message body and every audit payload afterward (the
-  one exception, by design: the *formatted* CPF legitimately appears in
-  the "CPF ... confirmado" customer-visible message itself — that is the
-  script's specified output, not a persistence violation). This test
+  (`actor_type="SYSTEM"`). **Corrected in T082:** the earlier assertion
+  checked only operator messages/audit and missed that the baseline HTTP
+  path persisted raw customer inputs first. The route now replaces both
+  sensitive customer-message bodies with fixed disclosure markers before
+  insertion; this test inspects all `Message` rows and every audit payload
+  for the submitted strings. The *formatted* CPF legitimately appears in
+  the fixed "CPF ... confirmado" output — the script's specified output,
+  not structured identity persistence. This test
   file's first run (before the `created_at` fix above) is what surfaced
   the timestamp-collision bug, failing only under full-suite timing, not
   in isolation.
@@ -540,8 +545,10 @@ with no database required.
   ranking — Phase 7's lesson applied here too), a real booking-intent
   customer message, the script's exact messages appear with zero operator
   action through both retry branches, the exact final message confirmed,
-  and `identity.patients`/`billing.payments`/`scheduling.appointments`/
-  `scheduling.appointment_events` confirmed empty-or-nonexistent
+  submitted CPF/payment strings are absent from real `Message` and
+  `AuditEvent` rows, and `identity.patients`/`billing.payments`/
+  `scheduling.appointments`/`scheduling.appointment_events` are confirmed
+  empty-or-nonexistent
   afterward (all four are in fact nonexistent tables, per T008's
   correction — the strongest possible proof).
 - [x] **T098 [P, optional]** Implemented. Found the backend gap this
@@ -598,12 +605,19 @@ design-heavy. Whoever/whatever executes this phase should:
    phase's commit messages), update `tasks.md` checkboxes with real
    evidence (not just "done"), and do not push without being asked.
 
-- [ ] **T080** Write `acceptance.md` covering `spec.md` §4's 15 acceptance
-  outcomes as executable scenarios, following V1/V2/V3's Execution-record
-  format.
-- [ ] **T081** `checklists/{requirements,security,traceability}.md`
-  finalized against the implemented state.
-- [ ] **T082** `analysis.md` — final post-implementation cross-artifact
+- [x] **T080** `acceptance.md` covers `spec.md` §4's 15 acceptance
+  outcomes as executable scenarios and now contains the 2026-08-19
+  Execution record: rebuilt containers, real Postgres catalog evidence,
+  backend 119, frontend Vitest 17, all 16 actual `smoke_*.py`, and full
+  Playwright 11 passed/1 intentional skip. The request named 3 new V4
+  smokes, while commit `1810d1a`/the package contain 2; after the human
+  explicitly said "Prossiga", both actual scripts were executed and the
+  discrepancy was recorded rather than hidden.
+- [x] **T081** `checklists/{requirements,security,traceability}.md`
+  finalized against the implemented state: all security items checked
+  against concrete code/tests, stale "planned" evidence removed, four
+  migrations and schema activation represented accurately.
+- [x] **T082** `analysis.md` — final post-implementation cross-artifact
   convergence review (spec/plan/data-model/tasks/acceptance), following
   V2 §6 / V3 §6's method: diff against the real implementation, not just
   against each other. **Explicitly re-verify AA-10's containment** — the
@@ -611,7 +625,12 @@ design-heavy. Whoever/whatever executes this phase should:
   function, reachable from exactly one trigger. Update
   `PROJECT_STATE.md`/`ROADMAP.md`/`DECISIONS.md` to record this feature's
   closure (and D-031's move from "specification pending" to
-  "implemented").
+  "implemented"). Completed 2026-08-19. The independent T096 rerun passed
+  4/4 and the DB `messages_check` gave a second containment proof. This
+  review also found and repaired one false-green AA-10 gap: raw CPF/payment
+  inputs had been stored as ordinary customer messages; they are now
+  request-local and fixed markers are persisted instead, with real-HTTP +
+  DB regression assertions.
 
 **Gate:** backend `ruff`/`mypy`/`pytest`; frontend
 `eslint`/`tsc --noEmit`/`vitest`/`vite build` (this feature now has a real
@@ -619,6 +638,13 @@ frontend surface, unlike the first plan draft — Phase 6's button, and
 optionally Phase 9's badge); the full `smoke_*` suite (pre-existing + this
 feature's new scripts) all pass; `acceptance.md`'s Execution record covers
 all 15 `spec.md` §4 outcomes.
+
+**Passed (2026-08-19):** backend `ruff`/`mypy`/`pytest` (119), frontend
+ESLint/TypeScript/Vitest (17)/build, 16/16 actual smoke scripts, and full
+Playwright (11 passed, 1 intentional skip) against rebuilt containers and
+real Postgres. T096 independently reconfirmed 4/4 after the AA-10
+non-retention correction. Feature DONE; local closure commit created, no
+push performed.
 
 ## Dependency summary
 

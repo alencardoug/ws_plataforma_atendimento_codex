@@ -1,18 +1,17 @@
 # Project State
 
-Last updated: 2026-08-17
+Last updated: 2026-08-19
 
 ## Lifecycle and authority
 
 - V1 (`specs/001-v1-assisted-customer-service`) is the completed executable
   baseline. Its original acceptance gates completed on 2026-08-10.
-- The human explicitly authorized the **V2 specification cycle** on 2026-08-11.
-  Its feature package is `specs/002-v2-commercial-product-experience/`.
-- V2 implementation is authorized only in SDD order: it must first complete
-  `specify -> clarify -> plan -> tasks -> analyze`, with acceptance coverage,
-  before production code is written.
-- Dynamic appointment availability is a separate future feature, recorded in
-  `ROADMAP.md` and D-026. It is not V2 scope unless explicitly added later.
+- V2 (`specs/002-v2-commercial-product-experience`) is DONE (2026-08-17).
+- V3 (`specs/003-v3-measured-n2`) is DONE (2026-08-18).
+- Dynamic appointment availability
+  (`specs/004-dynamic-appointment-availability`) is DONE (2026-08-19), as
+  a separate feature from V2/V3. Its real booking/identity/payment follow-on
+  remains deferred.
 
 ## V1 baseline
 
@@ -249,17 +248,50 @@ coverage. Per this project's deploy-cadence practice, this V3 work is
 committed but not yet redeployed to production; deploy at the end of the
 current refinement window, not reactively per-commit.
 
+## Dynamic appointment availability — DONE (2026-08-19)
+
+All 10 phases of `specs/004-dynamic-appointment-availability/tasks.md`
+(T000-T082, plus AA-10's T090-T098) are complete and committed locally;
+not pushed/redeployed:
+
+- a narrowly activated `scheduling` schema with 4 specialties/12
+  professionals, real synthetic price/duration data, and a purely
+  read-only allowlisted `appointment_availability` resolver;
+- an authenticated, idempotent operator action that maintains exactly
+  1 generalist slot at D+1 and 3 at D+7, bounded to business days/hours
+  and serialized under concurrent clicks with a Postgres advisory lock;
+- deterministic dynamic answers with no LLM rewrite, safe abstention for
+  every other resolver name, append-only provenance, and an operator UI;
+- AA-10's one Constitution Amendment 1.1.0 exception: a fixed simulated
+  CPF/payment-confirmation script, no booking/payment/identity state,
+  every autonomous message tagged/audited, and the exception structurally
+  confined to one construction function and one trigger.
+
+The Phase 10 convergence pass found one material AA-10 false-green:
+ordinary customer-message persistence retained raw CPF/payment replies
+before parsing even though the spec forbade it. The HTTP path now parses
+only request-local input and stores fixed disclosure markers for those two
+customer steps; the real HTTP smoke directly verifies `Message` and
+`AuditEvent`. The independently rerun structural containment test passed
+4/4, and the database `messages_check` provides a second containment
+boundary.
+
+Acceptance against rebuilt Compose containers and real Postgres:
+backend ruff/mypy/pytest (119), frontend lint/typecheck/Vitest (17)/build,
+all 16 actual `smoke_*.py` scripts, and Playwright (11 passed, 1
+intentional maturity-mode skip) all pass. See `acceptance.md`'s Execution
+record and `analysis.md` §18. D-031 is now implemented. Real appointment
+booking/holds, identity persistence, payment processing, other resolver
+names, and a scheduling CRUD remain deferred.
+
 ## Immediate next action for Claude Code
 
-V1 remains closed (GO, 2026-08-13), V2 is DONE (2026-08-17), and V3
-("Measured N2") is DONE (2026-08-18). There is no open implementation work
-in any of the three. V3's changes are committed to `main` but not yet
-pushed or redeployed to production — per this project's deploy-cadence
-practice, batch the next production deploy at the end of the current
-refinement window rather than redeploying reactively; the production
-environment described above still serves V1+V2 only until that happens.
-`ROADMAP.md`/`DECISIONS.md` govern what comes next: dynamic appointment
-availability remains a separate, not-yet-authorized future feature
-(D-026), distinct from V2's `dynamic_data_required` safety correction
-(D-028, V2 Phase 7) and unrelated to anything V3 built. No V4/V5
-specification cycle has been authorized yet.
+V1 remains closed (GO, 2026-08-13), V2 is DONE (2026-08-17), V3
+("Measured N2") is DONE (2026-08-18), and dynamic appointment availability
+is DONE (2026-08-19). There is no open implementation work in these
+packages. The latest changes are committed locally but not pushed or
+redeployed; batch the next production deploy at the end of the current
+refinement window. The production environment described above still
+serves V1+V2 only until that happens. `ROADMAP.md`/`DECISIONS.md` govern
+what comes next; real appointment booking/holds/payment/identity and the
+full scheduling CRUD remain separate future specification work.

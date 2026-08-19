@@ -1,9 +1,8 @@
 # Feature Specification: Dynamic Appointment Availability
 
 **Feature ID:** `004-dynamic-appointment-availability`
-**Status:** Clarification complete (2026-08-18, revised same day) —
-planning, tasks, analysis, and acceptance coverage required before
-implementation
+**Status:** Implemented and accepted (DONE 2026-08-19) — see
+`acceptance.md`'s Execution record and `analysis.md` §18
 **Authorized for specification:** 2026-08-18
 **Scope:** read-only appointment-availability consultation, one explicit
 operator-triggered demo-seeding action, and one narrowly-scoped simulated
@@ -53,8 +52,9 @@ data" behavior into two separate, more precise pieces:
   explicit, idempotent operator action** — a button on the operator
   workspace that ensures exactly 1 available slot on D+1 and 3 on D+7
   exist, creating them within business hours (08:00-18:00) only when
-  needed (new AA-9). This is the *only* write path in this feature; the
-  query path (AA-2) never triggers it as a side effect.
+  needed (new AA-9). This is the only write path into `scheduling`; the
+  query path (AA-2) never triggers it as a side effect. AA-10 later adds
+  its separately authorized conversation-message/audit writes.
 
 A third clarification round (§5 items 8-9) deferred a full scheduling CRUD
 to future work and identified a real content gap: no existing specialty
@@ -331,10 +331,15 @@ Sub-mechanics:
   whichever specialty the customer's most recent resolved
   `appointment_availability` generation (AA-1..AA-9) was about — reuses
   data this feature already reads, no new price source.
-- **No real reservation, payment, or identity persistence**: the CPF and
-  the payment yes/no answer are used only to decide the next scripted
-  message and are never written to any table — not `identity.patients`,
-  not a new table, nowhere (Constitution Article VI). No
+- **No real reservation, payment, or identity persistence**: raw CPF and
+  payment-reply inputs are parsed only from the request-local value. At
+  those two steps, the ordinary durable customer `Message.body` is
+  replaced with a fixed disclosure marker before insertion; no raw input
+  reaches `Message`, `AuditEvent`, `identity.patients`, or a new table.
+  The formatted CPF necessarily appears in the fixed, customer-visible
+  `"CPF ... confirmado"` output required above; that scripted output is
+  not a reusable identity record and is the sole documented exception to
+  the raw-input non-retention rule. No
   `scheduling.appointments`/`schedule_slots.status` row is created or
   changed either — "reserva" (actually holding a slot) is explicitly
   **not** handled by this script (still deferred, `spec.md` §6) — this is
@@ -400,10 +405,13 @@ Sub-mechanics:
     reply that isn't recognized as an affirmative "sim" variant — including
     an explicit "não", gibberish, or a reply matching neither — with no
     retry limit, never advancing on anything but a clear "sim".
-13. Neither the CPF nor the payment yes/no answer is ever persisted to any
-    table — a negative test proves this structurally (no column/table
-    exists to hold either raw value) — only the current script *step*
-    (an enum-like marker, not the customer's actual input) is persisted.
+13. Neither raw CPF input nor raw payment-reply input is persisted to any
+    table: the HTTP path replaces each sensitive customer-message body
+    with a fixed disclosure marker before insertion, and a negative test
+    inspects `Message` and `AuditEvent` after the real HTTP flow. Only the
+    current script *step* (an enum-like marker, not the customer's actual
+    input) and the exact scripted outputs are persisted; the formatted CPF
+    appears only in the required `"CPF ... confirmado"` output.
 14. **The autonomous-send mechanism this script uses is provably scoped to
     only this one flow** — a negative test proves no other message path in
     the system can be triggered without an authenticated operator action
@@ -549,9 +557,8 @@ outcome:**
   protocol number, booking for a minor, booking for someone else, remain
   unimplemented and untouched;
 - the seed action (AA-9) creating/counting slots for any specialty other
-  than "however many happen to exist" — it is a flat, specialty-agnostic
-  count, not a per-specialty guarantee (that distinction is deliberate, not
-  an oversight — see `plan.md`);
+  than `oncologia-geral` — its target is deliberately scoped to the
+  generalist specialty (`plan.md` §4b);
 - autonomous AI-to-customer send **outside AA-10's one narrowly-authorized
   script** — Constitution Amendment 1.1.0 is explicit that it does not
   extend to any other outbound message in the system; every other
@@ -561,22 +568,24 @@ outcome:**
 - the specialist-escalation workflow — unchanged V5 exclusion;
 - real patient data — unchanged Constitution Article VI exclusion.
 
-## 7. Required next artifacts
+## 7. Delivered artifacts
 
 - `plan.md` with the resolver's exact architecture (dispatch mechanism, the
   deterministic keyword-extraction vocabulary, audit event shape), the seed
   action's exact algorithm (AA-9), the new endpoint and operator-workspace
   button, the booking script's exact state machine and autonomous-send
   mechanism (AA-10), security, and testing decisions;
-- `data-model.md` documenting **three** new migrations — the §2 correction's
+- `data-model.md` documenting **four** new migrations — the §2 correction's
   schema-creation one (the `scheduling` schema itself, scoped to only the
   tables/enum/function this feature uses, plus the original 3 specialties'
   seed data, ported from `db/init/001_schema.sql`/`002_seed_and_schedule.sql`
   since neither file is wired into any automated init path), AA-3a's
   data-only one (the seeded generalist specialty/professionals/
-  professional_specialties rows), and AA-10's schema one (a transient
+  professional_specialties rows), AA-10's schema one (a transient
   flow-position column plus a marker distinguishing an autonomously-sent
-  message from an operator-sent one) — and confirming no other change to
+  message from an operator-sent one), and the narrow correction to the
+  pre-existing `messages_check` constraint found during Phase 9 — and
+  confirming no other change to
   the dormant `scheduling`/`identity`/`billing` tables' shape beyond the
   query path's ordinary reads and the two write paths' (AA-9, AA-10)
   documented inserts;

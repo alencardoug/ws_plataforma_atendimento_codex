@@ -78,15 +78,18 @@ test.describe("V3 acceptance (tasks.md T132)", () => {
       await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 45_000 });
       const approveButton = operator.getByRole("button", { name: "Aprovar" });
       if (await approveButton.isVisible().catch(() => false)) {
-        const draftText = await operator.locator(".draft-panel").textContent();
+        const draftText = await operator.locator(".draft-panel .message-body").textContent();
         await approveButton.click();
-        await expect(operator.locator(".message.operator").last()).toBeVisible();
-        const sentText = await operator.locator(".message.operator").last().textContent();
-        expect(draftText).toContain(sentText?.replace("Operador", "").trim() ?? "__no_match__");
+        // A poll already in flight can be completing a real automatic draft
+        // while quick-approve refreshes the conversation. Wait through that
+        // bounded provider call instead of relying on Playwright's 5s default.
+        await expect(operator.locator(".message.operator").last()).toBeVisible({ timeout: 20_000 });
+        const sentText = await operator.locator(".message.operator .message-body").last().textContent();
+        expect(sentText).toBe(draftText);
       } else {
         await operator.locator("#operator-reply").fill("Resposta manual de fallback (T132).");
         await operator.getByRole("button", { name: "Enviar", exact: true }).click();
-        await expect(operator.locator(".message.operator").last()).toBeVisible();
+        await expect(operator.locator(".message.operator").last()).toBeVisible({ timeout: 20_000 });
       }
 
       // mark-incorrect / escalate: reachable on the just-sent message,

@@ -25,6 +25,13 @@ V2 proceeded through the full SDD order (`spec.md`, `plan.md`, `tasks.md`,
 passed acceptance. See `PROJECT_STATE.md` for the summary and that package's
 own `tasks.md`/`acceptance.md`/`analysis.md` for full evidence.
 
+## Completed subsequent features
+
+- `specs/003-v3-measured-n2` — **DONE (2026-08-18)**.
+- `specs/004-dynamic-appointment-availability` — **DONE (2026-08-19)**;
+  final execution evidence is in `acceptance.md`, with post-implementation
+  convergence and AA-10 containment in `analysis.md` §18.
+
 ## Required pre-code review
 
 An agent must verify:

@@ -59,7 +59,10 @@ test.describe("V2 acceptance (tasks.md T124-T128)", () => {
   });
 
   test("typing-debounced automatic trigger batches correctly across multiple bursts (T124, V2-7 automatic)", async ({ browser }) => {
-    test.setTimeout(60_000);
+    // Each automatic draft includes the deliberate 8s debounce plus a real
+    // provider call. Two bursts therefore need more than the old 60s test
+    // budget when provider latency is above a few seconds.
+    test.setTimeout(150_000);
     const customerContext = await browser.newContext();
     const operatorContext = await browser.newContext();
     try {
@@ -81,7 +84,7 @@ test.describe("V2 acceptance (tasks.md T124-T128)", () => {
       await expect(operator.getByText(/ANSWER|ABSTAIN/)).toHaveCount(0);
 
       // Now stay idle for the full 8s debounce; exactly one automatic draft must appear.
-      await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 15_000 });
+      await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 45_000 });
       const firstDraft = await operator.locator(".draft-panel .badge").textContent();
       expect(firstDraft).toMatch(/ANSWER|ABSTAIN/);
 
@@ -93,7 +96,7 @@ test.describe("V2 acceptance (tasks.md T124-T128)", () => {
       await operator.waitForTimeout(9_000);
       await operator.reload();
       await operator.getByRole("button", { name: /^Em atendimento/ }).click();
-      await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 15_000 });
+      await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 45_000 });
     } finally {
       await customerContext.close();
       await operatorContext.close();

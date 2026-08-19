@@ -15,9 +15,8 @@ Read and obey `AGENTS.md` first.
   authoritative summary. The V2 runtime (which supersedes V1's UI/API
   surface where V2 changed it, while preserving every V1 safety invariant)
   is now the executable baseline.
-- Dynamic appointment availability is a separate future feature, not part
-  of the completed V2 package, unless a later human decision explicitly
-  authorizes it. The human made exactly one narrow combination into V2 on
+- Dynamic appointment availability is a separate feature, not part of
+  the completed V2 package. The human made exactly one narrow combination into V2 on
   2026-08-12 (D-028): the `dynamic_data_required=true` safety correction
   (deterministic, database-driven chunk-pattern substitution via a
   server-side allowlist, no LLM rewrite) — V2 Phase 7 implemented and
@@ -41,15 +40,12 @@ Read and obey `AGENTS.md` first.
   workflow (V5), and an automated evaluation-case re-run mechanism all
   remain out of scope, unchanged from prior exclusions, unless a later
   human decision explicitly authorizes them.
-- The human authorized the "Dynamic appointment availability" feature's
-  discovery/specification on 2026-08-18 — read-only appointment-
-  availability consultation only, not booking. Its package is
-  `specs/004-dynamic-appointment-availability/`. Its `spec.md` (13→9
-  numbered outcomes AA-1..AA-8, resolved), `plan.md`, `data-model.md`,
-  `tasks.md`, `acceptance.md`, and the pre-implementation `analysis.md` are
-  complete; implementation (that package's `tasks.md` Phase 1 onward) is
-  the next work once a human confirms. Booking, holds, payment, identity
-  persistence, and every `dynamic_resolver` name besides
+- **Dynamic appointment availability is DONE (2026-08-19).** Its package
+  is `specs/004-dynamic-appointment-availability/`; all 10 phases passed
+  final acceptance and convergence. AA-10's fixed simulation is the sole
+  Constitution Amendment 1.1.0 exception and is structurally contained.
+  Real booking, holds, payment, identity persistence, and every
+  `dynamic_resolver` name besides
   `appointment_availability` (`price_lookup`/`payment_simulator`/
   `insurance_lookup`) remain explicitly deferred — see that package's
   `spec.md` §6.
@@ -59,7 +55,7 @@ Read in this order:
 1. `.specify/memory/constitution.md`
 2. `PROJECT_STATE.md`
 3. `CLAUDE_CODE_HANDOFF.md`
-4. `specs/004-dynamic-appointment-availability/spec.md` (current active
+4. `specs/004-dynamic-appointment-availability/spec.md` (latest closed
    cycle)
 5. the complete V1/V2/V3 packages, especially their `spec.md`, `plan.md`,
    `tasks.md`, `data-model.md`, contract, acceptance, analysis, and
@@ -115,17 +111,15 @@ DONE (2026-08-18); no further V3 spec/plan/tasks authoring is expected
 unless a new correction is authorized, following the same
 repair-the-highest-authority-artifact process as a V1/V2 correction.
 
-### Dynamic appointment availability — specification complete, implementation pending
+### Dynamic appointment availability — complete
 
-`specs/004-dynamic-appointment-availability/` is the current active
-package. Its `spec.md`, `plan.md`, `data-model.md`, `tasks.md`,
-`acceptance.md`, and pre-implementation `analysis.md` are all written and
-cross-checked; `tasks.md` Phase 0 (SDD gates) is done. Implementation
-(`tasks.md` Phase 1 onward) has not started. Read `tasks.md`'s dependency
-summary before continuing; do not skip a phase's gate. This feature has no
-frontend surface (an internal resolution-path change only, matching V2-6's
-own no-new-route precedent) — do not add one unless the spec is amended
-first.
+`specs/004-dynamic-appointment-availability/` is a completed package. Its
+`spec.md`, `plan.md`, `data-model.md`, `tasks.md`,
+`acceptance.md`, and `analysis.md` are complete; Phases 0-10 are DONE and
+the final verdict is GO (`analysis.md` §18). The implemented frontend
+surface is the operator's bounded D+1/D+7 seed button/status plus the
+optional autonomous-message transparency badge. Do not broaden AA-10 or
+start a deferred scheduling feature without a new authorized package.
 
 ## General Claude Code behavior
 

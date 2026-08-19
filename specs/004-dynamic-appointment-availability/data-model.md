@@ -6,17 +6,19 @@ the `scheduling` schema's tables "already exist" (`db/init/001_schema.sql`,
 local Docker Compose database and Neon production — neither file is
 mounted as `initdb.d` content, referenced by any script, or ported into an
 Alembic migration; `scheduling.specialties` exists in neither database.
-`spec.md` §2 and `plan.md` §3 now record this correctly. **Three new
-migrations are needed**, from three different rounds: §5's schema one
+`spec.md` §2 and `plan.md` §3 now record this correctly. **Four new
+migrations were delivered**, from three design rounds plus one
+implementation finding: §5's schema one
 (creating the `scheduling` schema itself, scoped to what this feature
 uses, plus the original 3 specialties' seed data — new, this correction),
 §6's data-only one (seeding the new generalist specialty, AA-3a — the same
 kind of reference data `db/init/002_seed_and_schedule.sql` already defines
 for the original 3 specialties, just applied the correct way since that
 file is wired into nothing), and §8's real schema one (two additive,
-nullable columns supporting AA-10's booking script). This document records
-the new SQLAlchemy ORM mappings this feature adds, all three migrations,
-and confirms nothing else about the schema's shape changes.
+nullable columns supporting AA-10's booking script), and §8's narrow
+`messages_check` correction discovered during Phase 9. This document
+records the new SQLAlchemy ORM mappings this feature adds, all four
+migrations, and confirms nothing else about the schema's shape changes.
 
 ## 1. New ORM mappings (`app/customer_care/scheduling/models.py`)
 
@@ -29,7 +31,7 @@ trigger a migration of their own.
 | `Professional` | `scheduling.professionals` | `professional_id`, `display_name`, `active` | `registration_display`/`simulated` not mapped — unused by this feature |
 | `ProfessionalSpecialty` | `scheduling.professional_specialties` | `professional_id`, `specialty_id`, `fixed_price_cents`, `appointment_duration_minutes` | composite PK, both FKs |
 | `Unit` | `scheduling.units` | `unit_id`, `name`, `timezone` | `simulated` not mapped |
-| `ScheduleSlot` | `scheduling.schedule_slots` | `slot_id`, `unit_id`, `specialty_id`, `professional_id`, `starts_at`, `ends_at`, `status` | the only table this feature writes to (insert-only), and only from `scheduling/seeding.py` — never from `scheduling/availability.py` (`plan.md` §4/§4b) |
+| `ScheduleSlot` | `scheduling.schedule_slots` | `slot_id`, `unit_id`, `specialty_id`, `professional_id`, `starts_at`, `ends_at`, `status` | the only `scheduling` table this feature writes to (insert-only), and only from `scheduling/seeding.py` — never from `scheduling/availability.py` (`plan.md` §4/§4b) |
 
 `scheduling.holidays` is **not** ORM-mapped — no Python code needs a
 `Holiday` row directly; only `scheduling.next_business_day()`'s already-
@@ -48,9 +50,10 @@ path).
 
 ## 2. `ScheduleSlot` write path
 
-The only write this feature performs, and the only one anywhere in
-`scheduling/seeding.py` (never in `scheduling/availability.py`, the query
-path — revised 2026-08-18, `spec.md` §5 items 6-7):
+The only write this feature performs in the `scheduling` schema, and the
+only one anywhere in `scheduling/seeding.py` (never in
+`scheduling/availability.py`, the query path — revised 2026-08-18,
+`spec.md` §5 items 6-7):
 
 ```sql
 INSERT INTO scheduling.schedule_slots (unit_id, specialty_id, professional_id, starts_at, ends_at, status)
@@ -60,11 +63,11 @@ ON CONFLICT (professional_id, starts_at) DO NOTHING
 
 Reachable only via `POST /operator/scheduling/ensure-availability`
 (operator-authenticated, `plan.md` §4b) — never automatically, never as a
-side effect of a customer/operator query. Bounded to at most 3 inserts per
+side effect of a customer/operator query. Bounded to at most 4 inserts per
 call (`TARGET_D1=1` + `TARGET_D7=3`, minus whatever already exists on
 those two dates). This reuses the `UNIQUE (professional_id, starts_at)`
-constraint `001_schema.sql` already defines (line 164) — no new
-constraint, no new index. `status` is always inserted as `'available'`;
+constraint T008's schema migration creates (faithfully ported from
+`001_schema.sql` line 164). `status` is always inserted as `'available'`;
 this feature never transitions a slot to any other `scheduling.slot_status`
 enum value (that enum's other states — held/booked/etc., referenced by
 `appointments`, D-024 — remain reachable only by the still-unauthorized
@@ -325,9 +328,11 @@ unlike the runtime seed action's repeatable insert in §2).
 
 `scheduling.availability_seeded` (`customer_service.audit_events`, no
 schema change — the existing generic audit-event table, same as every
-other event type). Payload: `operator_id`, `created_d1`, `created_d7`,
-`already_sufficient`. Emitted by `scheduling/router.py`'s one endpoint,
-never by the query path.
+other event type). Payload: `created_d1`, `created_d7`,
+`already_sufficient`; the operator identity is
+stored in the audit row's standard `actor_id` column, not duplicated in
+the JSON payload. Emitted by `scheduling/router.py`'s one endpoint, never
+by the query path.
 
 ## 8. New migration: booking-script columns (AA-10)
 
@@ -382,6 +387,13 @@ Both columns are additive and nullable — no backfill needed, no existing
 row's meaning changes, unrelated to AA-3a's migration (kept as two
 separate migrations, `plan.md` §12, since they address unrelated concerns
 authorized in different clarification rounds).
+
+No column is added for CPF or payment input. During AA-10's two sensitive
+steps, `anonymous_access/router.py` passes the raw request body directly
+to the parser but persists a fixed disclosure marker as the customer
+`Message.body`. The formatted CPF is persisted only inside the exact,
+fixed `"CPF ... confirmado"` autonomous output required by the script;
+there is no identity/profile field or reusable structured value.
 
 ## 9. New audit event (AA-10)
 
