@@ -1,0 +1,70 @@
+openapi: 3.1.0
+info:
+  title: Customer Care AI Dynamic Appointment Availability API (delta)
+  version: 4.0.0-delta
+  description: >-
+    This is a DELTA over specs/003-v3-measured-n2's contracts/openapi.yaml
+    (3.0.0-delta), itself a delta over V2's, which remains canonical for
+    every path and schema not listed here — see spec.md §7/plan.md §12.
+
+    This feature's query path (AA-1..AA-8) adds **no** path or schema here
+    — it is an internal resolution-path change inside the existing
+    /operator/conversations/{id}/drafts and
+    /operator/knowledge/evidence/{id}/select flows, whose contracts are
+    already fully described by V2/V3's files (draft_text/dynamic_pattern_used
+    already cover its customer-visible shape). Only AA-9's new seed action
+    needs a contract entry, below.
+
+    Every V1/V2/V3 safety invariant (explicit operator send, server-side
+    citation/authorization enforcement, append-only audit, no
+    chain-of-thought persistence) is unchanged.
+servers:
+  - url: http://localhost:8000/api/v1
+
+paths:
+  /operator/scheduling/ensure-availability:
+    post:
+      tags: [Operator Scheduling]
+      summary: Idempotently ensure demo D+1/D+7 appointment availability (AA-9) — new
+      description: >-
+        Computes D+1/D+7 via the existing scheduling.next_business_day(),
+        counts available scheduling.schedule_slots rows on each date, and
+        creates only what's missing to reach exactly 1 slot on D+1 and 3 on
+        D+7, within 08:00-18:00 America/Sao_Paulo. Idempotent: if already
+        sufficient, creates nothing and reports so. Not conversation-scoped
+        — any authenticated operator may call it (plan.md §9).
+      security:
+        - operatorBearer: []
+      responses:
+        '200':
+          description: >-
+            Either the idempotent no-op case (already_sufficient=true,
+            created counts both 0) or however many slots were actually
+            created to reach target.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [created_d1, created_d7, already_sufficient, message]
+                properties:
+                  created_d1:
+                    type: integer
+                    minimum: 0
+                    maximum: 1
+                    description: Slots created on D+1 this call (0 if already sufficient).
+                  created_d7:
+                    type: integer
+                    minimum: 0
+                    maximum: 3
+                    description: Slots created on D+7 this call (0 if already sufficient).
+                  already_sufficient:
+                    type: boolean
+                    description: True if D+1 already had >=1 and D+7 already had >=3 available slots.
+                  message:
+                    type: string
+                    description: >-
+                      Portuguese status message for direct display —
+                      "Já tem 4 vagas disponíveis." when already_sufficient,
+                      otherwise a created-count summary.
+        '401':
+          description: No/invalid operator credential.

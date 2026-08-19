@@ -1,10 +1,12 @@
 # Feature Specification: Dynamic Appointment Availability
 
 **Feature ID:** `004-dynamic-appointment-availability`
-**Status:** Clarification complete (2026-08-18) — planning, tasks, analysis,
-and acceptance coverage required before implementation
+**Status:** Clarification complete (2026-08-18, revised same day) —
+planning, tasks, analysis, and acceptance coverage required before
+implementation
 **Authorized for specification:** 2026-08-18
-**Scope:** read-only appointment-availability consultation only (see §6)
+**Scope:** read-only appointment-availability consultation, plus one
+explicit operator-triggered demo-seeding action (see §6)
 
 ## 1. Purpose
 
@@ -32,11 +34,25 @@ payment, identity, or any other resolver name (`price_lookup`/
 `payment_simulator`/`insurance_lookup` remain separately deferred,
 unauthorized by this cycle — see §6).
 
-The human's clarification (2026-08-18, §5) explicitly prioritized correct,
-simple *logic* over preserving the existing `slot_offers`/`available_offers`/
-`ensure_demo_availability()` D+1-and-D+7-window machinery or the exact
-wording of the 14 seeded `agenda` Q&A entries verbatim — both may be
-redesigned or replaced where that produces a cleaner implementation.
+The human's first clarification round (2026-08-18, §5 items 1-5) explicitly
+prioritized correct, simple *logic* over preserving the existing
+`slot_offers`/`available_offers`/`ensure_demo_availability()`
+D+1-and-D+7-window machinery or the exact wording of the 14 seeded `agenda`
+Q&A entries verbatim — both may be redesigned or replaced where that
+produces a cleaner implementation.
+
+A second clarification round the same day (§5 items 6-7) refined this
+further, splitting what had been one combined "resolver ensures its own
+data" behavior into two separate, more precise pieces:
+
+- the **customer-facing query path is now purely read-only** — it never
+  writes a row, under any circumstance (revised AA-2);
+- the **D+1/D+7 windowing rule is reinstated, but only as a separate,
+  explicit, idempotent operator action** — a button on the operator
+  workspace that ensures exactly 1 available slot on D+1 and 3 on D+7
+  exist, creating them within business hours (08:00-18:00) only when
+  needed (new AA-9). This is the *only* write path in this feature; the
+  query path (AA-2) never triggers it as a side effect.
 
 ## 2. What already exists (verified against the real schema/code, not assumed)
 
@@ -60,10 +76,13 @@ redesigned or replaced where that produces a cleaner implementation.
 - `scheduling.slot_offers`/`scheduling.available_offers`/
   `scheduling.ensure_demo_availability()` are the *existing* D+1/D+7-window
   materialization machinery — kept in the schema (harmless, unused) but this
-  feature does not depend on them (§5 resolution 2): they are only ever
-  seeded once at container-init time and go stale, and the human explicitly
-  authorized disregarding that specific windowing rule rather than building
-  freshness machinery to keep it alive.
+  feature's query path does not depend on them (§5 resolution 2): they are
+  only ever seeded once at container-init time and go stale. This feature's
+  own D+1/D+7 seeding action (AA-9) reimplements the same windowing
+  *concept* in Python as an explicit, idempotent, operator-triggered
+  action — it does not call `ensure_demo_availability()` or write to
+  `slot_offers` (those stay exactly as unused/dormant as before); it writes
+  directly to `schedule_slots`, the same table the query path reads.
 - `scheduling.appointments`/`appointment_events`, `identity.patients`/
   `consent_records`, and `billing.payments` also already exist (D-024,
   dormant) but are **out of scope** for this cycle (§6) — this feature never
@@ -82,20 +101,20 @@ by this cycle; every other `dynamic_resolver` value already present in seed
 data (`price_lookup`, `payment_simulator`, `insurance_lookup`) remains
 unresolved/abstaining, exactly as today — this cycle does not authorize them.
 
-### AA-2 — Read-only, on-demand, no freshness machinery needed
+### AA-2 — Purely read-only query path
 
 The resolver only ever `SELECT`s `scheduling.schedule_slots` (joined to
 `specialties`/`professionals`/`professional_specialties`/`units`) for slots
-with `starts_at` in the future relative to the real query time, computed
-fresh on every resolution — never a pre-materialized, date-stamped
-`slot_offers` row that can go stale. No row in `scheduling.appointments`,
-`schedule_slots.status`, `identity.*`, or `billing.*` is ever written by this
-feature. If too few future slots exist to answer (the seed data has been
-exhausted by the passage of time), the resolver may deterministically ensure
-more exist for the near future (an idempotent, allowlisted, read-adjacent
-operation — never a customer/operator-triggered write path) rather than
-either fabricating an answer or requiring a human to remember a manual reseed
-step (§5 resolution 2).
+with `starts_at` in the future relative to the real query time and
+`status = 'available'`, computed fresh on every resolution — never a
+pre-materialized, date-stamped `slot_offers` row that can go stale. **This
+path never writes anything, under any circumstance** (revised 2026-08-18,
+§5 item 6): no row in `schedule_slots`, `scheduling.appointments`,
+`identity.*`, or `billing.*` is ever created, updated, or deleted by a
+customer/operator query. If too few (or zero) future slots exist to answer,
+the resolver aborts to the existing manual-fallback path (AA-8) — it never
+generates data itself. Keeping the seed data populated is entirely AA-9's
+job, a separate, explicit, operator-triggered action.
 
 ### AA-3 — Deterministic parameter extraction from the customer's message
 
@@ -138,7 +157,10 @@ Every resolution (success or failure) is audited, following the existing
 V2-6 pattern (`ai.dynamic_pattern_resolved` / `ai.dynamic_pattern_fallback`)
 rather than inventing a parallel event shape — extended only as needed to
 carry which specialty/date/period was matched, never a query string or
-table/column name in a customer-facing field.
+table/column name in a customer-facing field. AA-9's seed action gets its
+own new event (it is not a resolution, so it does not reuse
+`ai.dynamic_pattern_resolved`) — `scheduling.availability_seeded`, carrying
+the operator id, `d1`/`d7` dates, and how many slots were created on each.
 
 ### AA-8 — Manual fallback for unavailable, empty, or failed data
 
@@ -146,6 +168,38 @@ Matches D-028's existing safety correction exactly: zero matching slots or a
 resolution error must produce the *existing* `ABSTAIN`/
 `DYNAMIC_DATA_UNAVAILABLE` path — never a fabricated slot, never an exposed
 cause string, never a partial answer.
+
+### AA-9 — Explicit, idempotent, operator-triggered D+1/D+7 seeding action (added 2026-08-18)
+
+A button on the operator workspace ("aba operator" — the operator's own
+page, not tied to any single conversation) triggers one idempotent backend
+action:
+
+1. Compute `d1 = scheduling.next_business_day(today + 1 day)` and
+   `d7 = scheduling.next_business_day(today + 7 days)` — reusing the
+   existing, already-correct SQL function (same single source of truth
+   `plan.md` originally chose for the query path, before AA-2 was
+   narrowed to read-only; this is the one place in the feature that still
+   calls it, and only from this explicit action).
+2. Count `schedule_slots` rows with `status = 'available'` and
+   `starts_at`'s date equal to `d1` (call it `count_d1`), and likewise for
+   `d7` (`count_d7`) — a flat count, not scoped to any one
+   specialty/professional.
+3. **If `count_d1 >= 1` and `count_d7 >= 3`: do nothing and report
+   "já tem 4 vagas disponíveis"** (the exact idempotent no-op case the
+   human specified).
+4. **Otherwise, create just enough new slots** — `max(0, 1 - count_d1)` on
+   `d1`, `max(0, 3 - count_d7)` on `d7` — to reach exactly that target,
+   each within business hours **08:00-18:00** `America/Sao_Paulo`, each a
+   real `schedule_slots` row tied to a real seeded professional/specialty
+   (reusing `professional_specialties.appointment_duration_minutes` for
+   that professional, so `ends_at` is always correct), and report how many
+   were created.
+5. This is the **only** write path in this entire feature — the query path
+   (AA-2) never writes. It is reachable only by an authenticated,
+   assignment-independent operator action (not conversation-scoped — this
+   button is not about any one customer), audited like every other
+   operator action (AA-7).
 
 ## 4. Acceptance outcomes to develop into executable tests
 
@@ -159,13 +213,16 @@ cause string, never a partial answer.
    redirected to the correct next business day by the existing
    `scheduling.next_business_day()` — the customer-facing text reflects the
    actual resolved date, never a raw "Sunday" slot.
-4. A query for a Saturday only returns slots within whatever Saturday hours
-   the resolver's own slot generation defines (documented in `plan.md`, not
-   necessarily the old 8h-12h figure if the demo generation is redesigned).
-5. Repeated resolutions on different days never require a manual reseed step
-   to keep answering correctly — the near-future slot generation this
-   feature owns is triggered deterministically as part of resolution, not by
-   an external scheduler/cron (Constitution Article VIII).
+4. The query path (AA-2) never writes to `schedule_slots` or any other
+   table under any circumstance — including when it finds zero matching
+   slots — proven by a negative test, not just by absence of a write in the
+   demo's happy path.
+5. The seed action (AA-9): starting from zero seeded slots on `d1`/`d7`,
+   one call creates exactly 1 slot on `d1` and 3 on `d7`, all within
+   08:00-18:00 `America/Sao_Paulo`. A second immediate call makes zero
+   further writes and reports "já tem 4 vagas disponíveis" (idempotency).
+   A partial state (e.g. `d1` already has 1, `d7` has only 1 of 3) results
+   in creating exactly the 2 missing `d7` slots and none on `d1`.
 6. Zero matching slots (e.g., a specialty with no seeded professional, or a
    date filter that matches nothing) aborts to the existing `ABSTAIN`/
    `DYNAMIC_DATA_UNAVAILABLE` path with no internal cause exposed, mirroring
@@ -178,8 +235,14 @@ cause string, never a partial answer.
    `dynamic_resolver` value this cycle does not implement) continue to
    abstain exactly as they do today — a regression test proves this cycle
    did not accidentally widen the allowlist.
-9. All V1/V2/V3 acceptance outcomes this spec's baseline lists as preserved
-   still pass unmodified (spot-check, not a full rerun).
+9. The seed button/endpoint (AA-9) requires the same authenticated-operator
+   check every other operator action already requires; no anonymous or
+   customer-token credential can reach it. It never creates a slot outside
+   08:00-18:00, and never creates more than the exact number needed to
+   reach 1×`d1`/3×`d7` — a negative test proves it cannot be made to
+   over-create by calling it repeatedly or concurrently.
+10. All V1/V2/V3 acceptance outcomes this spec's baseline lists as
+    preserved still pass unmodified (spot-check, not a full rerun).
 
 ## 5. Decisions resolved with the human (2026-08-18)
 
@@ -190,13 +253,11 @@ cause string, never a partial answer.
    over a known, limited vocabulary (specialty names, a handful of date/
    period phrases) stays deterministic and testable without inventing an NLU
    dependency. See AA-3.
-2. **No freshness machinery for the existing D+1/D+7 `slot_offers`
-   materialization — that windowing rule is explicitly disregarded.**
-   Instead, the resolver computes against real-time `schedule_slots` and may
-   deterministically top up near-future slots as part of resolving a query,
-   never via a new scheduler/cron process (Constitution Article VIII still
-   applies; this is a data-generation detail, not new infrastructure). See
-   AA-2, AA-8, and `plan.md` for the exact mechanism.
+2. **No freshness machinery tied to the *query* path — the existing
+   `slot_offers`/`available_offers`/`ensure_demo_availability()`
+   D+1/D+7-window materialization stays unused.** The query path only ever
+   reads whatever is actually in `schedule_slots` (§5 item 6 below narrows
+   this further: it never writes at all). See AA-2, AA-8.
 3. **Scope of the existing 14 `agenda` Q&A entries: logic over preserving
    exact chunks.** The human explicitly authorized evaluating each entry
    against the new resolver's actual logic and keeping only what is
@@ -214,6 +275,21 @@ cause string, never a partial answer.
    deliberately not `004-v4-...` since `ROADMAP.md`'s own "V4" already names
    a different, unrelated feature (N3 governed autonomy).
 
+**Second round (2026-08-18, same day):**
+
+6. **The query path must be purely read-only — no on-demand slot
+   generation as a side effect of a customer/operator query, at all.**
+   Supersedes item 2 above's original framing (which still allowed the
+   resolver itself to top up data). See revised AA-2.
+7. **A new, explicit, idempotent operator action reinstates the D+1/D+7
+   rule** — exactly 1 available slot on D+1 and 3 on D+7, created within
+   08:00-18:00 only when short of that target, reporting "já tem 4 vagas
+   disponíveis" when already sufficient. This is a genuinely new outcome
+   (AA-9), not a revision of an existing one — the first clarification
+   round's item 2 had disregarded D+1/D+7 windowing *entirely*; this round
+   reinstates it, but scoped to one explicit, auditable, operator-only
+   action rather than automatic behavior on the query path.
+
 ## 6. Explicitly out of scope unless newly approved
 
 - holding, reserving, confirming, rescheduling, or cancelling appointments
@@ -227,6 +303,10 @@ cause string, never a partial answer.
   but not authorized by this cycle; each would need its own explicit
   authorization the same way this feature just received one;
 - any booking/hold/identity/payment-confirmation Q&A content (§5 item 3);
+- the seed action (AA-9) creating/counting slots for any specialty other
+  than "however many happen to exist" — it is a flat, specialty-agnostic
+  count, not a per-specialty guarantee (that distinction is deliberate, not
+  an oversight — see `plan.md`);
 - autonomous AI-to-customer send in any form — unchanged N4/Era-C exclusion;
 - N3 governed autonomy/policy enforcement — unchanged V4 exclusion;
 - the specialist-escalation workflow — unchanged V5 exclusion;
@@ -234,16 +314,17 @@ cause string, never a partial answer.
 
 ## 7. Required next artifacts
 
-- `plan.md` with the resolver's exact architecture (dispatch mechanism,
-  the deterministic keyword-extraction vocabulary, near-future slot
-  generation mechanism, audit event shape), UI impact (likely none beyond
-  existing evidence rendering), security, and testing decisions;
-- `data-model.md` documenting any new column (if the chosen resolver
-  architecture needs one — likely none, `dynamic_resolver` already exists)
-  and confirming no change to the dormant `scheduling`/`identity`/`billing`
-  tables' shape beyond ordinary reads;
-- `contracts/openapi.yaml` delta (likely none — this is an internal
-  resolution-path change, not a new endpoint, matching V2-6's own
-  no-new-route precedent);
+- `plan.md` with the resolver's exact architecture (dispatch mechanism, the
+  deterministic keyword-extraction vocabulary, audit event shape), the seed
+  action's exact algorithm (AA-9), the new endpoint and operator-workspace
+  button, security, and testing decisions;
+- `data-model.md` documenting any new column (likely none —
+  `dynamic_resolver` already exists) and confirming no change to the
+  dormant `scheduling`/`identity`/`billing` tables' shape beyond the query
+  path's ordinary reads and the seed action's `schedule_slots` inserts;
+- a `contracts/openapi.yaml` delta for the new
+  `POST /operator/scheduling/ensure-availability` endpoint (AA-9) — the
+  query path itself still needs no contract change (unchanged from the
+  first round; matches V2-6's no-new-route precedent for that part only);
 - `tasks.md`, `acceptance.md`, and a cross-artifact `analysis.md` before any
   implementation, per `AGENTS.md`'s required SDD flow.
