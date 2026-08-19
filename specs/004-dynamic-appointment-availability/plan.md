@@ -371,9 +371,9 @@ created_d7, already_sufficient}`. `EVENT_CATALOG.md` gains this one new row.
 
 ## 8. Q&A content: evaluate and keep only what's necessary (`spec.md` §5 item 3)
 
-Unchanged from the first plan draft. Final entry list is authored in
-`tasks.md`/a data-seed task, but the shape is decided here: keep a small
-set (roughly 4-6) of `agenda`-category entries with `dynamic_resolver =
+Final entry list is authored in `tasks.md`/a data-seed task, but the shape
+is decided here: keep a small set (roughly 4-6, plus the 2 new ones below)
+of `agenda`-category entries with `dynamic_resolver =
 'appointment_availability'`, `dynamic_data_required = true`, covering the
 phrasings retrieval actually needs to match a real customer message to
 *some* entry. The 5 entries describing booking/hold/identity/payment-
@@ -382,6 +382,41 @@ are **soft-deactivated** (`is_active = false`) via the existing V2-8 CRUD
 mechanism — never hard-deleted — done through a one-off authenticated
 operator-CRUD script (`scripts/`, matching `seed_evaluation_cases.py`'s
 precedent) rather than editing `db/init/004_qa.sql` in place.
+
+### New coverage gap identified by the human (2026-08-18): "primeira consulta," no specialty named
+
+The 3 seeded specialties (`mastologia-oncologica`, `cirurgia-colorretal`,
+`segunda-opiniao`) all assume the customer already knows which one they
+need. Nothing covers someone who suspects they may have cancer but does
+not yet know which specialty applies — a real, common intake scenario.
+**No new `scheduling.specialties` row and no new migration are needed for
+this** — the fix is purely new Q&A content that deliberately names no
+specialty, so `extract_parameters()` (§5) matches no `SPECIALTY_KEYWORDS`
+entry and the query naturally returns slots across all seeded specialties
+(AA-3's already-designed "no specialty named → all specialties" behavior),
+letting the operator/customer see every option and route accordingly. Two
+new `agenda` entries, both `dynamic_resolver = 'appointment_availability'`,
+`dynamic_data_required = true`, `category = 'agenda'`, deliberately naming
+no specialty keyword:
+
+```
+Q: "Suspeito que posso ter câncer, mas ainda não sei qual especialidade
+    preciso. Posso marcar uma primeira consulta?"
+A: "Sim. Para uma primeira avaliação sem diagnóstico definido, apresentamos
+    os horários disponíveis entre as especialidades cadastradas
+    (simulação); a equipe orienta o encaminhamento correto depois da
+    avaliação inicial."
+
+Q: "Quero agendar uma consulta simples para investigar uma suspeita, sem
+    saber ainda qual especialista devo procurar."
+A: "Sim, é possível. Apresentamos os horários disponíveis entre as
+    especialidades cadastradas para uma primeira avaliação (simulação); a
+    especialidade definitiva é indicada pela equipe após essa consulta."
+```
+
+Both are authored here (not left to implementation time, unlike the rest
+of §8's entry list) since the human specified the exact scenario;
+`tasks.md` T070 seeds them verbatim.
 
 ## 9. Security
 

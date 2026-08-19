@@ -166,8 +166,14 @@ the button twice, see the created-count message then the idempotent
   identity, payment confirmation — expected to be the 5 identified in
   `spec.md` §5 item 3, but re-evaluate rather than assuming the list is
   final). Create/edit the in-scope entries as needed so retrieval reliably
-  matches real customer phrasings per specialty/day/period. Record the
-  final entry list and rationale for every change in this task's evidence.
+  matches real customer phrasings per specialty/day/period. **Also seed the
+  2 new "primeira consulta, sem especialidade" entries authored verbatim in
+  `plan.md` §8** (human-identified coverage gap, 2026-08-18: no existing
+  entry covers a customer who suspects cancer but doesn't yet know which
+  specialty applies) — confirm neither entry's wording matches any
+  `SPECIALTY_KEYWORDS` term, so they correctly resolve across all
+  specialties, not a wrong single one. Record the final entry list and
+  rationale for every change in this task's evidence.
 - [ ] **T071 [P]** `smoke_v4_appointment_availability.py` — real
   end-to-end HTTP smoke against the rebuilt containers: call the seed
   endpoint (Phase 4) to guarantee real data exists, then a real customer

@@ -27,6 +27,9 @@ different triggers and different write permissions.
    specialties with availability.
 3. A message naming a specialty with no seeded professional/availability
    falls through to §F (abstain), never a wrong specialty's slots.
+4. The two "primeira consulta" entries (`spec.md` §5 item 9, `plan.md`
+   §8) — deliberately naming no specialty — resolve via the same
+   all-specialties path as B.2, not a dedicated code path of their own.
 
 ## C. Query path is purely read-only [AA-2, outcome 4]
 

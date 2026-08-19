@@ -290,6 +290,24 @@ action:
    reinstates it, but scoped to one explicit, auditable, operator-only
    action rather than automatic behavior on the query path.
 
+**Third round (2026-08-18, same day):**
+
+8. **A full operator-facing CRUD screen for the `scheduling` schema was
+   considered as an alternative to AA-9's single button** (create/edit/
+   deactivate specialties, professionals, and individual slots, mirroring
+   `/operator/knowledge`'s existing pattern) and **deliberately deferred as
+   separate future work** (`ROADMAP.md`) — the button already covers this
+   cycle's actual need; a full CRUD is real additional scope, not a small
+   extension, and edges toward schedule-administration territory adjacent
+   to the still-deferred booking feature.
+9. **A real content gap: no existing Q&A entry covers a customer who
+   suspects cancer but doesn't yet know which specialty applies.** All 3
+   seeded specialties assume the customer already knows which one they
+   need. Resolved with 2 new `agenda` Q&A entries (`plan.md` §8, authored
+   verbatim) that deliberately name no specialty — they rely entirely on
+   AA-3's already-designed "no specialty matched → all specialties"
+   behavior, needing no new `scheduling.specialties` row and no migration.
+
 ## 6. Explicitly out of scope unless newly approved
 
 - holding, reserving, confirming, rescheduling, or cancelling appointments

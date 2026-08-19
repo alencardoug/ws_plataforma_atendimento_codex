@@ -54,7 +54,15 @@ Explicitly deferred from this cycle:
 
 - holding, reserving, confirming, rescheduling, or cancelling appointments;
 - CPF, customer identity/profile persistence, payment, or saved continuity;
-- autonomous AI send or autonomous scheduling.
+- autonomous AI send or autonomous scheduling;
+- a full operator-facing CRUD screen for the `scheduling` schema (create/
+  edit/deactivate specialties, professionals, and individual time slots,
+  mirroring the existing `/operator/knowledge` Q&A/clinical-document CRUD
+  pattern) — human decision 2026-08-18, discussed as an alternative to
+  `specs/004-dynamic-appointment-availability`'s one-button idempotent
+  D+1/D+7 seed action and deliberately deferred as separate future work,
+  since the button alone covers this cycle's actual need. Its own Spec Kit
+  package would be required before implementation, same as this feature.
 
 ### V2 — Commercial product experience — **DONE (2026-08-17)**
 
