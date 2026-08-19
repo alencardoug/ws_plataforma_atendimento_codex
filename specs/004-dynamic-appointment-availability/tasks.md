@@ -286,6 +286,34 @@ exact script, including both retry branches; the containment test
 
 ## Phase 10 — Acceptance automation and DONE
 
+**Handoff note (human decision, 2026-08-18):** Phases 1-9 (the actual
+implementation) are done in this same session/tool. This phase — the
+long-running, mostly-mechanical verification pass (full `smoke_*` suite,
+full Playwright suite, live Docker rebuilds, real-provider latency) — is
+intended to be picked up by a different coding agent (Codex) in a fresh
+session, to save tokens on work that is execution-heavy rather than
+design-heavy. Whoever/whatever executes this phase should:
+
+1. Read `AGENTS.md`, `CLAUDE.md`, `.specify/memory/constitution.md`
+   (including Amendment 1.1.0), and this package's full artifact set
+   (`spec.md`, `plan.md`, `data-model.md`, `acceptance.md`, `analysis.md`,
+   `checklists/*`) before starting — do not rely on any prior conversation
+   context, there is none available.
+2. Confirm Phases 1-9's own gates all show `[x]` with real evidence in
+   this file before starting T080-T082 — if any phase's evidence looks
+   incomplete or the described tests don't actually exist/pass, stop and
+   flag it rather than writing acceptance.md around a gap.
+3. Hold AA-10 to the same standard as every other outcome, not a lighter
+   one, even though it's the fastest/most tempting to rubber-stamp: T082
+   must independently re-run the containment test
+   (`test_booking_script_containment.py`) and confirm its own read of the
+   result, not just trust that it was green when Phase 9 finished.
+4. Follow this project's established conventions throughout this
+   package's own history: real Postgres/Docker, no mocked integration
+   tests, commit with detailed evidence per task (matching every prior
+   phase's commit messages), update `tasks.md` checkboxes with real
+   evidence (not just "done"), and do not push without being asked.
+
 - [ ] **T080** Write `acceptance.md` covering `spec.md` §4's 15 acceptance
   outcomes as executable scenarios, following V1/V2/V3's Execution-record
   format.
