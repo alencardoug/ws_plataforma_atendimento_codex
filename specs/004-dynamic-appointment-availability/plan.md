@@ -1,40 +1,48 @@
 # Implementation Plan: Dynamic Appointment Availability
 
-Ratifies `spec.md`'s confirmed outcomes (AA-1..AA-9) into concrete
-architecture, data-model, and testing decisions. Written after both
-`spec.md` §5 clarification rounds were resolved with the human (2026-08-18):
-the first round shaped AA-1..AA-8; the second round (same day) narrowed
-AA-2 to purely read-only and added AA-9, the operator-triggered seed
-action. This revision supersedes the plan's original single-write-path
-design (the query path no longer writes anything, ever).
+Ratifies `spec.md`'s confirmed outcomes (AA-1..AA-9, plus AA-3a) into
+concrete architecture, data-model, and testing decisions. Written after
+all four `spec.md` §5 clarification rounds were resolved with the human
+(2026-08-18): the first shaped AA-1..AA-8; the second narrowed AA-2 to
+purely read-only and added AA-9; the third deferred a full scheduling CRUD
+to future work and identified the "customer doesn't know which specialty"
+content gap; the fourth corrected how to close that gap — a seeded
+**generalist** specialty (AA-3a), not an unfiltered search.
 
 ## 1. Technical summary
 
-Two independent pieces, cleanly separated by who triggers them and what
-they're allowed to do:
+Three pieces, cleanly separated by who triggers them and what they're
+allowed to do:
 
 1. **Query path (AA-1..AA-8), purely read-only.** A new named resolver,
    `appointment_availability`, reachable only when
    `content.qa_entries.dynamic_resolver = 'appointment_availability'` and
    `dynamic_data_required = true`. It deterministically extracts a
-   specialty/date-phrase/period from the customer's own query text, `SELECT`s
-   real, current `scheduling.schedule_slots` rows, and renders a
-   deterministic, template-substituted answer (no LLM call, no LLM
-   rewrite) — or aborts to the existing `ABSTAIN`/
-   `DYNAMIC_DATA_UNAVAILABLE` path. **It never writes anything, under any
-   circumstance.**
-2. **Seed action (AA-9), the only write path, operator-triggered only.** A
-   new button on the operator workspace calls a new endpoint that
-   idempotently ensures exactly 1 available slot on D+1 and 3 on D+7 exist
-   (business-day-aware, reusing `scheduling.next_business_day()`), creating
-   only what's missing, within 08:00-18:00. If already sufficient, it does
-   nothing and reports so.
+   specialty/date-phrase/period from the customer's own query text — always
+   resolving to *some* specialty, defaulting to the new generalist one when
+   nothing more specific matched (AA-3a) — `SELECT`s real, current
+   `scheduling.schedule_slots` rows, and renders a deterministic,
+   template-substituted answer (no LLM call, no LLM rewrite) — or aborts to
+   the existing `ABSTAIN`/`DYNAMIC_DATA_UNAVAILABLE` path. **It never
+   writes anything, under any circumstance.**
+2. **Seed action (AA-9), the only *runtime* write path, operator-triggered
+   only.** A new button on the operator workspace calls a new endpoint
+   that idempotently ensures exactly 1 available slot on D+1 and 3 on D+7
+   exist (business-day-aware, reusing `scheduling.next_business_day()`),
+   creating only what's missing, within 08:00-18:00. If already
+   sufficient, it does nothing and reports so.
+3. **One new migration (AA-3a), applied once, not a runtime write path.**
+   Seeds the generalist `scheduling.specialties` row plus a small number of
+   `professionals`/`professional_specialties` rows tied to it — reference
+   data, the same kind the original `db/init/002_seed_and_schedule.sql`
+   already contains, just added the correct way (a migration) instead of
+   editing that frozen file.
 
 This is no longer a purely internal, route-less change (unlike the plan's
 first draft): AA-9 needs one new operator-only endpoint and one small
-frontend button. The query path (AA-1..AA-8) still needs neither. No
-migration for the `scheduling` schema's shape — it already exists and is
-correct for both pieces.
+frontend button, and AA-3a needs one new migration. The query path
+(AA-1..AA-8) itself still needs neither a route nor a migration of its
+own — it only reads whatever rows exist, however they got there.
 
 ## 2. Module boundaries
 
@@ -110,15 +118,25 @@ this fallthrough, not a separate check that could later be forgotten
   query" available at that call site. An empty/missing value is valid input
   (§5) — it just means no dimension gets filtered on.
 
-## 3. Persistence: new read-mostly ORM mappings, no schema migration
+## 3. Persistence: new read-mostly ORM mappings, plus one data-only migration
 
-The `scheduling` schema (`db/init/001_schema.sql`) already has the exact
-shape both pieces need (verified `spec.md` §2) — it predates Alembic and
-was preserved as a "legacy... dormant" asset (D-024). This feature is the
-first to actually use it, so it needs SQLAlchemy `Mapped`/`mapped_column`
-classes, but **not** a migration: the tables, columns, indexes, and the
-`UNIQUE (professional_id, starts_at)` constraint the seed action's
-idempotent insert relies on all already exist.
+The `scheduling` schema's *shape* (`db/init/001_schema.sql`) already has
+everything both the query path and the seed action need (verified
+`spec.md` §2) — it predates Alembic and was preserved as a "legacy...
+dormant" asset (D-024). This feature is the first to actually use it, so
+it needs SQLAlchemy `Mapped`/`mapped_column` classes, but **no schema
+change** — no new table, column, index, or constraint; the `UNIQUE
+(professional_id, starts_at)` constraint the seed action's idempotent
+insert relies on already exists.
+
+**One data-only migration is still needed** (AA-3a, `spec.md` §5 item 10):
+seeding the new generalist specialty. This is reference/seed data, the
+same category of thing `db/init/002_seed_and_schedule.sql` already
+contains — it just can't go there (that file is frozen, V1 `plan.md` §1),
+so it goes in a new, additive, forward-only Alembic migration instead,
+matching how V3's own migration also seeded reference data (its category
+backfill) alongside a schema change. `data-model.md` §5 has the exact
+rows.
 
 `scheduling/models.py`:
 
@@ -195,9 +213,8 @@ def resolve_appointment_availability(session: Session, query_text: str) -> Dynam
         .join(ProfessionalSpecialty, and_(ProfessionalSpecialty.professional_id == ScheduleSlot.professional_id, ProfessionalSpecialty.specialty_id == ScheduleSlot.specialty_id))
         .join(Unit, ScheduleSlot.unit_id == Unit.unit_id)
         .where(ScheduleSlot.status == "available", ScheduleSlot.starts_at >= now_in_sao_paulo())
+        .where(Specialty.slug == params.specialty_slug)  # always present — defaults to GENERALIST_SLUG (§5), never unfiltered
     )
-    if params.specialty_id:
-        query = query.where(ScheduleSlot.specialty_id == params.specialty_id)
     if params.date_range:
         query = query.where(ScheduleSlot.starts_at.between(*params.date_range))
     if params.period_hours:  # "manhã"/"tarde"
@@ -301,24 +318,44 @@ the existing `typing-indicator` pattern's accessibility treatment, not a
 blocking `alert`). No new page, no new route — one button, one handler,
 one status line, in the existing `main.tsx`.
 
-## 5. AA-3 — Deterministic keyword extraction
+## 5. AA-3/AA-3a — Deterministic keyword extraction, always resolving to a specialty
 
-Unchanged from the first plan draft. A small, explicit, testable
-vocabulary — not fuzzy matching, not an LLM call:
+A small, explicit, testable vocabulary — not fuzzy matching, not an LLM
+call. Revised 2026-08-18 (§5 item 10): `specialty_slug` is no longer
+`str | None` — it always resolves to a real specialty, defaulting to the
+new generalist one:
 
 ```python
+GENERALIST_SLUG = "oncologia-geral"
+
 SPECIALTY_KEYWORDS: dict[str, tuple[str, ...]] = {
     "mastologia-oncologica": ("mastologia", "mama", "peito"),
     "cirurgia-colorretal": ("colorretal", "intestino", "cólon", "colon", "reto"),
     "segunda-opiniao": ("segunda opinião", "segunda opiniao"),
+    GENERALIST_SLUG: ("generalista", "clínico geral", "clinico geral", "não sei qual", "nao sei qual", "triagem", "suspeita"),
 }
 DATE_KEYWORDS: dict[str, ...] = {"amanhã": ..., "amanha": ..., "semana que vem": ..., "próxima semana": ..., "sábado": ..., "sabado": ..., "domingo": ...}
 PERIOD_KEYWORDS = {"manhã": (0, 12), "manha": (0, 12), "tarde": (12, 24)}
+
+def extract_parameters(query_text: str) -> ExtractedParameters:
+    text = query_text.lower()
+    specialty_slug = GENERALIST_SLUG  # default: "no match" means generalist, not unfiltered
+    for slug, keywords in SPECIALTY_KEYWORDS.items():
+        if slug != GENERALIST_SLUG and any(kw in text for kw in keywords):
+            specialty_slug = slug
+            break
+    ...  # date_range/period_hours extraction unchanged, still optional
+    return ExtractedParameters(specialty_slug=specialty_slug, date_range=..., period_hours=...)
 ```
 
-Matching is case-insensitive substring search over the query text, first
-match wins per dimension (no dimension is required — an unmatched one is
-simply not filtered on, `spec.md` AA-3). This lives entirely in
+Matching is case-insensitive substring search; the 3 diagnosis-specific
+specialties are checked first, in a fixed order, and only if none of them
+match does `specialty_slug` stay at its `GENERALIST_SLUG` default — which
+is exactly the same outcome as if the customer had explicitly asked for a
+generalist, so no separate code path exists for "unmatched" versus
+"explicitly generalist" (one less thing to keep in sync, one less thing
+to test twice). Date/period remain genuinely optional — an unmatched one
+is simply not filtered on. This lives entirely in
 `scheduling/availability.py`, is pure/synchronous/side-effect-free, and is
 unit-tested directly with no database — the highest-value, cheapest tests
 this feature has.
@@ -383,40 +420,41 @@ mechanism — never hard-deleted — done through a one-off authenticated
 operator-CRUD script (`scripts/`, matching `seed_evaluation_cases.py`'s
 precedent) rather than editing `db/init/004_qa.sql` in place.
 
-### New coverage gap identified by the human (2026-08-18): "primeira consulta," no specialty named
+### New coverage gap identified by the human (2026-08-18): "primeira consulta," generalist (AA-3a)
 
-The 3 seeded specialties (`mastologia-oncologica`, `cirurgia-colorretal`,
-`segunda-opiniao`) all assume the customer already knows which one they
-need. Nothing covers someone who suspects they may have cancer but does
-not yet know which specialty applies — a real, common intake scenario.
-**No new `scheduling.specialties` row and no new migration are needed for
-this** — the fix is purely new Q&A content that deliberately names no
-specialty, so `extract_parameters()` (§5) matches no `SPECIALTY_KEYWORDS`
-entry and the query naturally returns slots across all seeded specialties
-(AA-3's already-designed "no specialty named → all specialties" behavior),
-letting the operator/customer see every option and route accordingly. Two
-new `agenda` entries, both `dynamic_resolver = 'appointment_availability'`,
-`dynamic_data_required = true`, `category = 'agenda'`, deliberately naming
-no specialty keyword:
+The 3 originally-seeded specialties (`mastologia-oncologica`,
+`cirurgia-colorretal`, `segunda-opiniao`) all assume the customer already
+knows which one they need. Nothing covered someone who suspects they may
+have cancer but does not yet know which specialty applies — a real, common
+intake scenario. **Corrected 2026-08-18 (§5 item 10):** the fix is not
+"search unfiltered across all specialties" — it's a real seeded
+**generalist** specialty (`GENERALIST_SLUG = "oncologia-geral"`, §5, §3a),
+so the customer is matched with an actual non-specialized professional for
+an initial/triage consultation, the same way any other specialty match
+works. Two new `agenda` entries, both `dynamic_resolver =
+'appointment_availability'`, `dynamic_data_required = true`, `category =
+'agenda'`, deliberately naming no *diagnosis-specific* specialty keyword
+(so `extract_parameters()` falls through to the generalist default — §5):
 
 ```
 Q: "Suspeito que posso ter câncer, mas ainda não sei qual especialidade
     preciso. Posso marcar uma primeira consulta?"
-A: "Sim. Para uma primeira avaliação sem diagnóstico definido, apresentamos
-    os horários disponíveis entre as especialidades cadastradas
-    (simulação); a equipe orienta o encaminhamento correto depois da
-    avaliação inicial."
+A: "Sim. Uma primeira consulta com um profissional generalista está
+    disponível para investigação inicial, sem diagnóstico definido
+    (simulação); a especialidade definitiva é indicada pela equipe depois
+    dessa avaliação."
 
 Q: "Quero agendar uma consulta simples para investigar uma suspeita, sem
     saber ainda qual especialista devo procurar."
-A: "Sim, é possível. Apresentamos os horários disponíveis entre as
-    especialidades cadastradas para uma primeira avaliação (simulação); a
-    especialidade definitiva é indicada pela equipe após essa consulta."
+A: "Sim, é possível. Apresentamos os horários disponíveis com um
+    profissional generalista para essa primeira avaliação (simulação); o
+    encaminhamento ao especialista correto acontece depois dessa consulta."
 ```
 
 Both are authored here (not left to implementation time, unlike the rest
 of §8's entry list) since the human specified the exact scenario;
-`tasks.md` T070 seeds them verbatim.
+`tasks.md` T070 seeds them verbatim, alongside the new `oncologia-geral`
+migration (§3, `data-model.md` §5) they depend on.
 
 ## 9. Security
 
@@ -454,17 +492,19 @@ adapter needed (neither the query path nor the seed action ever calls the
 LLM/embedding provider).
 
 - `test_appointment_availability_keywords.py` — pure unit tests for
-  `extract_parameters()`: each specialty/date/period keyword, no match
-  (all dimensions `None`), mixed-case, and a query containing no known
-  keyword at all.
+  `extract_parameters()`: each specialty/date/period keyword; explicit
+  generalist keywords; **a query with no known keyword at all resolves
+  `specialty_slug == GENERALIST_SLUG`, never `None` and never one of the 3
+  diagnosis-specific specialties**; mixed-case.
 - `test_appointment_availability_resolver.py` — integration tests against a
   real (test) database, query path only: a specialty-filtered query
-  returns only that specialty's slots; a period filter returns only
-  matching-hour slots; zero-match (e.g. an unseeded/empty state) raises
-  `DynamicResolutionError`; the rendered text contains no raw
-  table/column/internal-error string; **a structural test asserts
-  `scheduling.availability` module contains no `INSERT`/`UPDATE`/`DELETE`
-  SQLAlchemy construct** (acceptance outcome 4).
+  returns only that specialty's slots; **a query with no specialty keyword
+  returns only the generalist specialty's slots, never a mix of the other
+  3**; a period filter returns only matching-hour slots; zero-match (e.g.
+  an unseeded/empty state) raises `DynamicResolutionError`; the rendered
+  text contains no raw table/column/internal-error string; **a structural
+  test asserts `scheduling.availability` module contains no
+  `INSERT`/`UPDATE`/`DELETE` SQLAlchemy construct** (acceptance outcome 4).
 - `test_appointment_seeding.py` — integration tests for
   `ensure_seed_availability()`: from zero, creates exactly 1×D+1/3×D+7,
   all within 08:00-18:00; a second immediate call creates zero more and
@@ -505,6 +545,9 @@ Article VIII; none exists here at demo scale).
 
 ## 12. Deliverables
 
+- `app/alembic/versions/`: one new, additive, forward-only migration
+  seeding the `oncologia-geral` generalist specialty/professionals/
+  professional_specialties rows (AA-3a, `data-model.md` §5)
 - `app/customer_care/scheduling/__init__.py`, `models.py`,
   `availability.py` (query, read-only), `seeding.py` (AA-9 write path),
   `router.py` (new endpoint)

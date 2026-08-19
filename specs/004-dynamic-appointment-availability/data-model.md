@@ -1,10 +1,15 @@
 # Data Model: Dynamic Appointment Availability
 
-No Alembic migration is required. Every table this feature reads or writes
-already exists (`db/init/001_schema.sql`, applied before Alembic history
-began, preserved as-is per V1 `plan.md` §1). This document records the new
-SQLAlchemy ORM mappings this feature adds and confirms nothing about the
-existing schema's shape changes.
+No schema change (no new table/column/index/constraint) is required —
+every table this feature reads or writes already exists
+(`db/init/001_schema.sql`, applied before Alembic history began, preserved
+as-is per V1 `plan.md` §1). **One data-only migration is still needed**
+(§5, added 2026-08-18): seeding a new generalist specialty, the same kind
+of reference data `db/init/002_seed_and_schedule.sql` already contains for
+the original 3 specialties — it just can't go in that frozen file, so it
+goes in a migration instead. This document records the new SQLAlchemy ORM
+mappings this feature adds, that one migration, and confirms nothing else
+about the existing schema's shape changes.
 
 ## 1. New ORM mappings (`app/customer_care/scheduling/models.py`)
 
@@ -88,7 +93,43 @@ ordinary, already-audited (`knowledge.qa_created`/`knowledge.qa_updated`/
   table another module owns, so no existing cascade-delete/deactivate path
   is affected.
 
-## 5. New audit event
+## 5. New migration: the generalist specialty (AA-3a)
+
+Data-only — no `CREATE TABLE`/`ALTER TABLE`, only `INSERT`s into tables
+that already exist, following exactly the same shape
+`002_seed_and_schedule.sql` already used for the original 3 specialties.
+Forward-only (matching every other migration in this codebase's
+convention); `downgrade()` raises, same as V3's category migration.
+
+```sql
+INSERT INTO scheduling.specialties (specialty_id, slug, display_name, description) VALUES
+('20000000-0000-0000-0000-000000000004', 'oncologia-geral', 'Oncologia geral (triagem)',
+ 'Primeira consulta com profissional generalista para investigação inicial de suspeita oncológica, sem especialidade definida (simulação)');
+
+INSERT INTO scheduling.professionals (professional_id, display_name, registration_display) VALUES
+('30000000-0000-0000-0000-000000000010', 'Dr. Eduardo Vasconcelos (simulação)', 'CRM-SP 000010 (simulação)'),
+('30000000-0000-0000-0000-000000000011', 'Dra. Renata Silveira (simulação)', 'CRM-SP 000011 (simulação)'),
+('30000000-0000-0000-0000-000000000012', 'Dr. Thiago Barros (simulação)', 'CRM-SP 000012 (simulação)');
+
+INSERT INTO scheduling.professional_specialties (professional_id, specialty_id, fixed_price_cents, appointment_duration_minutes) VALUES
+('30000000-0000-0000-0000-000000000010', '20000000-0000-0000-0000-000000000004', 60000, 45),
+('30000000-0000-0000-0000-000000000011', '20000000-0000-0000-0000-000000000004', 60000, 45),
+('30000000-0000-0000-0000-000000000012', '20000000-0000-0000-0000-000000000004', 60000, 45);
+```
+
+3 professionals (mirroring the existing 3-per-specialty pattern), priced
+and timed as a "simple" consultation — shorter and cheaper than the
+diagnosis-specific specialties (`mastologia-oncologica`/
+`cirurgia-colorretal` are 60min/R$980-1050; `segunda-opiniao` is 90min/
+R$1450; this generalist triage consultation is 45min/R$600), matching the
+human's own framing ("consulta simples"). All data synthetic (Constitution
+Article VI), same `(simulação)` convention as every other seeded row.
+
+Idempotent by construction for a migration (`INSERT` with fixed UUIDs, run
+exactly once by Alembic's own bookkeeping — no `ON CONFLICT` needed here,
+unlike the runtime seed action's repeatable insert in §2).
+
+## 6. New audit event
 
 `scheduling.availability_seeded` (`customer_service.audit_events`, no
 schema change — the existing generic audit-event table, same as every

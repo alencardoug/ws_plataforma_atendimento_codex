@@ -54,6 +54,17 @@ data" behavior into two separate, more precise pieces:
   needed (new AA-9). This is the *only* write path in this feature; the
   query path (AA-2) never triggers it as a side effect.
 
+A third clarification round (§5 items 8-9) deferred a full scheduling CRUD
+to future work and identified a real content gap: no existing specialty
+covers a customer who doesn't yet know what's wrong.
+
+A fourth clarification round (§5 item 10) corrected how that gap should be
+closed: "no specialty named" means the customer needs a **generalist**
+professional (AA-3a) — a new seeded specialty of its own — not an
+unfiltered search across the 3 diagnosis-specific specialties. This is the
+one place this feature adds new reference data (via a small migration, not
+a schema change) rather than only reading what already existed.
+
 ## 2. What already exists (verified against the real schema/code, not assumed)
 
 - `content.qa_entries.dynamic_resolver` is an ORM-mapped, DB-seeded `text`
@@ -123,12 +134,41 @@ generation's context) is parsed by a small, non-LLM, deterministic keyword
 matcher for: a specialty (matched against `scheduling.specialties.slug`/
 `display_name`, the same vocabulary the knowledge base already uses), a
 date/day phrase ("amanhã", "semana que vem", a weekday name), and a period
-("manhã"/"tarde"). No parameter match is required for the resolver to
-produce an answer — an unmatched dimension is simply not filtered on (e.g.
-"tem vaga amanhã?" with no specialty named returns the next available slot
-per specialty). This is a new, small, purpose-built component — V2's proven
-static-per-entry-filter alternative was considered and rejected because the
-existing Q&A wording is generic, not per-specialty (§5 resolution 1).
+("manhã"/"tarde"). Date/period are optional — an unmatched one is simply not
+filtered on. **Specialty is not optional in that same sense** (revised
+2026-08-18, §5 item 10): "no specialty named" does not mean "search
+unfiltered across every specialty" — it means the customer needs a
+**generalist** (a non-specialized professional for an initial/triage
+consultation), which is itself a distinct, seeded specialty (AA-3a). Every
+resolution therefore always has exactly one specialty in effect — either an
+explicitly matched one, or the generalist default. This is a new, small,
+purpose-built component — V2's proven static-per-entry-filter alternative
+was considered and rejected because the existing Q&A wording is generic,
+not per-specialty (§5 resolution 1).
+
+### AA-3a — A seeded generalist specialty, not an unfiltered fallback (added 2026-08-18)
+
+A new `scheduling.specialties` row represents a non-specialized, generalist
+professional for an initial/triage consultation — for a customer who
+suspects cancer but doesn't yet know which specialty applies. Since all
+data here is synthetic (Constitution Article VI), this is added the same
+way the original 3 specialties were: seed rows, not a schema change. Needs:
+
+- one new `scheduling.specialties` row (slug, display name, description);
+- a small number of new `scheduling.professionals` rows tied to it via
+  `professional_specialties` (mirroring the existing 3-professionals-per-
+  specialty pattern), with their own price/duration — a "simple"
+  consultation, priced and timed shorter than the specialist consultations;
+- inserted via a new, additive, forward-only migration (not by editing
+  `db/init/*.sql`, which stays frozen per V1 `plan.md` §1) — this is the
+  one schema-adjacent change this feature makes; everything else about the
+  `scheduling` schema's shape is still unchanged (`plan.md` §3).
+
+`extract_parameters()` (AA-3) defaults to this specialty's slug whenever no
+other specialty keyword matches — not to "no filter." The two "primeira
+consulta" Q&A entries (`spec.md` §5 item 9) now correctly route here, for a
+real reason (a real generalist professional exists to see them), not as a
+side effect of an unfiltered query.
 
 ### AA-4 — Structured, timezone-aware evidence
 
@@ -207,8 +247,10 @@ action:
    `scheduling.schedule_slots`, rendered deterministically (no LLM rewrite)
    with `America/Sao_Paulo` times, price, and a "(simulação)" marker.
 2. A query naming a real specialty only returns slots for that specialty; a
-   query naming no specialty returns across all specialties with seeded
-   availability.
+   query naming no specialty (or explicitly asking for a generalist)
+   returns only the seeded generalist specialty's slots — never a mix
+   across the 3 diagnosis-specific specialties, and never zero results
+   just because nothing specific was named.
 3. A query for a day that resolves to Sunday or a holiday is silently
    redirected to the correct next business day by the existing
    `scheduling.next_business_day()` — the customer-facing text reflects the
@@ -304,9 +346,20 @@ action:
    suspects cancer but doesn't yet know which specialty applies.** All 3
    seeded specialties assume the customer already knows which one they
    need. Resolved with 2 new `agenda` Q&A entries (`plan.md` §8, authored
-   verbatim) that deliberately name no specialty — they rely entirely on
-   AA-3's already-designed "no specialty matched → all specialties"
-   behavior, needing no new `scheduling.specialties` row and no migration.
+   verbatim) that deliberately name no specialty.
+
+**Fourth round (2026-08-18, same day) — correction:**
+
+10. **"No specialty named" means the customer needs a generalist, not an
+    unfiltered search.** Superseding item 9's original framing (which
+    routed an unmatched query across all 3 diagnosis-specific specialties
+    indiscriminately): a customer who doesn't know what's wrong should see
+    a non-specialized professional for an initial/triage consultation —
+    which itself needed to be a real seeded specialty (AA-3a), not a
+    behavior of the query. Since all data here is synthetic anyway
+    (Constitution Article VI), the human explicitly authorized adding this
+    as new seed data via a small migration — the one schema-adjacent
+    change in this otherwise read/seed-existing-data-only feature.
 
 ## 6. Explicitly out of scope unless newly approved
 
@@ -336,10 +389,11 @@ action:
   deterministic keyword-extraction vocabulary, audit event shape), the seed
   action's exact algorithm (AA-9), the new endpoint and operator-workspace
   button, security, and testing decisions;
-- `data-model.md` documenting any new column (likely none —
-  `dynamic_resolver` already exists) and confirming no change to the
-  dormant `scheduling`/`identity`/`billing` tables' shape beyond the query
-  path's ordinary reads and the seed action's `schedule_slots` inserts;
+- `data-model.md` documenting the one new migration (AA-3a: the seeded
+  generalist specialty/professionals/professional_specialties rows — data
+  only, no new column/table) and confirming no other change to the dormant
+  `scheduling`/`identity`/`billing` tables' shape beyond the query path's
+  ordinary reads and the seed action's `schedule_slots` inserts;
 - a `contracts/openapi.yaml` delta for the new
   `POST /operator/scheduling/ensure-availability` endpoint (AA-9) — the
   query path itself still needs no contract change (unchanged from the

@@ -53,3 +53,8 @@ read-only query path and a separate operator-triggered seed action.
   never contains a raw SQL fragment or full query — only structured,
   bounded diagnostic values (matched/unmatched parameters), matching
   D-028's existing precedent. `tasks.md` T030/T031.
+- [ ] The new generalist-specialty migration (AA-3a) is purely additive
+  `INSERT`s into already-existing tables with hardcoded, fixed values —
+  no user/request input reaches it, it runs once via Alembic (not a
+  runtime code path an attacker could re-trigger), and it does not modify
+  or delete any existing row. `tasks.md` T009, `acceptance.md` §0.

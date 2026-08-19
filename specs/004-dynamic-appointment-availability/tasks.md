@@ -5,9 +5,11 @@ to `scheduling.appointments`/`appointment_events`, `identity.*`, or
 `billing.*`, or implements `price_lookup`/`payment_simulator`/
 `insurance_lookup` — those remain out of scope per `spec.md` §6. The query
 path (`scheduling/availability.py`) never writes anything, under any
-circumstance — the only write path in this entire feature is
+circumstance. There are exactly two places anything is written in this
+feature: T009's one-time migration (seeding the new generalist specialty,
+applied once by Alembic, not a runtime code path), and
 `scheduling/seeding.py`, reachable only through the one new operator
-endpoint (Phase 4).
+endpoint (Phase 4). No other task writes anything.
 
 Legend: `[P]` parallelizable after its listed dependency;
 `[AA-x]` primary confirmed-outcome mapping (`spec.md` §3).
@@ -24,40 +26,53 @@ Legend: `[P]` parallelizable after its listed dependency;
   against the real source, not guessed (`analysis.md` §3).
 - [x] **T001** Run cross-artifact review of `spec.md` vs `plan.md` vs
   `data-model.md`; record findings/repairs in this package's `analysis.md`
-  before implementation starts. Done 2026-08-18, revised same day after the
-  human's second clarification round split the design into a read-only
-  query path (AA-2, revised) and a new explicit operator-triggered seed
-  action (AA-9) — `analysis.md` updated to review the revised design, not
-  just the original one; 1 finding repaired pre-revision
-  (`Professional.active` filtering), re-confirmed still correct in the
-  revised `scheduling/seeding.py`.
+  before implementation starts. Done 2026-08-18, revised twice more the
+  same day: once after the second clarification round split the design
+  into a read-only query path (AA-2, revised) and a new explicit
+  operator-triggered seed action (AA-9); again after the fourth round
+  corrected "no specialty named" to mean a seeded generalist specialty
+  (AA-3a) rather than an unfiltered search — `analysis.md` §8 covers this
+  latest revision. 1 finding repaired pre-revision (`Professional.active`
+  filtering), re-confirmed still correct in the current
+  `scheduling/seeding.py`.
 
 **Gate:** `analysis.md`'s pre-implementation section shows no unresolved
 contradiction. **Passed.**
 
-## Phase 1 — Scheduling read model [AA-2]
+## Phase 1 — Scheduling read model + generalist specialty [AA-2, AA-3a]
 
+- [ ] **T009** New Alembic migration (`data-model.md` §5): seed the
+  `oncologia-geral` generalist specialty, its 3 professionals, and their
+  `professional_specialties` rows, exact values as specified. Data-only,
+  forward-only, `downgrade()` raises (matching this codebase's convention).
 - [ ] **T010** `app/customer_care/scheduling/__init__.py`,
   `scheduling/models.py` — `Specialty`, `Professional`,
   `ProfessionalSpecialty`, `Unit`, `ScheduleSlot` ORM classes
-  (`data-model.md` §1). No migration.
+  (`data-model.md` §1). No schema migration for these — only T009's
+  data-only one.
 - [ ] **T011 [P]** Unit test: each class round-trips against the real
-  seeded `scheduling` data (`SELECT` the 3 seeded specialties, 9
-  professionals, confirm FK joins resolve) — proves the mapping is correct
-  before anything is built on top of it.
+  seeded `scheduling` data (`SELECT` all 4 specialties — the original 3
+  plus T009's new one — and all 12 professionals, confirm FK joins
+  resolve) — proves the mapping is correct before anything is built on top
+  of it.
 
-**Gate:** backend `ruff`/`mypy`/`pytest`; T011 passes against the real
-local database.
+**Gate:** backend `ruff`/`mypy`/`pytest`; migration applies cleanly on top
+of the current database; T011 passes against the real local database.
 
-## Phase 2 — Deterministic parameter extraction [AA-3]
+## Phase 2 — Deterministic parameter extraction [AA-3, AA-3a]
 
-- [ ] **T020** `scheduling/availability.py`: `SPECIALTY_KEYWORDS`,
-  `DATE_KEYWORDS`, `PERIOD_KEYWORDS`, `extract_parameters(query_text) ->
-  ExtractedParameters` (`plan.md` §5). Pure function, no database, no I/O.
+- [ ] **T020** `scheduling/availability.py`: `GENERALIST_SLUG`,
+  `SPECIALTY_KEYWORDS`, `DATE_KEYWORDS`, `PERIOD_KEYWORDS`,
+  `extract_parameters(query_text) -> ExtractedParameters` (`plan.md` §5).
+  Pure function, no database, no I/O. `specialty_slug` always resolves to
+  a real slug — defaults to `GENERALIST_SLUG` when no diagnosis-specific
+  keyword matches, never `None`/unfiltered.
 - [ ] **T021 [P]** `test_appointment_availability_keywords.py` — every
-  keyword, mixed case, no-match-on-any-dimension, and a realistic full
-  customer sentence per specialty (matching the tone of the existing Q&A
-  wording, e.g. "Tem vaga de mastologia amanhã de manhã?").
+  diagnosis-specific keyword; explicit generalist keywords; **a query with
+  no known specialty keyword at all resolves to `GENERALIST_SLUG`**; mixed
+  case; a realistic full customer sentence per specialty (matching the
+  tone of the existing Q&A wording, e.g. "Tem vaga de mastologia amanhã de
+  manhã?").
 
 **Gate:** T021 passes; no database required for this phase's tests.
 
@@ -66,19 +81,23 @@ local database.
 - [ ] **T030** `scheduling/availability.py`:
   `resolve_appointment_availability(session, query_text) -> DynamicResolution`
   (`plan.md` §4) — a single `SELECT` against `schedule_slots` (joined to
-  `Specialty`/`Professional`/`ProfessionalSpecialty`/`Unit`), filtered by
-  whatever `extract_parameters()` (T020) matched, rendering the
-  deterministic template (`plan.md` §6), raising `DynamicResolutionError`
-  (reusing `knowledge/dynamic_binding.py`'s existing exception type) on
-  zero matches. **Contains no `INSERT`/`UPDATE`/`DELETE` statement and
-  never imports `scheduling/seeding.py`** — this is the core invariant the
-  human's second clarification round introduced.
+  `Specialty`/`Professional`/`ProfessionalSpecialty`/`Unit`), always
+  filtered by `extract_parameters()`'s (T020) resolved `specialty_slug`
+  (never unfiltered), further narrowed by whatever date/period matched,
+  rendering the deterministic template (`plan.md` §6), raising
+  `DynamicResolutionError` (reusing `knowledge/dynamic_binding.py`'s
+  existing exception type) on zero matches. **Contains no
+  `INSERT`/`UPDATE`/`DELETE` statement and never imports
+  `scheduling/seeding.py`** — this is the core invariant the human's
+  second clarification round introduced.
 - [ ] **T031 [P]** `test_appointment_availability_resolver.py` — real-
-  database integration tests: specialty filter correctness; period
-  (manhã/tarde) filter correctness; zero-match raises with a diagnostic
-  (never customer-facing) cause; rendered text contains no raw
-  table/column name; **a structural test asserts the
-  `scheduling.availability` module source contains no
+  database integration tests: specialty filter correctness for each of the
+  4 seeded specialties (including the new generalist one, T009); **a query
+  with no specialty keyword returns only the generalist's slots, never a
+  mix of the other 3**; period (manhã/tarde) filter correctness;
+  zero-match raises with a diagnostic (never customer-facing) cause;
+  rendered text contains no raw table/column name; **a structural test
+  asserts the `scheduling.availability` module source contains no
   `insert(`/`update(`/`delete(`/`pg_insert(` construct** (acceptance
   outcome 4).
 
@@ -167,13 +186,15 @@ the button twice, see the created-count message then the idempotent
   `spec.md` §5 item 3, but re-evaluate rather than assuming the list is
   final). Create/edit the in-scope entries as needed so retrieval reliably
   matches real customer phrasings per specialty/day/period. **Also seed the
-  2 new "primeira consulta, sem especialidade" entries authored verbatim in
-  `plan.md` §8** (human-identified coverage gap, 2026-08-18: no existing
-  entry covers a customer who suspects cancer but doesn't yet know which
-  specialty applies) — confirm neither entry's wording matches any
-  `SPECIALTY_KEYWORDS` term, so they correctly resolve across all
-  specialties, not a wrong single one. Record the final entry list and
-  rationale for every change in this task's evidence.
+  2 new "primeira consulta" (generalist) entries authored verbatim in
+  `plan.md` §8**, after T009's migration has run (human-identified coverage
+  gap, 2026-08-18: no existing entry covers a customer who suspects cancer
+  but doesn't yet know which specialty applies — corrected same day to
+  route to the new seeded generalist specialty, not an unfiltered search)
+  — confirm neither entry's wording matches any of the 3
+  diagnosis-specific `SPECIALTY_KEYWORDS` terms, so both correctly resolve
+  to `GENERALIST_SLUG`. Record the final entry list and rationale for
+  every change in this task's evidence.
 - [ ] **T071 [P]** `smoke_v4_appointment_availability.py` — real
   end-to-end HTTP smoke against the rebuilt containers: call the seed
   endpoint (Phase 4) to guarantee real data exists, then a real customer
@@ -209,8 +230,10 @@ full `smoke_*` suite (pre-existing + this feature's new script) all pass;
 
 ```text
 Phase 0 (SDD gates)
-  -> Phase 1 (scheduling read model)
-  -> Phase 2 (parameter extraction) [P, independent of Phase 1]
+  -> Phase 1 (migration + scheduling read model)
+  -> Phase 2 (parameter extraction) [P, independent of Phase 1 — GENERALIST_SLUG
+       is a Python constant, not a DB lookup; only Phase 3's query and Phase 7's
+       Q&A seeding actually need T009's migration to have run]
   -> Phase 3 (query resolver, read-only, needs Phase 1 + Phase 2)
   -> Phase 4 (seed action, the only write path, needs Phase 1)
        [P, independent of Phase 3 — different files, disjoint concerns]

@@ -5,7 +5,19 @@ This is the executable definition of DONE for this feature, supplementary to
 does not repeat scenarios this feature leaves untouched. Revised 2026-08-18
 same day as the spec's second clarification round — the query path (§A-C)
 and the seed action (§D-F) are now two clearly separated pieces with
-different triggers and different write permissions.
+different triggers and different write permissions — and again the same
+day after the fourth round added the generalist specialty (AA-3a, §0).
+
+## 0. Environment [AA-3a]
+
+1. The new migration (`data-model.md` §5) applies cleanly on top of the
+   V1/V2/V3-migrated database, purely additive (new reference rows in
+   already-existing tables, no schema change).
+2. After applying, `scheduling.specialties` has exactly 4 rows (the
+   original 3 plus `oncologia-geral`), and its 3 new professionals'
+   `professional_specialties` rows carry the specified price/duration.
+3. Existing V1/V2/V3 data/rows are unaffected — spot-check row counts for
+   the 3 original specialties/9 original professionals before/after.
 
 ## A. Deterministic, real-data answer [AA-4, AA-5, outcome 1]
 
@@ -23,13 +35,16 @@ different triggers and different write permissions.
 
 1. A message naming a real specialty (e.g. "mastologia") returns only that
    specialty's slots.
-2. A message naming no specialty returns slots across all seeded
-   specialties with availability.
+2. A message naming no specialty — or explicitly asking for a generalist —
+   returns only the seeded generalist specialty's (`oncologia-geral`)
+   slots, never a mix across the 3 diagnosis-specific specialties, and
+   never zero results just because nothing specific was named.
 3. A message naming a specialty with no seeded professional/availability
    falls through to §F (abstain), never a wrong specialty's slots.
 4. The two "primeira consulta" entries (`spec.md` §5 item 9, `plan.md`
-   §8) — deliberately naming no specialty — resolve via the same
-   all-specialties path as B.2, not a dedicated code path of their own.
+   §8) — deliberately naming no diagnosis-specific specialty — resolve to
+   the generalist specialty via the same default path as B.2, not a
+   dedicated code path of their own.
 
 ## C. Query path is purely read-only [AA-2, outcome 4]
 

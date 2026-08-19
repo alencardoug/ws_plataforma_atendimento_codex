@@ -164,11 +164,78 @@ this re-review.
   worth fixing without a new instruction, since it would change the
   button's specified behavior.
 
-## 7. Verdict (current)
+## 7. Verdict (second design, superseded — see §8-9)
 
 No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
 `tasks.md`, and `acceptance.md` as of this revised review; §2's finding and
 §6's five re-checks/one fix are all repaired in place before any
+implementation began. This verdict covered the design after the *second*
+clarification round (read-only query path + separate seed action). It was
+superseded the same day by the third and fourth rounds — see §8.
+
+## 8. Revision review — third and fourth clarification rounds (2026-08-18, same day)
+
+The third round deferred a full scheduling CRUD to `ROADMAP.md` (no
+artifact impact beyond that file) and identified a real content gap: no
+seeded specialty covers a customer who doesn't yet know what's wrong. The
+fourth round corrected how to close that gap: a customer with "no
+specialty named" needs a **generalist** professional — a new seeded
+specialty of its own (AA-3a) — not an unfiltered search across the 3
+diagnosis-specific ones. This is the first time this feature adds new
+reference data rather than only reading/reusing what already existed, so
+it gets the same rigor as any other new-data decision in this codebase.
+
+### Re-checked for this revision
+
+- **`extract_parameters()`'s new default is unconditional, not a
+  fallback-only path.** `plan.md` §5's pseudocode was checked line by line:
+  `specialty_slug` is initialized to `GENERALIST_SLUG` before the loop
+  runs, so "explicitly asked for a generalist" and "asked for nothing in
+  particular" produce identical output through the same code path — no
+  hidden branch could let one behave differently from the other by
+  accident.
+- **The query algorithm (`plan.md` §4) was checked to confirm it always
+  filters by specialty now** — the old `if params.specialty_id:`
+  conditional (which allowed an unfiltered query when nothing matched) was
+  replaced with an unconditional `.where(Specialty.slug ==
+  params.specialty_slug)`, consistent with `specialty_slug` never being
+  `None` after §5's change. No leftover conditional path that could
+  silently reintroduce the old "search everything" behavior.
+- **The new migration (`data-model.md` §5) was checked against the exact
+  UUID ranges the original seed file used** (`specialty_id` prefix
+  `20000000-...`, `professional_id` prefix `30000000-...`) — the new rows
+  continue those ranges (`...0004`, `...0010-0012`) rather than colliding
+  with or duplicating an existing id.
+- **Pricing/duration for the new generalist consultation were checked
+  against the other 3 specialties' seeded values** for internal
+  consistency (`data-model.md` §5's table) — deliberately priced and timed
+  lower than all 3 (R$600/45min vs. R$980-1450/60-90min), consistent with
+  the human's own "consulta simples" framing, not an arbitrary number.
+- **`tasks.md`'s Phase 1 gained T009 (the migration) ahead of T010/T011**,
+  and Phase 2's independence from Phase 1 was re-justified explicitly
+  (`GENERALIST_SLUG` is a Python constant, not a DB lookup — only Phase 3's
+  query and Phase 7's Q&A seeding actually need T009 to have run) rather
+  than asserted without reason.
+- **`spec.md` §4 outcome 2 and `acceptance.md` §B were both checked for the
+  stale "returns across all specialties" claim** the second/third rounds
+  had left in place — found and corrected in both (this document's own
+  method: grep the exact stale phrase across every artifact after a
+  behavioral change, not just the file that prompted the change).
+
+### New residual risk from this revision
+
+- **The generalist specialty's 3 professionals are net-new synthetic
+  identities**, not reassigned from the existing 9. This keeps the
+  original 3 specialties' data untouched (lower risk of an unrelated
+  regression) at the cost of a slightly larger seed dataset — a reasonable
+  trade a real deployment might revisit, not a concern for this synthetic
+  demo (Constitution Article VI).
+
+## 9. Verdict (current)
+
+No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
+`tasks.md`, and `acceptance.md` as of this latest review; §2's finding and
+§6's and §8's re-checks/fixes are all repaired in place before any
 implementation began. `checklists/requirements.md`'s final item
 ("cross-artifact analysis reports no material contradiction") is satisfied
 by this document. This feature is ready to move from artifact authoring
