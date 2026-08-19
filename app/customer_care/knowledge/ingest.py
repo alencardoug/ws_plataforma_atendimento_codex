@@ -155,7 +155,20 @@ def ingest(corpus_root: Path, provider: EmbeddingProvider) -> dict[str, int]:
                     qa = QAEntry(qa_id=source["qa_id"], category=source["category"], question=source["question"], answer_markdown=source["answer"], retrieval_intents=[], dynamic_data_required=source["dynamic_data_required"], dynamic_resolver=source["dynamic_resolver"], metadata_json=source["metadata"], customer_citation_allowed=False)
                     session.add(qa)
                     counts["inserted"] += 1
-                elif qa.content_hash != content_hash:
+                elif (
+                    qa.content_hash != content_hash
+                    or qa.category != source["category"]
+                    or qa.dynamic_data_required != source["dynamic_data_required"]
+                    or qa.dynamic_resolver != source["dynamic_resolver"]
+                    or qa.metadata_json != source["metadata"]
+                ):
+                    # Correction (2026-08-19, found while re-configuring
+                    # QA-014/015/019/020's dynamic_resolver for spec 004):
+                    # this branch previously keyed only on content_hash
+                    # (question+answer text), so a source edit that changed
+                    # only dynamic_data_required/dynamic_resolver/category/
+                    # metadata — with question/answer text left untouched —
+                    # was silently never applied on re-ingest.
                     qa.category = source["category"]
                     qa.question = source["question"]
                     qa.answer_markdown = source["answer"]

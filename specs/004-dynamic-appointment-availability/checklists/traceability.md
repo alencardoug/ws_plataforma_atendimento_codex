@@ -6,12 +6,16 @@ still governs everything this feature leaves untouched. Revised 2026-08-18
 three times: for the split into a read-only query path and a separate
 operator-triggered seed action (AA-9); for AA-3a (the seeded generalist
 specialty); for AA-10 (the booking script) and Constitution Amendment 1.1.0.
+Revised again 2026-08-19 (T008, the `scheduling`-schema-creation migration
+found necessary during the post-V3 production sync — `spec.md` §2
+correction).
 
 | Outcome | Primary tasks | Acceptance area |
 |---|---|---|
 | AA-1 Resolver allowlist, not a generic binding | T050, T052 | H |
 | AA-2 Purely read-only query path | T030, T031 | C |
 | AA-3 Deterministic parameter extraction | T020, T021 | B |
+| Scheduling schema creation (correction, prerequisite for AA-2/AA-3a/AA-9) | T008 | 0 |
 | AA-3a Seeded generalist specialty, not an unfiltered fallback | T009, T020, T031 | 0, B |
 | AA-4 Structured, timezone-aware evidence | T030 | A |
 | AA-5 Deterministic template rendering, never LLM-composed | T030 | A |
@@ -47,7 +51,7 @@ specialty); for AA-10 (the booking script) and Constitution Amendment 1.1.0.
 |---|---|---|
 | No new infrastructure (Article VIII) | T040, T093, `plan.md` §4b/§8b/§11 | E |
 | `scheduling` schema shape unchanged (D-024 dormancy preserved) | T010, `data-model.md` | G |
-| New migrations apply cleanly, additive only | T009, T090, `data-model.md` §5/§7 | 0 |
+| New migrations apply cleanly, additive only, in order | T008, T009, T090, `data-model.md` §5/§6/§8 | 0 |
 | Idempotency + bounded creation under concurrent seed calls | T041 | D |
 | Audit coverage for the resolver, seed action, and booking script | T042, T051, T093 | (security checklist) |
 | Frontend button accessibility/behavior | T060, T061 | J/P |
@@ -57,14 +61,14 @@ specialty); for AA-10 (the booking script) and Constitution Amendment 1.1.0.
 
 | Coverage | Evidence |
 |---|---|
-| Migration correctness (4 specialties, 12 professionals; booking-script columns) | `app/tests/test_appointment_availability_*.py` (T011), migration itself (T090) |
+| Migration correctness (schema creation, 4 specialties, 12 professionals; booking-script columns) | `app/tests/test_appointment_availability_*.py` (T011), migrations themselves (T008, T009, T090) |
 | ORM mapping correctness | `app/tests/test_appointment_availability_*.py` (planned, T011) |
 | Deterministic keyword extraction (incl. generalist default) | `app/tests/test_appointment_availability_keywords.py` (planned, T021) |
 | Query-path correctness + no-write structural proof | `app/tests/test_appointment_availability_resolver.py` (planned, T031) |
 | Seed action idempotency/bounds/business-day correctness | `app/tests/test_appointment_seeding.py` (planned, T041) |
 | Dispatch/regression (generic path + unimplemented resolvers) | `app/tests/smoke_v2_dynamic_pattern.py` unmodified (planned check, T052) |
 | Seed endpoint auth + button behavior | `frontend/src/main.test.tsx` (planned, T061) |
-| End-to-end real HTTP smoke (query + seed) | `app/tests/smoke_v4_appointment_availability.py` (planned, T071) |
+| End-to-end real HTTP smoke (query + seed) | `app/tests/smoke_v4_appointment_availability.py` (T071, passing) |
 | CPF/payment/booking-intent parsing correctness | `app/tests/test_booking_script_parsing.py` (planned, T092) |
 | Booking script full flow + non-persistence | `app/tests/test_booking_script_flow.py` (planned, T095) |
 | Autonomous-send containment (structural) | `app/tests/test_booking_script_containment.py` (planned, T096) |

@@ -39,6 +39,9 @@ class Conversation(Base):
     last_customer_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_customer_typing_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     auto_draft_covers_through_message_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.messages.id"))
+    # AA-10: transient flow-position marker for booking_script/service.py.
+    # NULL = no script in progress. Never holds the customer's CPF/payment answer.
+    booking_script_step: Mapped[str | None] = mapped_column(Text)
 
 
 class ConversationAssignment(Base):
@@ -62,6 +65,10 @@ class Message(Base):
     body: Mapped[str] = mapped_column(Text)
     source_generation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    # AA-10: NULL for every message except the ones send_scripted_message()
+    # creates, which get "booking_script" — Constitution Amendment 1.1.0's
+    # containment is enforced structurally by this column, not just documented.
+    autonomous_source: Mapped[str | None] = mapped_column(Text)
 
 
 class Category(Base):

@@ -51,6 +51,8 @@ regenerate-with-instruction extends `ai.draft_generated`/`ai.draft_abstained`'s 
 | `auth.login_succeeded` | operator_id, request_id |
 | `auth.login_failed` | normalized identifier fingerprint?; never password |
 | **`anonymous_access.token_validation_rate_limited`** (V2-2) | correlation_id — emitted when a source IP is currently locked out (`plan.md` §13.1); deliberately carries no client IP, attempted token, or attempted `conversation_id` in the payload (the attempted `conversation_id` may not correspond to a real conversation, so it is never used as this event's FK-constrained `conversation_id` column either) |
+| **`scheduling.availability_seeded`** (dynamic appointment availability, AA-9) | operator_id, created_d1, created_d7, already_sufficient — emitted by `POST /operator/scheduling/ensure-availability`, the sole write-triggering endpoint for `scheduling.schedule_slots`; not conversation-scoped (no `ai_generation_id`/`conversation_id` — this action isn't about any one customer) |
+| **`booking_script.autonomous_message_sent`** ⚠ (dynamic appointment availability, AA-10, Constitution Amendment 1.1.0) | conversation_id, message_id, step — **never** the customer's raw CPF or payment-question reply, and never the sent message's own body. `actor_type = "SYSTEM"`, the only event type in the entire catalog marking a message sent with no operator click. `SELECT * FROM audit_events WHERE event_type = 'booking_script.autonomous_message_sent'` is, by construction, a complete and exhaustive list of every autonomously-sent message in the system. |
 
 ## Event properties
 

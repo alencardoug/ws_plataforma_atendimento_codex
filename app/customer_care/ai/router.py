@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from uuid import UUID
@@ -10,13 +11,23 @@ from customer_care.ai.providers import GenerationResult, configured_generation_p
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
-from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Conversation, KnowledgeDocument, Message, MessageSelection, QAEntry, RetrievalHit
-from customer_care.knowledge.dynamic_binding import DynamicResolutionError, resolve_dynamic_pattern
+from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Conversation, KnowledgeDocument, Message, MessageSelection, QAEntry, RetrievalHit, RetrievalRun
+from customer_care.knowledge.dynamic_binding import DynamicResolution, DynamicResolutionError, resolve_dynamic_pattern
 from customer_care.rag.service import Evidence, evidence_dict, load_evidence, retrieve
+from customer_care.scheduling.availability import resolve_appointment_availability
 from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
 
 router = APIRouter(tags=["Operator AI"])
+
+# AA-1: server-side-allowlisted named resolvers — distinct from V2's generic
+# qa_dynamic_bindings mechanism. A dynamic_resolver value not present here
+# (price_lookup/payment_simulator/insurance_lookup) falls through to the
+# existing generic path below, which safely aborts (no qa_dynamic_bindings
+# row exists for them) — no special-casing needed to keep them abstaining.
+NAMED_RESOLVERS: dict[str, Callable[[DbSession, str], DynamicResolution]] = {
+    "appointment_availability": resolve_appointment_availability,
+}
 
 # V2-7: fixed product behavior (spec.md), not an operator-tunable setting.
 AUTOMATIC_TRIGGER_IDLE_SECONDS = 8
@@ -153,14 +164,19 @@ def full_parent_draft(evidence: list[Evidence]) -> GenerationResult | None:
     return GenerationResult("ANSWER", parent.content, None, [str(parent.retrieval_hit_id)])
 
 
-def dynamic_pattern_result(session: DbSession, evidence: list[Evidence]) -> tuple[GenerationResult, bool, str | None] | None:
-    """V2-6: if the top evidence is an ADMIN_QA entry flagged
+def dynamic_pattern_result(session: DbSession, evidence: list[Evidence], query_text: str) -> tuple[GenerationResult, bool, str | None, dict[str, object] | None] | None:
+    """V2-6/AA-1: if the top evidence is an ADMIN_QA entry flagged
     dynamic_data_required, resolve it deterministically instead of an LLM
-    call. Returns (result, dynamic_pattern_used, audit_only_failure_cause) —
-    None means "not applicable, fall through to the normal LLM path".
-    A configured-but-failing resolution and an unconfigured
-    dynamic_data_required entry both fall back identically (spec.md V2-6
-    §9.4): this is what finally retires the original V1 finding."""
+    call — via NAMED_RESOLVERS's allowlisted dispatch when
+    `qa.dynamic_resolver` names one, otherwise via the existing generic
+    qa_dynamic_bindings path. Returns (result, dynamic_pattern_used,
+    audit_only_failure_cause, audit_extra) — None means "not applicable,
+    fall through to the normal LLM path". `audit_extra` carries
+    `specialty_slug`/`slot_count` for `appointment_availability`
+    resolutions (plan.md §7), None otherwise. A configured-but-failing
+    resolution and an unconfigured dynamic_data_required entry both fall
+    back identically (spec.md V2-6 §9.4): this is what finally retires the
+    original V1 finding."""
     if not evidence or evidence[0].knowledge_type != "ADMIN_QA":
         return None
     hit = session.get(RetrievalHit, evidence[0].retrieval_hit_id)
@@ -170,10 +186,14 @@ def dynamic_pattern_result(session: DbSession, evidence: list[Evidence]) -> tupl
     if not qa or not qa.dynamic_data_required:
         return None
     try:
-        resolution = resolve_dynamic_pattern(session, qa)
-        return GenerationResult("ANSWER", resolution.pattern_text, None, [str(evidence[0].retrieval_hit_id)]), True, None
+        resolver = NAMED_RESOLVERS.get(qa.dynamic_resolver) if qa.dynamic_resolver else None
+        resolution = resolver(session, query_text) if resolver else resolve_dynamic_pattern(session, qa)
+        audit_extra: dict[str, object] | None = None
+        if resolution.specialty_slug is not None or resolution.slot_count is not None:
+            audit_extra = {"specialty_slug": resolution.specialty_slug, "slot_count": resolution.slot_count}
+        return GenerationResult("ANSWER", resolution.pattern_text, None, [str(evidence[0].retrieval_hit_id)]), True, None, audit_extra
     except DynamicResolutionError as exc:
-        return GenerationResult("ABSTAIN", "", "DYNAMIC_DATA_UNAVAILABLE", []), False, exc.cause
+        return GenerationResult("ABSTAIN", "", "DYNAMIC_DATA_UNAVAILABLE", []), False, exc.cause, None
 
 
 def generate_draft(
@@ -198,15 +218,16 @@ def generate_draft(
     try:
         dynamic_used = False
         dynamic_cause = None
+        dynamic_extra: dict[str, object] | None = None
         parent_result = full_parent_draft(evidence)
         if parent_result:
             result = parent_result
             provider_name = "clinical-parent-document"
             model = "not-applicable"
         else:
-            dynamic = dynamic_pattern_result(session, evidence)
+            dynamic = dynamic_pattern_result(session, evidence, query)
             if dynamic:
-                result, dynamic_used, dynamic_cause = dynamic
+                result, dynamic_used, dynamic_cause, dynamic_extra = dynamic
                 provider_name = "dynamic-pattern-resolver"
                 model = "not-applicable"
             else:
@@ -230,7 +251,7 @@ def generate_draft(
         if dynamic_cause is not None:
             record_event(session, "ai.dynamic_pattern_fallback", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "cause": dynamic_cause})
         elif dynamic_used:
-            record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id)})
+            record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), **(dynamic_extra or {})})
         session.commit()
         return generation, [evidence_dict(item) for item in evidence], result.request_messages
     except Exception as exc:
@@ -291,15 +312,20 @@ def select_evidence(retrieval_hit_id: UUID, payload: SelectEvidenceIn, operator:
     try:
         dynamic_used = False
         dynamic_cause = None
+        dynamic_extra: dict[str, object] | None = None
         parent_result = full_parent_draft([evidence])
         if parent_result:
             result = parent_result
             provider_name = "clinical-parent-document"
             model = "not-applicable"
         else:
-            dynamic = dynamic_pattern_result(session, [evidence])
+            # No message_selections context by design (V2-3) — the
+            # originating manual-search query_text is the closest analog to
+            # a "customer query" available at this call site (plan.md §2).
+            run_query_text = session.scalar(select(RetrievalRun.query_text).where(RetrievalRun.id == hit.retrieval_run_id)) or ""
+            dynamic = dynamic_pattern_result(session, [evidence], run_query_text)
             if dynamic:
-                result, dynamic_used, dynamic_cause = dynamic
+                result, dynamic_used, dynamic_cause, dynamic_extra = dynamic
                 provider_name = "dynamic-pattern-resolver"
                 model = "not-applicable"
             else:
@@ -324,7 +350,7 @@ def select_evidence(retrieval_hit_id: UUID, payload: SelectEvidenceIn, operator:
         if dynamic_cause is not None:
             record_event(session, "ai.dynamic_pattern_fallback", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "cause": dynamic_cause})
         elif dynamic_used:
-            record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id)})
+            record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), **(dynamic_extra or {})})
         session.commit()
         return generation_dict(session, generation, [evidence_dict(evidence)], result.request_messages)
     except Exception as exc:

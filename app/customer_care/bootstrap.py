@@ -9,6 +9,7 @@ from customer_care.infrastructure.database import check_database
 from customer_care.knowledge.router import router as knowledge_crud_router
 from customer_care.operator_workspace.router import router as operator_router
 from customer_care.rag.router import router as rag_router
+from customer_care.scheduling.router import router as scheduling_router
 from customer_care.shared.http import RequestContextMiddleware
 from customer_care.shared.settings import get_settings
 
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
     application.include_router(ai_router, prefix=api_prefix)
     application.include_router(knowledge_crud_router, prefix=api_prefix)
     application.include_router(evaluation_router, prefix=api_prefix)
+    application.include_router(scheduling_router, prefix=api_prefix)
 
     @application.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException) -> JSONResponse:

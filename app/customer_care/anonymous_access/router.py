@@ -11,6 +11,7 @@ from customer_care.ai.router import evaluate_automatic_trigger
 from customer_care.anonymous_access.rate_limit import enforce_not_locked_out, record_attempt
 from customer_care.anonymous_access.security import digest_conversation_token, issue_conversation_token
 from customer_care.audit.service import record_event
+from customer_care.booking_script.service import advance_booking_script
 from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.shared.dependencies import DbSession, customer_bearer
@@ -91,6 +92,7 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
     conversation.last_message_at = message.created_at
     conversation.last_customer_activity_at = message.created_at
     record_event(session, "message.customer_received", "CUSTOMER", conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"message_id": str(message.id), "length": len(payload.body)})
+    advance_booking_script(session, conversation, message)  # AA-10 — same transaction, no debounce (never calls an LLM)
     session.commit()
     session.refresh(message)
     return message

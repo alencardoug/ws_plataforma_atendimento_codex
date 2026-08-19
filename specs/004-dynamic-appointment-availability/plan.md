@@ -118,25 +118,54 @@ this fallthrough, not a separate check that could later be forgotten
   query" available at that call site. An empty/missing value is valid input
   (§5) — it just means no dimension gets filtered on.
 
-## 3. Persistence: new read-mostly ORM mappings, plus one data-only migration
+## 3. Persistence: new read-mostly ORM mappings, plus two new migrations
 
-The `scheduling` schema's *shape* (`db/init/001_schema.sql`) already has
-everything both the query path and the seed action need (verified
-`spec.md` §2) — it predates Alembic and was preserved as a "legacy...
-dormant" asset (D-024). This feature is the first to actually use it, so
-it needs SQLAlchemy `Mapped`/`mapped_column` classes, but **no schema
-change** — no new table, column, index, or constraint; the `UNIQUE
-(professional_id, starts_at)` constraint the seed action's idempotent
-insert relies on already exists.
+**Correction (2026-08-19, found during the post-V3 production sync, before
+Phase 1 started):** `db/init/001_schema.sql`/`002_seed_and_schedule.sql`
+define the `scheduling` schema's *shape*, but define is all they do —
+neither file is mounted as Postgres `initdb.d` content in
+`docker-compose.yml`, referenced by any script, or ported into an Alembic
+migration. Direct queries against both the local Docker Compose database
+and the Neon production database confirm `scheduling.specialties` exists
+in neither. D-024's "dormant" framing underclaimed this: the schema was
+never activated at all, not created-once-then-idle. `spec.md` §2 (revised)
+now states this correctly; this section and `data-model.md` §5 (new)
+replace the "no schema change needed" framing this section originally had.
 
-**One data-only migration is still needed** (AA-3a, `spec.md` §5 item 10):
-seeding the new generalist specialty. This is reference/seed data, the
-same category of thing `db/init/002_seed_and_schedule.sql` already
-contains — it just can't go there (that file is frozen, V1 `plan.md` §1),
-so it goes in a new, additive, forward-only Alembic migration instead,
-matching how V3's own migration also seeded reference data (its category
-backfill) alongside a schema change. `data-model.md` §5 has the exact
-rows.
+**This feature's Phase 1 therefore needs two things where the original
+plan needed one:**
+
+1. **A new schema-creation migration** (`data-model.md` §5) — creates the
+   `scheduling` schema, but scoped to only what AA-2/AA-3a/AA-9 actually
+   use: the `slot_status` enum, `units`, `specialties`, `professionals`,
+   `professional_specialties`, `holidays` (+ its natural-key unique
+   index), `schedule_slots`, and the `next_business_day()` function —
+   ported faithfully from `001_schema.sql`, not redesigned. Also seeds the
+   original 3 specialties/9 professionals/holidays from
+   `002_seed_and_schedule.sql`, since the query path (AA-2/AA-3) needs
+   real specialties to filter by from the moment this migration lands.
+   Deliberately does **not** create `slot_offers`, `available_offers`, the
+   `ensure_demo_availability()` function, `appointments`,
+   `appointment_events`, or any `identity.*`/`billing.*`/`governance.*`
+   table/schema — those remain exactly as unactivated as before (D-024,
+   `spec.md` §6); this feature's own AA-9 write path replaces
+   `ensure_demo_availability()`'s role, it does not need it to exist.
+2. **The data-only AA-3a migration** (`spec.md` §5 item 10,
+   `data-model.md` §6, unchanged in content from the original plan, only
+   renumbered and now depending on migration 1 above having run first):
+   seeding the new generalist specialty. This is reference/seed data, the
+   same category of thing `002_seed_and_schedule.sql` already contains for
+   the original 3 — it just can't go in that file (it is not wired into
+   anything, per the correction above, and even if it were, V1 `plan.md`
+   §1 froze it), so it goes in its own additive, forward-only Alembic
+   migration, matching how V3's own migration also seeded reference data
+   (its category backfill) alongside a schema change.
+
+Once both migrations have run, the schema's shape needs no further
+change for this feature — it needs SQLAlchemy `Mapped`/`mapped_column`
+classes only. The `UNIQUE (professional_id, starts_at)` constraint the
+seed action's idempotent insert relies on is created by migration 1, not
+assumed to pre-exist.
 
 `scheduling/models.py`:
 
@@ -230,6 +259,20 @@ structural test (acceptance outcome 4) greps/introspects the module to
 prove it, not just a behavioral test that happens not to trigger one.
 
 ## 4b. AA-9 — Seed action: algorithm, endpoint, and operator-workspace button
+
+**Correction (2026-08-19, human decision: "faça este botão ir para a
+oncologia geral"):** `count_available_on()` and `active_professional_specialty_pairs()`
+below are now scoped to the generalist specialty (`GENERALIST_SLUG`,
+`scheduling/availability.py`) specifically — both the count and the
+candidate pairs filter on `Specialty.slug == GENERALIST_SLUG`. The
+original design counted/created across all 4 specialties flat, which live
+verification (Phase 5, `tasks.md`) showed meant the button would
+essentially always seed `mastologia-oncologica` only (its professionals'
+UUIDs sort lowest), never the generalist specialty most customer queries
+actually need (AA-3a's default). `seeding.py` imports `GENERALIST_SLUG`
+from `availability.py` to avoid duplicating the slug string — the reverse
+import (`availability.py` importing from `seeding.py`) remains
+structurally forbidden (§4/§9), this direction is not.
 
 `scheduling/seeding.py`:
 
@@ -348,7 +391,14 @@ def extract_parameters(query_text: str) -> ExtractedParameters:
     return ExtractedParameters(specialty_slug=specialty_slug, date_range=..., period_hours=...)
 ```
 
-Matching is case-insensitive substring search; the 3 diagnosis-specific
+Matching is case-insensitive, **word-boundary-aware** substring search —
+corrected from plain substring search during Phase 5 live verification
+(2026-08-19): a real customer message containing "amanhã" was also
+false-positive-matching the "manhã" period keyword, because "amanhã"
+literally ends with the characters "manhã" — a naive substring check has
+no way to tell the two apart. `_contains_keyword()` uses `\b{keyword}\b`
+instead. This applies to every keyword dictionary here (specialty/date/
+period), not just the one collision that was caught; the 3 diagnosis-specific
 specialties are checked first, in a fixed order, and only if none of them
 match does `specialty_slug` stay at its `GENERALIST_SLUG` default — which
 is exactly the same outcome as if the customer had explicitly asked for a
@@ -454,7 +504,7 @@ A: "Sim, é possível. Apresentamos os horários disponíveis com um
 Both are authored here (not left to implementation time, unlike the rest
 of §8's entry list) since the human specified the exact scenario;
 `tasks.md` T070 seeds them verbatim, alongside the new `oncologia-geral`
-migration (§3, `data-model.md` §5) they depend on.
+migration (§3, `data-model.md` §6) they depend on.
 
 ## 8b. AA-10 — Booking script: the one exception to Article III
 
@@ -502,7 +552,7 @@ the price — same relationship `ai/` already has to `knowledge/`):
     Message` — constructs an `author_type="OPERATOR"` `Message` directly
     (no `send_operator_message`, no operator-auth dependency — there is no
     operator in this call's context), sets the new
-    `Message.autonomous_source = "booking_script"` (`data-model.md` §7),
+    `Message.autonomous_source = "booking_script"` (`data-model.md` §8),
     and records the new `booking_script.autonomous_message_sent` audit
     event (§ "Audit" below). **This is the only function in the entire
     codebase allowed to create a customer-visible `Message` without an
@@ -763,11 +813,13 @@ step) — negligible, no batching/queueing needed at demo scale.
 
 ## 12. Deliverables
 
-- `app/alembic/versions/`: two new, additive, forward-only migrations —
-  one seeding the `oncologia-geral` generalist specialty/professionals/
-  professional_specialties rows (AA-3a, `data-model.md` §5), one adding
+- `app/alembic/versions/`: three new, additive, forward-only migrations —
+  one creating the `scheduling` schema itself plus the original 3
+  specialties' seed data (correction, `data-model.md` §5), one seeding the
+  `oncologia-geral` generalist specialty/professionals/
+  professional_specialties rows (AA-3a, `data-model.md` §6), one adding
   `Conversation.booking_script_step` and `Message.autonomous_source`
-  (AA-10, `data-model.md` §7)
+  (AA-10, `data-model.md` §8)
 - `app/customer_care/scheduling/__init__.py`, `models.py`,
   `availability.py` (query, read-only), `seeding.py` (AA-9 write path),
   `router.py` (new endpoint)

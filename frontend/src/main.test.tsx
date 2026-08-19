@@ -376,4 +376,38 @@ describe("V1 routes", () => {
     expect(closeCalls).toHaveLength(0);
     expect(await screen.findByRole("button", { name: "Encerrar conversa" })).toBeInTheDocument();
   });
+
+  it("ensures appointment availability from the queue sidebar with no conversation selected (AA-9, T061)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    let ensureCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) return { ok: true, json: async () => [] };
+        if (url.endsWith("/operator/runtime-config")) return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        if (url.endsWith("/operator/scheduling/ensure-availability") && init?.method === "POST") {
+          ensureCalls += 1;
+          return {
+            ok: true,
+            json: async () =>
+              ensureCalls === 1
+                ? { created_d1: 1, created_d7: 3, already_sufficient: false, message: "Criadas 4 vaga(s): 1 em D+1, 3 em D+7." }
+                : { created_d1: 0, created_d7: 0, already_sufficient: true, message: "Já tem 4 vagas disponíveis." },
+          };
+        }
+        throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+
+    const button = await screen.findByRole("button", { name: "Garantir disponibilidade (D+1/D+7)" });
+    fireEvent.click(button);
+    expect(await screen.findByText("Criadas 4 vaga(s): 1 em D+1, 3 em D+7.")).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(await screen.findByText("Já tem 4 vagas disponíveis.")).toBeInTheDocument();
+    expect(ensureCalls).toBe(2);
+  });
 });

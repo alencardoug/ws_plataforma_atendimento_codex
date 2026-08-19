@@ -33,6 +33,7 @@ def customer_projection(session: Session, conversation: Conversation, include_ge
         if message.author_type == "OPERATOR":
             citations = session.scalars(select(MessageCitation).where(MessageCitation.message_id == message.id).order_by(MessageCitation.created_at)).all()
             item["citations"] = [{"title": c.display_title, "section": c.display_section, "url": c.display_url} for c in citations]
+            item["autonomous_source"] = message.autonomous_source  # AA-10: "automático" badge (frontend)
             if include_generation_id:
                 item["source_generation_id"] = message.source_generation_id
                 generation = session.get(AIGeneration, message.source_generation_id) if message.source_generation_id else None

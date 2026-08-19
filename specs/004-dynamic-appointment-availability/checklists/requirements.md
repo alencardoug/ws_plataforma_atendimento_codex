@@ -44,3 +44,13 @@
   containment (the autonomous-send exception provably scoped to exactly
   one function, one trigger) is checked with its own dedicated table in
   `analysis.md` §10, not just asserted in prose.
+- [x] A second finding was repaired 2026-08-19, before Phase 1
+  implementation began: `spec.md` §2/`plan.md` §3/`data-model.md`
+  (originally §5, now §5-§9) claimed the `scheduling` schema "already
+  exists" in the database. Direct queries against both the local and
+  production databases (during the post-V3 production sync) showed
+  `scheduling.specialties` exists in neither — `db/init/001_schema.sql`/
+  `002_seed_and_schedule.sql` were never wired into any automated init
+  path. Repaired by adding a new schema-creation migration (T008) ahead of
+  the generalist-specialty migration (T009); see `analysis.md`'s
+  corresponding revision note.

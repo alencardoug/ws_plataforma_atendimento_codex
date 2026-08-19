@@ -9,7 +9,9 @@ into a read-only query path and a separate operator-triggered seed action;
 for the generalist specialty (AA-3a); for the booking script (AA-10) — the
 one item group below (marked ⚠) verifies the project's first-ever
 exception to Constitution Article III, and gets correspondingly more
-scrutiny than every other item here.
+scrutiny than every other item here. Revised again 2026-08-19 for T008 (the
+`scheduling`-schema-creation migration found necessary during the post-V3
+production sync — `spec.md` §2 correction).
 
 - [ ] The query path (`scheduling/availability.py`) is reachable only
   through the existing authenticated-operator, assignment-gated,
@@ -57,52 +59,71 @@ scrutiny than every other item here.
   never contains a raw SQL fragment or full query — only structured,
   bounded diagnostic values (matched/unmatched parameters), matching
   D-028's existing precedent. `tasks.md` T030/T031.
-- [ ] The new generalist-specialty migration (AA-3a) is purely additive
-  `INSERT`s into already-existing tables with hardcoded, fixed values —
-  no user/request input reaches it, it runs once via Alembic (not a
-  runtime code path an attacker could re-trigger), and it does not modify
-  or delete any existing row. `tasks.md` T009, `acceptance.md` §0.
+- [ ] The schema-creation migration (T008, correction) creates only the
+  `scheduling` schema and only the tables/enum/function this feature
+  actually uses — no `identity.*`/`billing.*`/`governance.*`/
+  `appointments`/`appointment_events`/`slot_offers`/`available_offers`
+  object, verified structurally by inspecting the migration's DDL, not
+  just by absence of a call elsewhere. `tasks.md` T008, `acceptance.md` §0.
+- [x] The new generalist-specialty migration (AA-3a) is purely additive
+  `INSERT`s into the tables T008's migration just created, with hardcoded,
+  fixed values — no user/request input reaches it, it runs once via
+  Alembic (not a runtime code path an attacker could re-trigger), and it
+  does not modify or delete any existing row. `tasks.md` T009,
+  `acceptance.md` §0.
 
 **⚠ AA-10 — the Constitution Article III exception (Amendment 1.1.0,
 `DECISIONS.md` D-031). Every item below exists to keep this exception
 exactly as narrow as the amendment states, no wider.**
 
-- [ ] `send_scripted_message()` is the *only* function in the codebase
+- [x] `send_scripted_message()` is the *only* function in the codebase
   reachable without an authenticated-operator dependency that can create a
   customer-visible `Message`. A structural test enumerates every other
   `Message(author_type="OPERATOR", ...)` construction site and confirms
   each is gated by `CurrentOperator` or equivalent.
   `tasks.md` T096, `acceptance.md` §O.1-2.
-- [ ] `send_scripted_message()` is called only from
+- [x] `send_scripted_message()` is called only from
   `advance_booking_script()`, which is called only from
   `send_customer_message()` — not the typing-heartbeat endpoint, not any
   GET/poll path, not any operator-authenticated endpoint.
   `tasks.md` T093/T094, `acceptance.md` §O.4.
-- [ ] Every message body `send_scripted_message()` sends is a literal
+- [x] Every message body `send_scripted_message()` sends is a literal
   string from `spec.md` AA-10's fixed script, interpolated only with this
   feature's own data (formatted CPF, seeded price) — never raw customer
   text, never LLM output (no LLM/embedding provider is imported anywhere
   in `booking_script/`). `tasks.md` T093, `acceptance.md` §L.4.
-- [ ] `extract_cpf()` never implements the real Brazilian CPF check-digit
+- [x] `extract_cpf()` never implements the real Brazilian CPF check-digit
   algorithm — digit-count-only, matching the human's explicit "é uma
   simulação" instruction; a CPF that would fail real validation but has
   exactly 11 digits still passes here. `tasks.md` T091/T092,
   `acceptance.md` §M.1.
-- [ ] The raw CPF and the raw/parsed payment answer are never persisted
+- [x] The raw CPF and the raw/parsed payment answer are never persisted
   anywhere — not on `Conversation`, not in any audit payload, not in any
   new table. Only `booking_script_step` (an enum-like position marker,
   `CHECK`-constrained at the database level to its two legal values)
   persists. `tasks.md` T090/T095, `acceptance.md` §N.
-- [ ] No `scheduling.appointments`/`schedule_slots.status`/`identity.*`/
+- [x] No `scheduling.appointments`/`schedule_slots.status`/`identity.*`/
   `billing.*` write occurs anywhere in `booking_script/` — "Agendamento
-  realizado" is a sentence, never a real state transition.
-  `tasks.md` T093/T095, `acceptance.md` §N.3.
-- [ ] The script never starts for a conversation with no prior resolved
+  realizado" is a sentence, never a real state transition. Structurally
+  reinforced further than planned: those tables don't even exist in this
+  database (T008's schema-creation correction, `spec.md` §2), so a write
+  is not just absent but impossible. `tasks.md` T093/T095,
+  `acceptance.md` §N.3.
+- [x] The script never starts for a conversation with no prior resolved
   `appointment_availability` generation — the trigger cannot fire out of
   context. `tasks.md` T093/T095, `acceptance.md` §O.5.
-- [ ] Every autonomously-sent message carries both
+- [x] Every autonomously-sent message carries both
   `Message.autonomous_source = "booking_script"` and a
   `booking_script.autonomous_message_sent` audit event (payload excludes
   the message body, the raw CPF, and the raw payment reply) — either alone
   is a complete, queryable list of every message ever sent without an
   operator click. `tasks.md` T093/T097, `acceptance.md` §O.3.
+- [x] **New item, found during implementation (`analysis.md` §16 finding
+  1):** the pre-existing `messages_check` CHECK constraint required every
+  `OPERATOR` message to carry a non-null `operator_id` — widened by
+  migration `20260819_0004` with exactly one additional disjunct, gated
+  on `autonomous_source='booking_script'`. A `NULL` `operator_id` on an
+  `OPERATOR` message is therefore impossible at the database level for
+  any other reason — this is a second, independent structural enforcement
+  of the amendment's scope, not just the `autonomous_source` column
+  itself. `data-model.md` §8, `tasks.md` T093.

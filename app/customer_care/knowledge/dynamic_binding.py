@@ -36,6 +36,11 @@ class DynamicResolutionError(Exception):
 @dataclass(frozen=True)
 class DynamicResolution:
     pattern_text: str
+    # Populated only by scheduling/availability.py's NAMED_RESOLVERS entry
+    # (plan.md §7) — always None for this module's own generic
+    # qa_dynamic_bindings path.
+    specialty_slug: str | None = None
+    slot_count: int | None = None
 
 
 def resolve_dynamic_pattern(session: Session, qa: QAEntry) -> DynamicResolution:

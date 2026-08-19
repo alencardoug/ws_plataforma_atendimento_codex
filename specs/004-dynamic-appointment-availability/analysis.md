@@ -87,6 +87,29 @@ applicable in §6.
   deliberately left to implementation time**, not fixed here — the human
   explicitly prioritized evaluating against the real, working resolver over
   pre-deciding chunk wording (`spec.md` §5 resolution 3).
+- **(Superseded 2026-08-19 by §14 — the human corrected AA-9 to scope the
+  seed action to the generalist specialty specifically.) Found during
+  Phase 5 live verification, not a contradiction (`spec.md`
+  AA-9 item 2 explicitly chose this): the seed action's flat, not-
+  specialty-scoped count means which specialty actually receives the 4
+  seeded slots is an accident of `professional_id` ordering, not a
+  guarantee of coverage across all 4 specialties.** Concretely: because
+  `mastologia-oncologica`'s 3 professionals were seeded with the lowest
+  UUIDs (`30000000-...-0001/0002/0003`), `active_professional_specialty_pairs()`'s
+  `ORDER BY professional_id` always exhausts `TARGET_D1=1`/`TARGET_D7=3`
+  using only mastologia's professionals before any other specialty's
+  pair is ever tried — one click of "Garantir disponibilidade" will
+  essentially always seed mastologia only, never colorretal/segunda-opinião/
+  generalist, under the current fixed-UUID data. This is spec-compliant
+  (the human's own words: "a flat count, not scoped to any one
+  specialty/professional"), so not a defect to fix — but it does mean
+  Phase 7 (Q&A content cleanup, T070/T071) and Phase 10's acceptance
+  automation should verify their positive-path examples against whichever
+  specialty the seed action actually populated in that run, not assume
+  the generalist default (or any specific non-mastologia specialty) will
+  have live data — and should explicitly test at least one zero-match
+  abstain for an un-seeded specialty as the honest, spec-correct outcome,
+  not a bug to chase.
 
 ## 5. Verdict (first design, superseded — see §6)
 
@@ -201,14 +224,15 @@ it gets the same rigor as any other new-data decision in this codebase.
   params.specialty_slug)`, consistent with `specialty_slug` never being
   `None` after §5's change. No leftover conditional path that could
   silently reintroduce the old "search everything" behavior.
-- **The new migration (`data-model.md` §5) was checked against the exact
+- **The new migration (`data-model.md` §6, renumbered 2026-08-19 by the
+  schema-creation correction, §12 below) was checked against the exact
   UUID ranges the original seed file used** (`specialty_id` prefix
   `20000000-...`, `professional_id` prefix `30000000-...`) — the new rows
   continue those ranges (`...0004`, `...0010-0012`) rather than colliding
   with or duplicating an existing id.
 - **Pricing/duration for the new generalist consultation were checked
   against the other 3 specialties' seeded values** for internal
-  consistency (`data-model.md` §5's table) — deliberately priced and timed
+  consistency (`data-model.md` §6's table) — deliberately priced and timed
   lower than all 3 (R$600/45min vs. R$980-1450/60-90min), consistent with
   the human's own "consulta simples" framing, not an arbitrary number.
 - **`tasks.md`'s Phase 1 gained T009 (the migration) ahead of T010/T011**,
@@ -261,8 +285,8 @@ exception this design implements airtight, and does it leak."
   |---|---|
   | "fixed, human-authored template set... never LLM-composed" | `advance_booking_script()`'s every `send_scripted_message()` call site uses a literal string, interpolated only with this feature's own data (CPF format, seeded price) — no LLM/embedding provider is imported anywhere in `booking_script/` (§13) |
   | "does not extend to any other outbound message" | `send_scripted_message()` is called from exactly one place (`advance_booking_script()`), itself called from exactly one place (`send_customer_message()`); a dedicated structural test (T096) greps every other operator-message construction site in the codebase |
-  | "no real booking, payment, or identity persistence" | no new column holds a CPF or payment answer — only `booking_script_step`, an enum-like position marker (`data-model.md` §7); no `scheduling.appointments`/`schedule_slots.status` write anywhere in `booking_script/` (§13) |
-- **The `CHECK` constraints in the new migration** (`data-model.md` §7)
+  | "no real booking, payment, or identity persistence" | no new column holds a CPF or payment answer — only `booking_script_step`, an enum-like position marker (`data-model.md` §8, renumbered 2026-08-19); no `scheduling.appointments`/`schedule_slots.status` write anywhere in `booking_script/` (§13) |
+- **The `CHECK` constraints in the new migration** (`data-model.md` §8)
   were verified to enumerate the *only* legal values at the database
   level, not just in Python — so even a future bug in application code
   cannot write an unauthorized `booking_script_step`/`autonomous_source`
@@ -310,14 +334,14 @@ exception this design implements airtight, and does it leak."
   its own migration to widen that constraint — a good thing (forces
   deliberate schema review before the script can grow), but worth flagging
   so it isn't mistaken for an oversight if a future change trips it.
-- **The generalist specialty's price (`data-model.md` §5, R$600) is the
+- **The generalist specialty's price (`data-model.md` §6, R$600) is the
   number AA-10's script will actually display** for a "primeira consulta"
   booking — this is the first place in the feature where AA-3a's pricing
   choice has a second-order customer-facing effect beyond the availability
   answer itself; still a reasonable, deliberately-lower-than-the-others
   number, not a new concern, just newly load-bearing.
 
-## 11. Verdict (current)
+## 11. Verdict (fifth-round design, superseded — see §12-13)
 
 No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
 `tasks.md`, and `acceptance.md` as of this latest review; §2's finding and
@@ -332,3 +356,198 @@ flow. Given AA-10's exceptional nature, `tasks.md` Phase 10/T082 must
 re-run this containment review one more time against the *real*
 implementation before the feature can be declared DONE — a stronger bar
 than this package's other outcomes get.
+
+## 12. Revision review — sixth round: scheduling schema creation correction (2026-08-19)
+
+Found not during a human clarification round, but while executing the
+human's "sync com prod, then start Phase 1" instruction: applying the V3
+migration to Neon production succeeded, but a direct verification query
+(`SELECT count(*) FROM scheduling.specialties`) returned `relation
+"scheduling.specialties" does not exist`. Investigation showed the same is
+true of the local Docker Compose database — `docker-compose.yml` does not
+mount `db/init/` as Postgres `initdb.d` content, nothing in the repo
+references `db/init/001_schema.sql`/`002_seed_and_schedule.sql` outside
+`specs/`, and the V1 baseline Alembic migration
+(`20260810_0001_v1_baseline.py`) only creates `content`/`customer_service`.
+**Every prior version of `spec.md` §2, `plan.md` §3, and `data-model.md`
+that described the `scheduling` schema as "real," "already exists," or
+needing "no schema change" was wrong in every environment this project
+has, not just production** — D-024's "dormant" framing was accurate in
+spirit (the schema was always meant to stay inert until a feature like
+this one activated it) but the artifacts overstated *how* dormant: not
+created-and-unused, but never created at all.
+
+- **Repair:** `spec.md` §2 gained a correction bullet; `plan.md` §3 was
+  rewritten to describe two migrations instead of one; `data-model.md`
+  gained a new §5 (the schema-creation migration, ported faithfully from
+  `db/init/001_schema.sql`/`002_seed_and_schedule.sql` for only the
+  objects this feature uses) and renumbered its old §5-§8 to §6-§9;
+  `tasks.md` Phase 1 gained **T008** ahead of T009, with T009 now chained
+  after it; `acceptance.md` §0 now checks both migrations, including a
+  spot-check that T008 does *not* create `slot_offers`/
+  `ensure_demo_availability()`/`appointments`/`identity.*`/`billing.*`;
+  `checklists/security.md`/`traceability.md`/`requirements.md` gained
+  matching items.
+- **Scope check:** this is a mechanical/deployment-correctness repair, not
+  a new outcome or a change to any of AA-1 through AA-10 — the schema's
+  *shape* T008 creates is an unmodified port of what `001_schema.sql`/
+  `002_seed_and_schedule.sql` already specified (scoped down to exclude
+  the tables D-024 keeps dormant), not a redesign. No new human decision
+  was required; this does not touch Constitution Article III/VIII/IX, and
+  Amendment 1.1.0's scope (§10 above) is unaffected — T008 does not touch
+  `customer_service.conversations`/`messages` at all.
+- **Consistency re-check:** confirmed no other artifact in this package
+  still asserts the `scheduling` schema pre-exists — grepped for
+  "already exist"/"predates Alembic"/"no schema change" across
+  `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/`acceptance.md`/
+  `checklists/*.md` after the repair; every remaining hit is either this
+  section's own history (§3/§5, deliberately preserved as a record of what
+  was believed before this correction, per this document's own convention
+  of appending rather than rewriting past sections) or refers to a
+  genuinely unrelated already-existing column (`content.qa_entries.dynamic_resolver`,
+  `spec.md` §2's first bullet, correctly unaffected by this finding).
+
+## 13. Verdict (sixth-round design, superseded — see §14-15)
+
+No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
+`tasks.md`, and `acceptance.md` as of this latest review; §2's finding,
+§6's/§8's/§10's re-checks/fixes, and §12's schema-creation correction are
+all repaired in place before Phase 1 implementation began (T008 had not
+yet been executed at the time of this review — the repair is to the
+artifacts, ahead of the code). Every bound Constitution Amendment 1.1.0
+state still has a specific, checked enforcement mechanism (§10's table),
+untouched by §12's correction. `checklists/requirements.md`'s final item
+("cross-artifact analysis reports no material contradiction") is satisfied
+by this document. This feature is ready to proceed with `tasks.md` Phase 1
+implementation, starting with T008. Given AA-10's exceptional nature,
+`tasks.md` Phase 10/T082 must still re-run the containment review one more
+time against the *real* implementation before the feature can be declared
+DONE — a stronger bar than this package's other outcomes get.
+
+## 14. Revision review — seventh round: AA-9 scoped to the generalist specialty (2026-08-19)
+
+Human instruction, given after Phase 5 was already done and Phase 4's own
+live verification had already surfaced the mastologia-only consequence as
+a residual risk (§4's now-superseded bullet): "faça este botão ir para a
+oncologia geral." Unlike §12's finding, this one *is* a human decision
+about product behavior, not a factual correction of a wrong claim — AA-9's
+original "flat count, not scoped to any specialty" was accurate to what
+the code did and was a deliberate choice at the time; the human has now
+chosen differently, informed by seeing the real consequence.
+
+- **Repair:** `spec.md` AA-9 items 2 and 4 rewritten to require
+  specialty-scoping to `oncologia-geral`; `plan.md` §4b gained a
+  correction note ahead of the algorithm; `scheduling/seeding.py`'s
+  `count_available_on()`/`active_professional_specialty_pairs()`/
+  `create_slots_on()` all gained a `specialty_id` parameter, and a new
+  `_generalist_specialty_id()` resolves it once per call in
+  `ensure_seed_availability()`; `acceptance.md` §D/§E updated; §4's
+  residual-risk bullet marked superseded rather than deleted.
+- **Import direction check:** `seeding.py` now imports `GENERALIST_SLUG`
+  from `availability.py` to avoid duplicating the slug string. This is the
+  *reverse* of the one direction this package structurally forbids
+  (`availability.py` must never import `seeding.py`, verified by T031's
+  structural test) — confirmed `availability.py` still imports nothing
+  from `seeding.py` after this change; the forbidden direction remains
+  forbidden and untouched.
+- **Test repair:** `test_appointment_seeding.py`'s
+  `test_deactivated_professional_never_receives_a_generated_slot` was
+  deactivating a *mastologia* professional (`...0001`) — meaningless
+  now that the seed action never considers non-generalist professionals
+  at all. Repointed to one of the generalist specialty's own 3
+  professionals (`...0010`). All `count_available_on()` call sites across
+  the test file updated to pass the generalist `specialty_id` explicitly.
+  Live-verified after the fix: all 4 seeded slots land on
+  `oncologia-geral` (previously `mastologia-oncologica`), and a real
+  no-keyword customer query now resolves against real generalist data
+  end-to-end (`"Oncologia geral (triagem) — Dr. Eduardo Vasconcelos
+  (simulação)..."`) instead of silently zero-matching against a specialty
+  the button never populates.
+- **Scope check:** touches only AA-9's own seed-action scoping — does not
+  change AA-1 through AA-8, does not touch Constitution Article III/VIII/IX,
+  and does not affect Amendment 1.1.0's booking-script exception (§10's
+  table remains unaffected — AA-10 reads whichever specialty a prior
+  resolved `appointment_availability` generation was about, not a fixed
+  one, so it already handles either mastologia or generalist data
+  correctly without change).
+
+## 15. Verdict (eighth-round design, superseded — see §16-17)
+
+No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
+`tasks.md`, and `acceptance.md` as of this latest review; §2's finding,
+§6's/§8's/§10's re-checks/fixes, §12's schema-creation correction, and
+§14's AA-9 generalist-scoping correction are all repaired in place and
+verified against the real implementation (unlike §12, this one *was*
+implemented and live-verified as part of this same review — `tasks.md`
+Phase 4's evidence updated accordingly). Every bound Constitution
+Amendment 1.1.0 state still has a specific, checked enforcement mechanism
+(§10's table), unaffected by §14. `checklists/requirements.md`'s final
+item is satisfied by this document. Phases 1-5 remain DONE with corrected,
+re-verified evidence; Phase 6 (the operator-workspace button) is next.
+
+## 16. Revision review — Phase 9 implementation: two findings in the amendment's own mechanism (2026-08-19)
+
+Both found while actually implementing `send_scripted_message()`, not
+during artifact review — the kind of gap only implementing the exact
+authorized behavior surfaces. Given extra scrutiny per `plan.md` §8b/§13's
+own emphasis, both are recorded here in full rather than only in
+`tasks.md`.
+
+- **Finding 1 — the exception was structurally impossible without a
+  schema change.** `customer_service.messages`' V1-baseline `messages_check`
+  constraint required every `OPERATOR`-authored row to carry a non-null
+  `operator_id`. `send_scripted_message()` has no operator in its call
+  context by design (that is the entire point of the amendment) — its
+  first real insert attempt failed the constraint outright. This was not
+  caught by any prior artifact review because every review to this point
+  reasoned about the *application-level* call graph (who calls what,
+  which dependency gates which path) and never checked the *database's
+  own* pre-existing invariants for a conflict with the newly-authorized
+  behavior.
+  - **Repair:** migration `20260819_0004` adds exactly one disjunct to the
+    constraint: `author_type='OPERATOR' AND operator_id IS NULL AND
+    autonomous_source='booking_script'`. This is not a loosening for its
+    own sake — it is drawn as narrowly as the amendment itself, reusing
+    the same `autonomous_source` column (`CHECK`-constrained to its one
+    legal value) as the gate. `data-model.md` §8 updated;
+    `checklists/security.md`'s AA-10 item group still holds — this
+    strengthens it (a `NULL` `operator_id` on an `OPERATOR` message is now
+    *only* reachable when `autonomous_source='booking_script'`, at the
+    database level).
+- **Finding 2 — same-transaction messages could display out of order.**
+  Postgres's `now()` (the `created_at` column's server default) is fixed
+  for the entire transaction, not per-statement. `advance_booking_script()`
+  sends 2-3 messages per call, all in one transaction (by design — no
+  debounce, `plan.md` §8b "Trigger"), so they would all receive an
+  *identical* `created_at`. The real customer-facing message ordering
+  (`conversations/projections.py`: `ORDER BY created_at, id`) then
+  tie-breaks on `id`, a random UUID — meaning, e.g., "Informe seu CPF..."
+  could have displayed to the customer *before* "Agendamento realizado."
+  Surfaced by `test_booking_script_flow.py`'s own
+  `test_second_booking_intent_after_completed_flow_starts_fresh` failing
+  under full-suite execution (timing-sensitive) while passing in
+  isolation — a genuine flake, not a test bug, traced to its root cause
+  rather than papered over with a retry.
+  - **Repair:** `send_scripted_message()` now sets `created_at` from
+    Python's wall clock (`datetime.now(UTC)`) explicitly, rather than
+    relying on the column's server default. Each call already does a real
+    `session.flush()` (a DB round-trip) before the next, so consecutive
+    calls are guaranteed measurably distinct in practice. Verified stable
+    across 3 consecutive full-suite runs after the fix.
+  - **Scope check:** this is scoped to `send_scripted_message()`'s own
+    inserts only — the shared `Message` model's `server_default=now()`
+    behavior is unchanged for every other (V1/V2/V3) code path, all of
+    which only ever create one message per transaction and were never at
+    risk of this collision.
+
+## 17. Verdict (current)
+
+No unresolved contradiction between `spec.md`, `plan.md`, `data-model.md`,
+`tasks.md`, and `acceptance.md` as of this latest review. Both §16
+findings are implementation-mechanics corrections, not scope or outcome
+changes — they do not touch AA-1 through AA-9, and Amendment 1.1.0's
+bound-by-bound enforcement table (§10) is strengthened, not weakened, by
+Finding 1. `tasks.md` Phase 9 (T093-T098) is DONE with full evidence,
+including both findings. Phases 1-9 are now DONE; Phase 10 (acceptance
+automation) remains, per this package's own Handoff note, for a fresh
+session to pick up.

@@ -11,16 +11,27 @@ the booking script (AA-10, §L-O) — the one section group in this document
 that verifies an exception to Constitution Article III rather than an
 ordinary feature behavior.
 
-## 0. Environment [AA-3a]
+## 0. Environment [correction, AA-3a]
 
-1. The new migration (`data-model.md` §5) applies cleanly on top of the
-   V1/V2/V3-migrated database, purely additive (new reference rows in
-   already-existing tables, no schema change).
-2. After applying, `scheduling.specialties` has exactly 4 rows (the
+1. T008's schema-creation migration (`data-model.md` §5) applies cleanly
+   on top of the V1/V2/V3-migrated database, which has **no** pre-existing
+   `scheduling` schema (verified against both local and production before
+   this feature's implementation — `db/init/001_schema.sql`/
+   `002_seed_and_schedule.sql` were never wired into any automated init
+   path). Creates the schema, its tables/enum/function, and the original 3
+   specialties/9 professionals/holidays seed data.
+2. T009's generalist-specialty migration (`data-model.md` §6) applies
+   cleanly immediately after T008, purely additive (new reference rows in
+   the tables T008 just created, no schema change).
+3. After applying both, `scheduling.specialties` has exactly 4 rows (the
    original 3 plus `oncologia-geral`), and its 3 new professionals'
    `professional_specialties` rows carry the specified price/duration.
-3. Existing V1/V2/V3 data/rows are unaffected — spot-check row counts for
-   the 3 original specialties/9 original professionals before/after.
+4. Neither migration creates `slot_offers`, `available_offers`,
+   `ensure_demo_availability()`, `appointments`, `appointment_events`, or
+   any `identity.*`/`billing.*`/`governance.*` object — spot-check these
+   remain absent after both migrations apply.
+5. Existing V1/V2/V3 data/rows (`content.*`, `customer_service.*`) are
+   unaffected — spot-check row counts before/after.
 
 ## A. Deterministic, real-data answer [AA-4, AA-5, outcome 1]
 
@@ -59,16 +70,27 @@ ordinary feature behavior.
    before/after — the query path cannot ever be the cause of a new row,
    even indirectly.
 
-## D. Seed action: idempotent D+1/D+7 target [AA-9, outcome 5]
+## D. Seed action: idempotent D+1/D+7 target, scoped to the generalist specialty [AA-9, outcome 5]
 
-1. Starting from zero seeded slots on the computed `d1`/`d7` dates, one call
-   to the seed endpoint creates exactly 1 slot on `d1` and 3 on `d7`, all
-   within 08:00-18:00 `America/Sao_Paulo`, and reports the created counts.
+**Correction (2026-08-19, human decision: "faça este botão ir para a
+oncologia geral"):** every count/creation below is scoped to the
+generalist specialty (`oncologia-geral`, AA-3a) specifically — both the
+"already sufficient" check and any created slots. Originally flat across
+all 4 specialties; live verification showed that always seeded
+`mastologia-oncologica` only (lowest professional UUIDs), never the
+generalist specialty most customer queries actually fall back to.
+
+1. Starting from zero seeded **generalist-specialty** slots on the
+   computed `d1`/`d7` dates, one call to the seed endpoint creates exactly
+   1 slot on `d1` and 3 on `d7`, all within 08:00-18:00
+   `America/Sao_Paulo` and all tied to the `oncologia-geral` specialty and
+   one of its 3 seeded professionals, and reports the created counts.
 2. A second immediate call makes zero further writes and reports exactly
    "Já tem 4 vagas disponíveis." (the literal message the human specified).
-3. A partial state (e.g. `d1` already has 1, `d7` has only 1 of 3) results
-   in creating exactly the 2 missing `d7` slots and none on `d1`, and the
-   reported message reflects only what was actually created.
+3. A partial state (e.g. `d1` already has 1, `d7` has only 1 of 3,
+   counting only generalist-specialty slots) results in creating exactly
+   the 2 missing `d7` slots and none on `d1`, and the reported message
+   reflects only what was actually created.
 4. Two concurrent calls never together exceed the 1×D+1/3×D+7 target
    (`data-model.md` §4) — verified by issuing them concurrently in a test
    and asserting the final count is exactly at target, not over.
@@ -81,8 +103,10 @@ ordinary feature behavior.
 2. Every slot the seed action creates has `starts_at` between 08:00 and
    18:00 `America/Sao_Paulo` inclusive of the start, exclusive of 18:00
    itself as a start time — never outside that window.
-3. A deactivated professional (`active = false`) never receives a
-   generated slot (`analysis.md` finding 1).
+3. A deactivated generalist-specialty professional (`active = false`)
+   never receives a generated slot (`analysis.md` finding 1; scope
+   corrected 2026-08-19 to the generalist specialty's own 3 professionals,
+   since those are the only candidates the seed action considers now).
 
 ## F. Zero-match abstain [AA-8, outcome 6]
 

@@ -26,6 +26,10 @@ interface Message {
   // the draft that produced it (an "edit"), pre-filling the "transformar em
   // Q&A" flow.
   qa_transform?: { question: string; answer: string; category_slug: string | null } | null;
+  // AA-10: set only on the booking script's own autonomous sends —
+  // Constitution Amendment 1.1.0's one exception, surfaced here purely as
+  // an operator transparency cue, not required by any acceptance outcome.
+  autonomous_source?: "booking_script" | null;
 }
 
 interface CustomerConversation {
@@ -328,6 +332,9 @@ export function OperatorPage() {
   const [confirmingClose, setConfirmingClose] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState<number | null>(null);
+  // AA-9: a global ops action, not tied to any conversation — its status
+  // line lives in the queue sidebar regardless of what's selected.
+  const [availabilityMessage, setAvailabilityMessage] = useState("");
 
   const load = useCallback(async () => {
     setItems(await api<ConversationSummary[]>("/operator/conversations?scope=all", {}, token));
@@ -425,6 +432,11 @@ export function OperatorPage() {
     await api<OperatorConversation>(`/operator/conversations/${conversationId}/claim`, { method: "POST" }, token);
     await load();
     await open(conversationId);
+  };
+  // AA-9: not conversation-scoped — usable with no conversation selected.
+  const ensureAvailability = async () => {
+    const data = await api<{ created_d1: number; created_d7: number; already_sufficient: boolean; message: string }>("/operator/scheduling/ensure-availability", { method: "POST" }, token);
+    setAvailabilityMessage(data.message);
   };
   // V3-1: reachable from any message in the rendered history, not only the
   // latest draft. Idempotent server-side; the local Set only drives this
@@ -551,6 +563,8 @@ export function OperatorPage() {
         <StatusBadge status={conversation.status} />{" "}
         <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>
       </button>)}
+      <button type="button" className="btn-ghost" onClick={() => void ensureAvailability().catch((caught) => setError(errorMessage(caught)))}>Garantir disponibilidade (D+1/D+7)</button>
+      {availabilityMessage && <p role="status" aria-live="polite">{availabilityMessage}</p>}
     </aside>
     <section className="card">
       {selected ? <>
@@ -564,6 +578,7 @@ export function OperatorPage() {
             <label className="message-select">
               <input type="checkbox" checked={selectedMessageIds.has(message.id)} onChange={() => toggleMessageSelection(message.id)} aria-label={`Incluir mensagem de ${message.author_type === "CUSTOMER" ? "cliente" : "operador"} no contexto`} />
               <span className="message-author">{message.author_type === "CUSTOMER" ? "Cliente" : "Operador"}</span>
+              {message.autonomous_source === "booking_script" && <span className="badge" title="Enviada automaticamente pelo fluxo de agendamento simulado, sem clique do operador">automático</span>}
             </label>
             <MessageBody body={message.body} />
             {message.source_generation_id && <div className="message-taxonomy-actions">

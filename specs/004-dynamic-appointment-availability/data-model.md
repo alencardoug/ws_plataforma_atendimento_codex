@@ -1,21 +1,27 @@
 # Data Model: Dynamic Appointment Availability
 
-The `scheduling` schema's existing tables need no shape change — every
-table AA-1..AA-9 read or write already exists (`db/init/001_schema.sql`,
-applied before Alembic history began, preserved as-is per V1 `plan.md`
-§1). **Two new migrations are needed**, from two different clarification
-rounds: §5's data-only one (seeding the new generalist specialty, AA-3a —
-the same kind of reference data `db/init/002_seed_and_schedule.sql`
-already contains for the original 3 specialties, just added the correct
-way since that file stays frozen) and §7's real schema one (two additive,
+**Correction (2026-08-19):** an earlier version of this document claimed
+the `scheduling` schema's tables "already exist" (`db/init/001_schema.sql`,
+"applied before Alembic history began"). Verified false against both the
+local Docker Compose database and Neon production — neither file is
+mounted as `initdb.d` content, referenced by any script, or ported into an
+Alembic migration; `scheduling.specialties` exists in neither database.
+`spec.md` §2 and `plan.md` §3 now record this correctly. **Three new
+migrations are needed**, from three different rounds: §5's schema one
+(creating the `scheduling` schema itself, scoped to what this feature
+uses, plus the original 3 specialties' seed data — new, this correction),
+§6's data-only one (seeding the new generalist specialty, AA-3a — the same
+kind of reference data `db/init/002_seed_and_schedule.sql` already defines
+for the original 3 specialties, just applied the correct way since that
+file is wired into nothing), and §8's real schema one (two additive,
 nullable columns supporting AA-10's booking script). This document records
-the new SQLAlchemy ORM mappings this feature adds, both migrations, and
-confirms nothing else about the existing schema's shape changes.
+the new SQLAlchemy ORM mappings this feature adds, all three migrations,
+and confirms nothing else about the schema's shape changes.
 
 ## 1. New ORM mappings (`app/customer_care/scheduling/models.py`)
 
-All map to columns that already exist; none of these classes trigger a
-migration.
+All map to columns §5's new migration creates; none of these classes
+trigger a migration of their own.
 
 | Class | Table | Columns mapped | Notes |
 |---|---|---|---|
@@ -82,23 +88,208 @@ ordinary, already-audited (`knowledge.qa_created`/`knowledge.qa_updated`/
   enforced by the existing schema — this feature's insert can never create
   an orphaned slot.
 - `ensure_seed_availability()` (`plan.md` §4b) is safe to call concurrently
-  from two simultaneous button clicks: the `UNIQUE (professional_id,
-  starts_at)` constraint plus `ON CONFLICT DO NOTHING` makes the operation
-  naturally idempotent under races, not just under sequential
-  re-invocation — worst case, two concurrent calls both see the same
-  "missing" count and both attempt to insert the same candidate slots, but
-  only one of each insert actually lands, and neither ever exceeds the
-  1×D+1/3×D+7 target because both re-count from the database's actual
-  post-commit state on their next call, not from an in-memory guess.
+  from two simultaneous button clicks. **Correction (found during Phase 4
+  implementation, T040):** the original text here claimed `UNIQUE
+  (professional_id, starts_at)` plus `ON CONFLICT DO NOTHING` alone made
+  this safe under races. That is false for two calls that are genuinely
+  concurrent (not merely sequential-but-close): if both read the same
+  stale "missing" count before either commits, a collision on their first
+  candidate slot only stops *that one* candidate from double-inserting —
+  each caller's loop simply moves on to try the *next* candidate, and both
+  can succeed on different slots, together exceeding the target. Fixed by
+  a transaction-scoped `pg_advisory_xact_lock` at the start of
+  `ensure_seed_availability()` (`scheduling/seeding.py`): the second
+  concurrent caller now blocks until the first's whole transaction
+  commits, then correctly re-counts against real post-commit state before
+  deciding what (if anything) to create. Verified by
+  `test_appointment_seeding.py`'s dedicated concurrency test (real
+  threads, `threading.Barrier`-synchronized). No new infrastructure —
+  advisory locks are a built-in Postgres primitive (Article VIII).
 - No cascade behavior changes: this feature adds no FK pointing *at* any
   table another module owns, so no existing cascade-delete/deactivate path
   is affected.
 
-## 5. New migration: the generalist specialty (AA-3a)
+## 5. New migration: create the `scheduling` schema (correction, prerequisite for AA-2/AA-3a/AA-9)
 
-Data-only — no `CREATE TABLE`/`ALTER TABLE`, only `INSERT`s into tables
-that already exist, following exactly the same shape
+A real schema migration — not, as an earlier version of this document
+claimed, something that "already exists." Ports `db/init/001_schema.sql`'s
+shape for exactly the objects this feature uses, plus
+`002_seed_and_schedule.sql`'s original seed data (units, the 3
+diagnosis-specific specialties, 9 professionals, `professional_specialties`,
+holidays) — both files verbatim for the parts this feature needs, neither
+file wired into any automated init path (the correction, `spec.md` §2).
+Deliberately excludes `slot_offers`, `available_offers`,
+`ensure_demo_availability()`, `appointments`, `appointment_events`, and
+every `identity.*`/`billing.*`/`governance.*` object — those stay exactly
+as unactivated as before (D-024, `spec.md` §6); nothing in this feature
+needs them to exist. Forward-only, `downgrade()` raises, matching this
+codebase's convention. Uses `CREATE TABLE IF NOT EXISTS` (matching the V1
+baseline migration's own defensive style) and bare `ON CONFLICT DO
+NOTHING` on every seed `INSERT` (matching `002_seed_and_schedule.sql`'s
+own style) so the migration is safe to design once and apply to any
+environment, even though today neither local nor production actually has
+any pre-existing row to conflict with.
+
+```sql
+CREATE SCHEMA IF NOT EXISTS scheduling;
+
+CREATE TYPE scheduling.slot_status AS ENUM ('available', 'held', 'booked', 'blocked');
+
+CREATE TABLE IF NOT EXISTS scheduling.units (
+    unit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    timezone text NOT NULL DEFAULT 'America/Sao_Paulo',
+    simulated boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS scheduling.specialties (
+    specialty_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug text NOT NULL UNIQUE,
+    display_name text NOT NULL,
+    description text NOT NULL,
+    simulated boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS scheduling.professionals (
+    professional_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    display_name text NOT NULL,
+    registration_display text,
+    simulated boolean NOT NULL DEFAULT true,
+    active boolean NOT NULL DEFAULT true
+);
+
+CREATE TABLE IF NOT EXISTS scheduling.professional_specialties (
+    professional_id uuid NOT NULL REFERENCES scheduling.professionals(professional_id),
+    specialty_id uuid NOT NULL REFERENCES scheduling.specialties(specialty_id),
+    fixed_price_cents integer NOT NULL CHECK (fixed_price_cents >= 0),
+    appointment_duration_minutes integer NOT NULL DEFAULT 60 CHECK (appointment_duration_minutes > 0),
+    PRIMARY KEY (professional_id, specialty_id)
+);
+
+CREATE TABLE IF NOT EXISTS scheduling.holidays (
+    holiday_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    holiday_date date NOT NULL,
+    name text NOT NULL,
+    scope text NOT NULL CHECK (scope IN ('national','state','municipal','institutional')),
+    state_code char(2),
+    city_code text,
+    unit_id uuid REFERENCES scheduling.units(unit_id),
+    is_business_day boolean NOT NULL DEFAULT false,
+    simulated boolean NOT NULL DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS holidays_natural_key_idx ON scheduling.holidays (
+    holiday_date, scope, coalesce(state_code,''), coalesce(city_code,''), coalesce(unit_id::text,'')
+);
+
+CREATE TABLE IF NOT EXISTS scheduling.schedule_slots (
+    slot_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    unit_id uuid NOT NULL REFERENCES scheduling.units(unit_id),
+    specialty_id uuid NOT NULL REFERENCES scheduling.specialties(specialty_id),
+    professional_id uuid NOT NULL REFERENCES scheduling.professionals(professional_id),
+    starts_at timestamptz NOT NULL,
+    ends_at timestamptz NOT NULL,
+    status scheduling.slot_status NOT NULL DEFAULT 'available',
+    simulated boolean NOT NULL DEFAULT true,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (ends_at > starts_at),
+    UNIQUE (professional_id, starts_at)
+);
+
+CREATE OR REPLACE FUNCTION scheduling.next_business_day(p_date date)
+RETURNS date
+LANGUAGE plpgsql
+STABLE
+AS $func$
+DECLARE
+    v_date date := p_date;
+BEGIN
+    LOOP
+        IF extract(isodow FROM v_date) <> 7
+           AND NOT EXISTS (
+               SELECT 1 FROM scheduling.holidays h
+               WHERE h.holiday_date = v_date AND NOT h.is_business_day
+           ) THEN
+            RETURN v_date;
+        END IF;
+        v_date := v_date + 1;
+    END LOOP;
+END;
+$func$;
+
+INSERT INTO scheduling.units (unit_id, name)
+VALUES ('10000000-0000-0000-0000-000000000001', 'Unidade Central (simulação)')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO scheduling.specialties (specialty_id, slug, display_name, description) VALUES
+('20000000-0000-0000-0000-000000000001', 'mastologia-oncologica', 'Mastologia oncológica', 'Primeira consulta para suspeita ou diagnóstico de câncer de mama (simulação)'),
+('20000000-0000-0000-0000-000000000002', 'cirurgia-colorretal', 'Cirurgia colorretal oncológica', 'Primeira consulta para suspeita ou diagnóstico colorretal (simulação)'),
+('20000000-0000-0000-0000-000000000003', 'segunda-opiniao', 'Segunda opinião oncológica', 'Revisão de diagnóstico, exames e proposta terapêutica (simulação)')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO scheduling.professionals (professional_id, display_name, registration_display) VALUES
+('30000000-0000-0000-0000-000000000001', 'Dra. Helena Martins (simulação)', 'CRM-SP 000001 (simulação)'),
+('30000000-0000-0000-0000-000000000002', 'Dra. Marina Lopes (simulação)', 'CRM-SP 000002 (simulação)'),
+('30000000-0000-0000-0000-000000000003', 'Dra. Beatriz Nogueira (simulação)', 'CRM-SP 000003 (simulação)'),
+('30000000-0000-0000-0000-000000000004', 'Dr. Rafael Almeida (simulação)', 'CRM-SP 000004 (simulação)'),
+('30000000-0000-0000-0000-000000000005', 'Dr. Gustavo Mendes (simulação)', 'CRM-SP 000005 (simulação)'),
+('30000000-0000-0000-0000-000000000006', 'Dra. Lívia Rocha (simulação)', 'CRM-SP 000006 (simulação)'),
+('30000000-0000-0000-0000-000000000007', 'Dra. Camila Torres (simulação)', 'CRM-SP 000007 (simulação)'),
+('30000000-0000-0000-0000-000000000008', 'Dr. André Ferreira (simulação)', 'CRM-SP 000008 (simulação)'),
+('30000000-0000-0000-0000-000000000009', 'Dra. Paula Azevedo (simulação)', 'CRM-SP 000009 (simulação)')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO scheduling.professional_specialties
+    (professional_id, specialty_id, fixed_price_cents, appointment_duration_minutes)
+VALUES
+('30000000-0000-0000-0000-000000000001','20000000-0000-0000-0000-000000000001',98000,60),
+('30000000-0000-0000-0000-000000000002','20000000-0000-0000-0000-000000000001',98000,60),
+('30000000-0000-0000-0000-000000000003','20000000-0000-0000-0000-000000000001',98000,60),
+('30000000-0000-0000-0000-000000000004','20000000-0000-0000-0000-000000000002',105000,60),
+('30000000-0000-0000-0000-000000000005','20000000-0000-0000-0000-000000000002',105000,60),
+('30000000-0000-0000-0000-000000000006','20000000-0000-0000-0000-000000000002',105000,60),
+('30000000-0000-0000-0000-000000000007','20000000-0000-0000-0000-000000000003',145000,90),
+('30000000-0000-0000-0000-000000000008','20000000-0000-0000-0000-000000000003',145000,90),
+('30000000-0000-0000-0000-000000000009','20000000-0000-0000-0000-000000000003',145000,90)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO scheduling.holidays (holiday_date, name, scope, state_code, city_code) VALUES
+('2026-01-01','Confraternização Universal','national',NULL,NULL),
+('2026-04-03','Paixão de Cristo','national',NULL,NULL),
+('2026-04-21','Tiradentes','national',NULL,NULL),
+('2026-05-01','Dia Mundial do Trabalho','national',NULL,NULL),
+('2026-09-07','Independência do Brasil','national',NULL,NULL),
+('2026-10-12','Nossa Senhora Aparecida','national',NULL,NULL),
+('2026-11-02','Finados','national',NULL,NULL),
+('2026-11-15','Proclamação da República','national',NULL,NULL),
+('2026-11-20','Dia Nacional de Zumbi e da Consciência Negra','national',NULL,NULL),
+('2026-12-25','Natal','national',NULL,NULL),
+('2026-01-25','Aniversário de São Paulo','municipal','SP','SAO_PAULO'),
+('2026-07-09','Revolução Constitucionalista','state','SP',NULL),
+('2027-01-01','Confraternização Universal','national',NULL,NULL),
+('2027-04-21','Tiradentes','national',NULL,NULL),
+('2027-05-01','Dia Mundial do Trabalho','national',NULL,NULL),
+('2027-09-07','Independência do Brasil','national',NULL,NULL),
+('2027-10-12','Nossa Senhora Aparecida','national',NULL,NULL),
+('2027-11-02','Finados','national',NULL,NULL),
+('2027-11-15','Proclamação da República','national',NULL,NULL),
+('2027-11-20','Dia Nacional de Zumbi e da Consciência Negra','national',NULL,NULL),
+('2027-12-25','Natal','national',NULL,NULL)
+ON CONFLICT DO NOTHING;
+```
+
+Idempotent by construction: `CREATE ... IF NOT EXISTS`/bare `ON CONFLICT DO
+NOTHING` throughout, matching this codebase's established convention for a
+migration that must apply cleanly regardless of environment history.
+`pgcrypto` (for `gen_random_uuid()`) is already installed by the V1
+baseline migration — no new extension needed.
+
+## 6. New migration: the generalist specialty (AA-3a)
+
+Data-only — no `CREATE TABLE`/`ALTER TABLE`, only `INSERT`s into the
+tables §5's migration just created, following exactly the same shape
 `002_seed_and_schedule.sql` already used for the original 3 specialties.
+Depends on §5's migration having already run (chained `down_revision`).
 Forward-only (matching every other migration in this codebase's
 convention); `downgrade()` raises, same as V3's category migration.
 
@@ -130,7 +321,7 @@ Idempotent by construction for a migration (`INSERT` with fixed UUIDs, run
 exactly once by Alembic's own bookkeeping — no `ON CONFLICT` needed here,
 unlike the runtime seed action's repeatable insert in §2).
 
-## 6. New audit event (AA-9)
+## 7. New audit event (AA-9)
 
 `scheduling.availability_seeded` (`customer_service.audit_events`, no
 schema change — the existing generic audit-event table, same as every
@@ -138,11 +329,12 @@ other event type). Payload: `operator_id`, `created_d1`, `created_d7`,
 `already_sufficient`. Emitted by `scheduling/router.py`'s one endpoint,
 never by the query path.
 
-## 7. New migration: booking-script columns (AA-10)
+## 8. New migration: booking-script columns (AA-10)
 
-A real schema change — the first (and only) one this feature makes beyond
-AA-3a's data-only migration. Forward-only, `downgrade()` raises, matching
-this codebase's convention.
+A real schema change — additive columns on already-Alembic-tracked tables
+(`customer_service.conversations`/`messages`, created by the V1 baseline
+migration, unaffected by the §5/§6 correction above). Forward-only,
+`downgrade()` raises, matching this codebase's convention.
 
 ```sql
 ALTER TABLE customer_service.conversations
@@ -174,12 +366,24 @@ ALTER TABLE customer_service.messages
   frontend's optional "automático" badge (`tasks.md`) would key off, and
   the field `acceptance.md`'s containment tests query directly.
 
+**Correction, found during Phase 9 implementation (T093):** the V1
+baseline's own `messages_check` constraint — `(author_type='CUSTOMER' AND
+operator_id IS NULL) OR (author_type='OPERATOR' AND operator_id IS NOT
+NULL)` — rejects `send_scripted_message()`'s insert outright, since that
+call has no operator in context by design and therefore cannot supply
+`operator_id`. A second migration (`20260819_0004`) narrowly widens this
+constraint with exactly one more disjunct: `author_type='OPERATOR' AND
+operator_id IS NULL AND autonomous_source='booking_script'`. This is
+itself a structural enforcement of the amendment's narrow scope — an
+`OPERATOR`-authored message can have a `NULL` `operator_id` for
+*no other reason*, at the database level, not just in application code.
+
 Both columns are additive and nullable — no backfill needed, no existing
 row's meaning changes, unrelated to AA-3a's migration (kept as two
 separate migrations, `plan.md` §12, since they address unrelated concerns
 authorized in different clarification rounds).
 
-## 8. New audit event (AA-10)
+## 9. New audit event (AA-10)
 
 `booking_script.autonomous_message_sent` (`customer_service.audit_events`,
 no schema change). Payload: `conversation_id`, `message_id`, `step` (the

@@ -78,28 +78,51 @@ a schema change) rather than only reading what already existed.
   mechanism, `knowledge/dynamic_binding.py`). No `qa_dynamic_bindings` row
   exists for any `agenda` entry, so they all abstain
   (`DYNAMIC_DATA_UNAVAILABLE`) today — correctly, per D-028.
-- The `scheduling` schema is real and seeded: `units`, `specialties`,
-  `professionals`, `professional_specialties` (carries
-  `fixed_price_cents`/`appointment_duration_minutes` per
+- **Correction (2026-08-19, discovered during the post-V3 production sync,
+  before Phase 1 implementation began):** the bullets below describe
+  `db/init/001_schema.sql`/`002_seed_and_schedule.sql` — SQL files that
+  define the `scheduling` schema in full, including the original 3
+  specialties' seed data — as if that schema were live. It is not, and
+  never has been: it is not mounted as Postgres `initdb.d` content in
+  `docker-compose.yml`, it is referenced nowhere outside this package's own
+  `specs/`, and it was never ported into an Alembic migration (the V1
+  baseline migration only created `content`/`customer_service`, D-024's
+  "dormant" framing undersold this — the schema is dormant as in *never
+  activated*, not dormant as in *created once and then unused*). Direct
+  `psql`/`SELECT` checks against both the local Docker Compose database and
+  the Neon production database confirm `scheduling.specialties` does not
+  exist in either. `db/init/001_schema.sql`/`002_seed_and_schedule.sql`
+  remain accurate as a **reference for the shape and original seed values**
+  this feature should create — every bullet below should be read as "this
+  is what those files define," not "this is what the database already
+  has." Phase 1 of this cycle's `tasks.md` must therefore create the
+  `scheduling` schema itself (the subset this feature actually uses) via a
+  new Alembic migration before seeding the generalist specialty, not just
+  add to an assumed-existing schema (`plan.md` §3, `data-model.md` §5,
+  revised).
+- The `scheduling` schema, once created per the correction above, gives
+  `units`, `specialties`, `professionals`, `professional_specialties`
+  (carries `fixed_price_cents`/`appointment_duration_minutes` per
   professional×specialty), `holidays`, `schedule_slots` (real
   `starts_at`/`ends_at timestamptz`, already `America/Sao_Paulo`-aware, with
   a `status` — `available`/etc.), and `scheduling.next_business_day(date)`
   (a real, reusable Saturday-is-a-business-day / Sunday-and-holiday-aware
   function). This feature's resolver builds on these directly.
 - `scheduling.slot_offers`/`scheduling.available_offers`/
-  `scheduling.ensure_demo_availability()` are the *existing* D+1/D+7-window
-  materialization machinery — kept in the schema (harmless, unused) but this
-  feature's query path does not depend on them (§5 resolution 2): they are
-  only ever seeded once at container-init time and go stale. This feature's
-  own D+1/D+7 seeding action (AA-9) reimplements the same windowing
-  *concept* in Python as an explicit, idempotent, operator-triggered
-  action — it does not call `ensure_demo_availability()` or write to
-  `slot_offers` (those stay exactly as unused/dormant as before); it writes
-  directly to `schedule_slots`, the same table the query path reads.
+  `scheduling.ensure_demo_availability()` are the D+1/D+7-window
+  materialization machinery `001_schema.sql`/`002_seed_and_schedule.sql`
+  also define — this feature's Phase 1 migration deliberately does **not**
+  create any of the three (§5 resolution 2 already decided this feature's
+  query path doesn't depend on them, and AA-9 reimplements the same
+  windowing *concept* in Python instead): it writes directly to
+  `schedule_slots`, the same table the query path reads, never through
+  `ensure_demo_availability()` or `slot_offers`.
 - `scheduling.appointments`/`appointment_events`, `identity.patients`/
-  `consent_records`, and `billing.payments` also already exist (D-024,
-  dormant) but are **out of scope** for this cycle (§6) — this feature never
-  reads or writes any of those tables.
+  `consent_records`, and `billing.payments` are likewise only defined in
+  `001_schema.sql` (D-024, dormant/never-activated) and are **out of
+  scope** for this cycle (§6) — this feature's Phase 1 migration does not
+  create any of these tables/schemas either, and this feature never reads
+  or writes any of them.
 
 ## 3. Confirmed outcomes
 
@@ -225,18 +248,26 @@ action:
    calls it, and only from this explicit action).
 2. Count `schedule_slots` rows with `status = 'available'` and
    `starts_at`'s date equal to `d1` (call it `count_d1`), and likewise for
-   `d7` (`count_d7`) — a flat count, not scoped to any one
-   specialty/professional.
+   `d7` (`count_d7`) — **scoped to the generalist specialty
+   (`oncologia-geral`, AA-3a) specifically** (corrected 2026-08-19, human
+   decision: "faça este botão ir para a oncologia geral" — the button must
+   guarantee the specialty most customer queries actually fall back to
+   (AA-3a's default) has real bookable data, not whichever specialty
+   happens to win an arbitrary professional-UUID ordering). Originally a
+   flat count "not scoped to any one specialty/professional" — that
+   framing is superseded by this correction; see `analysis.md`'s
+   corresponding revision note for why the original design silently never
+   seeded the generalist specialty in practice.
 3. **If `count_d1 >= 1` and `count_d7 >= 3`: do nothing and report
    "já tem 4 vagas disponíveis"** (the exact idempotent no-op case the
    human specified).
 4. **Otherwise, create just enough new slots** — `max(0, 1 - count_d1)` on
    `d1`, `max(0, 3 - count_d7)` on `d7` — to reach exactly that target,
    each within business hours **08:00-18:00** `America/Sao_Paulo`, each a
-   real `schedule_slots` row tied to a real seeded professional/specialty
-   (reusing `professional_specialties.appointment_duration_minutes` for
-   that professional, so `ends_at` is always correct), and report how many
-   were created.
+   real `schedule_slots` row tied to one of the generalist specialty's 3
+   seeded professionals (reusing `professional_specialties.appointment_duration_minutes`
+   for that professional, so `ends_at` is always correct), and report how
+   many were created.
 5. This was originally the *only* write path in this feature; AA-10 below
    (added in a later round the same day) adds a second, materially
    different one. The query path (AA-2) still never writes under any
@@ -311,7 +342,7 @@ Sub-mechanics:
 - **Transient flow-position state**: which step a conversation is on
   *is* persisted server-side (so an operator's page reload mid-flow
   doesn't lose it) but as ordinary mutable relational state, not an
-  audited durable fact — see `data-model.md` §7.
+  audited durable fact — see `data-model.md` §8.
 
 ## 4. Acceptance outcomes to develop into executable tests
 
@@ -537,13 +568,18 @@ outcome:**
   action's exact algorithm (AA-9), the new endpoint and operator-workspace
   button, the booking script's exact state machine and autonomous-send
   mechanism (AA-10), security, and testing decisions;
-- `data-model.md` documenting **two** new migrations — AA-3a's data-only
-  one (the seeded generalist specialty/professionals/professional_specialties
-  rows) and AA-10's schema one (a transient flow-position column plus a
-  marker distinguishing an autonomously-sent message from an
-  operator-sent one) — and confirming no other change to the dormant
-  `scheduling`/`identity`/`billing` tables' shape beyond the query path's
-  ordinary reads and the two write paths' (AA-9, AA-10) documented inserts;
+- `data-model.md` documenting **three** new migrations — the §2 correction's
+  schema-creation one (the `scheduling` schema itself, scoped to only the
+  tables/enum/function this feature uses, plus the original 3 specialties'
+  seed data, ported from `db/init/001_schema.sql`/`002_seed_and_schedule.sql`
+  since neither file is wired into any automated init path), AA-3a's
+  data-only one (the seeded generalist specialty/professionals/
+  professional_specialties rows), and AA-10's schema one (a transient
+  flow-position column plus a marker distinguishing an autonomously-sent
+  message from an operator-sent one) — and confirming no other change to
+  the dormant `scheduling`/`identity`/`billing` tables' shape beyond the
+  query path's ordinary reads and the two write paths' (AA-9, AA-10)
+  documented inserts;
 - a `contracts/openapi.yaml` delta for the new
   `POST /operator/scheduling/ensure-availability` endpoint (AA-9) — the
   query path itself and AA-10's script still need no contract change
