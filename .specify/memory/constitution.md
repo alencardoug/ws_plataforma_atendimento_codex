@@ -1,7 +1,8 @@
 # Customer Care AI Constitution
 
-Version: 1.0.0
+Version: 1.1.0
 Ratified: 2026-08-10
+Amended: 2026-08-18 (Amendment 1.1.0 — narrow exception to Article III)
 
 ## I. Specification precedes implementation
 
@@ -14,6 +15,27 @@ The currently authorized V1 includes N1/N2 only. N3, N4, supervisor, manager, AI
 ## III. Human authority over V1 outbound AI
 
 AI generations are internal artifacts. In V1, only an authenticated operator action may create a customer-visible operator message from an AI draft. No provider callback, background job, frontend shortcut, or API route may bypass this rule.
+
+**Narrow exception (Amendment 1.1.0, human decision 2026-08-18):** the
+simulated identity/payment-confirmation script belonging to the
+dynamic-appointment-availability feature
+(`specs/004-dynamic-appointment-availability/`) may send its messages to
+the customer automatically, without a per-message operator click, strictly
+limited to:
+
+(a) messages drawn from a fixed, human-authored template set for that one
+    script only — never LLM-composed, never LLM-rewritten;
+(b) the CPF-format-only validation and sim/não interpretation steps of
+    that one specific flow;
+(c) no real booking, payment, or identity persistence — remains a
+    synthetic simulation only (Article VI unchanged); the underlying
+    appointment-booking feature (D-026) remains separately deferred.
+
+This exception does not extend to any other outbound message in the
+system, does not authorize LLM-generated autonomous send, and does not by
+itself authorize real booking/payment/identity behavior. Every other
+outbound path in the system remains governed by this article's original
+rule without exception.
 
 ## IV. Manual service survives AI failure
 
