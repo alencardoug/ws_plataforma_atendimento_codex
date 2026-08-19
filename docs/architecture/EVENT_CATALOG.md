@@ -32,6 +32,7 @@ regenerate-with-instruction extends `ai.draft_generated`/`ai.draft_abstained`'s 
 | **`generation.escalated`** (V3-1) | ai_generation_id, operator_id — redefined from the roadmap's original framing: a content-gap signal ("operator could not answer using what is already standardized"), not a routing/handoff request to a specialist (that remains V5's separate, unbuilt workflow); tag only, no queue |
 | **`ai.dynamic_pattern_resolved`** (V2-6) | ai_generation_id — emitted alongside `ai.draft_generated` when `dynamic_pattern_used=true` |
 | **`ai.dynamic_pattern_fallback`** (V2-6) | ai_generation_id, cause (audit-only diagnostic string, e.g. table/column not found — never customer-visible) — emitted alongside `ai.draft_abstained` when a `dynamic_data_required` entry's resolution fails or has no binding configured |
+| **`ai.clinical_deflection_applied`** (2026-08-19, human decision) | ai_generation_id — emitted alongside `ai.draft_generated` when the clinical-question reranker (`GenerationProvider.rerank_clinical`) replaces a dynamic-pattern or LLM-composed candidate with the fixed clinical-deflection text (`CLINICAL_DEFLECTION_TEXT`). Scoped to the non-GB, non-`full_parent_draft` branch only — a matched clinical parent document is never second-guessed |
 | `knowledge.manual_search` | operator_id, conversation_id?, retrieval_run_id |
 | `knowledge.ingestion_started` | ingestion_run_id, source_type |
 | `knowledge.ingestion_completed` | ingestion_run_id, inserted, updated, embedded, skipped |

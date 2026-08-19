@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT
 from customer_care.bootstrap import create_app
 from customer_care.infrastructure.database import get_session_factory
 from customer_care.infrastructure.models import Message
@@ -139,10 +140,23 @@ def run() -> None:
         for raw_payment_input in ("Então, não paguei", "tabom simm paguei"):
             assert raw_payment_input in bodies, bodies
 
+    # Bug found 2026-08-19: after the booking flow completed, the *next*
+    # customer message — even an unrelated clinical question — was still
+    # matched against the same 4 old offers (latest_unconfirmed_offer_
+    # generation_id never knew the set had already been acted on). Confirm
+    # it now falls through to ordinary composition instead, and that the
+    # clinical-question reranker (human decision, same day) then replaces
+    # that ordinary answer with the fixed deflection text, since the top
+    # retrieved evidence here is an unrelated scheduling Q&A entry.
+    clinical_msg = send_customer("Em quanto tempo descubro se eu tenho câncer?")
+    clinical_draft = draft_on(clinical_msg["id"])
+    assert clinical_draft["trigger"] != "GUIDED_SLOT_SELECTION", clinical_draft
+    assert clinical_draft["draft_text"] == CLINICAL_DEFLECTION_TEXT, clinical_draft
+
     close = client.post(f"/api/v1/operator/conversations/{conversation_id}/close", headers=headers)
     assert close.status_code == 200, close.text
 
-    print("smoke_v5_guided_booking_ok: real price_lookup resolution, ordinal slot-choice recognition, full direct-to-CPF/payment flow (D-033), zero LLM calls, redaction confirmed, every step draft-only")
+    print("smoke_v5_guided_booking_ok: real price_lookup resolution, ordinal slot-choice recognition, full direct-to-CPF/payment flow (D-033), zero LLM calls, redaction confirmed, every step draft-only, post-completion clinical deflection confirmed")
 
 
 if __name__ == "__main__":

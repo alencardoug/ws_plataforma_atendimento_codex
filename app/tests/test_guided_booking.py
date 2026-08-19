@@ -137,6 +137,43 @@ class TestLatestUnconfirmedOfferGenerationId:
             assert conversation is not None
             assert latest_unconfirmed_offer_generation_id(db, conversation) is None
 
+    @pytest.mark.parametrize("later_trigger", ["GUIDED_SLOT_SELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE"])
+    def test_returns_none_once_a_slot_from_this_set_was_already_acted_on(self, conversation_with_generation, operator_id, later_trigger: str) -> None:
+        """Bug found 2026-08-19: without this check, a *completed* booking
+        never stopped being "the pending offer set" — the next customer
+        message (even an unrelated question) kept getting matched against
+        the same old offers instead of falling through to RAG."""
+        conversation_id, _generation_id, descriptions = conversation_with_generation
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text="t005-gb-later", embedding_model="smoke", top_k=1, status="COMPLETED")
+            db.add(run)
+            db.flush()
+            later_generation = AIGeneration(
+                conversation_id=conversation_id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER",
+                draft_text="later", provider="guided-booking", model="not-applicable", prompt_version="not-applicable",
+                trigger=later_trigger, dynamic_pattern_used=True,
+            )
+            db.add(later_generation)
+            db.commit()
+            later_generation_id, later_run_id = later_generation.id, run.id
+        try:
+            with session_factory() as db:
+                conversation = db.get(Conversation, conversation_id)
+                assert conversation is not None
+                assert latest_unconfirmed_offer_generation_id(db, conversation) is None
+                # The regression itself: an exact-text match against the old
+                # offer must NOT resolve once the set has been acted on.
+                assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is None
+        finally:
+            # Clean up before the fixture's own teardown, which deletes
+            # every RetrievalRun for operator_id and would otherwise hit
+            # the same FK this bug's own fix is unrelated to.
+            with session_factory() as db:
+                db.execute(delete(AIGeneration).where(AIGeneration.id == later_generation_id))
+                db.execute(delete(RetrievalRun).where(RetrievalRun.id == later_run_id))
+                db.commit()
+
 
 class TestInterpretSlotChoice:
     def test_exact_text_match_returns_that_offer(self, conversation_with_generation) -> None:

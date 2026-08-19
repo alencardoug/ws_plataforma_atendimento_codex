@@ -1,8 +1,9 @@
+import json
 from types import SimpleNamespace
 from uuid import uuid4
 
 from customer_care.ai.router import build_llm_history, full_parent_draft
-from customer_care.ai.providers import DeterministicTestGenerationProvider, OpenAIGenerationProvider
+from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT, DeterministicTestGenerationProvider, OpenAIGenerationProvider
 from customer_care.rag.service import Evidence
 
 
@@ -106,3 +107,40 @@ def test_openai_provider_uses_the_versioned_prompt_without_an_artificial_output_
     messages = captured["messages"]
     assert isinstance(messages, list)
     assert messages[0]["content"].startswith("PROMPT VERSIONADO")
+
+
+def test_deterministic_provider_rerank_clinical_always_keeps_the_rag_candidate() -> None:
+    # No real semantic judgment available — always False, matching this
+    # provider's conservative stand-in behavior everywhere else. Genuine
+    # reranking quality is smoke-tested against the real provider only.
+    assert DeterministicTestGenerationProvider().rerank_clinical("Em quanto tempo descubro se eu tenho câncer?", "Alguma resposta qualquer.") is False
+
+
+def test_openai_provider_rerank_clinical_prefers_candidate_a_when_chosen() -> None:
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"chosen": "A"})))])
+
+    provider = object.__new__(OpenAIGenerationProvider)
+    provider.model = "test-model"
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    assert provider.rerank_clinical("Qual o horário de atendimento?", "Atendemos de segunda a sábado, das 8h às 18h.") is False
+
+
+def test_openai_provider_rerank_clinical_prefers_the_deflection_when_chosen() -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        def create(self, **kwargs: object) -> SimpleNamespace:
+            captured.update(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({"chosen": "B"})))])
+
+    provider = object.__new__(OpenAIGenerationProvider)
+    provider.model = "test-model"
+    provider.client = SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions()))
+    assert provider.rerank_clinical("Em quanto tempo descubro se eu tenho câncer?", "Consulte a agenda simulada.") is True
+    messages = captured["messages"]
+    assert isinstance(messages, list)
+    system_content = messages[0]["content"]
+    assert "Consulte a agenda simulada." in system_content
+    assert CLINICAL_DEFLECTION_TEXT in system_content

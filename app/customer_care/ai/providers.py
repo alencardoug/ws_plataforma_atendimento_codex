@@ -24,6 +24,25 @@ class GenerationProvider(Protocol):
     model: str
 
     def generate(self, history: list[dict[str, str]], evidence: list[Evidence], system_prompt: str) -> GenerationResult: ...
+    def rerank_clinical(self, customer_text: str, candidate_text: str) -> bool: ...
+
+
+CLINICAL_DEFLECTION_TEXT = "Essa é uma pergunta de natureza clínica — recomendo conversar sobre isso com o profissional de saúde responsável durante a consulta. Posso ajudar com outra dúvida?"
+
+_RERANK_SYSTEM_PROMPT_TEMPLATE = (
+    "Você compara duas respostas candidatas para a mensagem mais recente de um "
+    "cliente de um serviço de atendimento oncológico e escolhe qual é mais "
+    "apropriada.\n\n"
+    "CANDIDATA A: {candidate_text}\n\n"
+    "CANDIDATA B: {deflection_text}\n\n"
+    "Prefira sempre a CANDIDATA A quando ela responder de forma adequada à "
+    "mensagem do cliente, mesmo que de forma simples ou genérica. Só prefira "
+    "a CANDIDATA B quando a mensagem do cliente for claramente uma pergunta "
+    "de natureza clínica ou de saúde (sintomas, diagnóstico, prognóstico, "
+    "tratamento, prazos de exames, efeitos colaterais, etc.) que a CANDIDATA "
+    "A claramente não responde.\n\n"
+    'Retorne um objeto JSON válido com exatamente um campo: {{"chosen": "A"}} ou {{"chosen": "B"}}.'
+)
 
 
 FORMAT_INSTRUCTION = "Retorne um objeto JSON válido com exatamente estes campos: status (ANSWER ou ABSTAIN), draft_text, reason_code e used_hit_ids. Para ANSWER, draft_text deve conter somente a resposta final, curta e natural para o cliente. Não inclua explicações do processo, instruções ao operador, citações, metadados ou trechos de evidência. Nunca envie mensagem nem revele raciocínio interno."
@@ -55,6 +74,14 @@ class DeterministicTestGenerationProvider:
             return GenerationResult("ANSWER", "Posso ajudar. Pode me contar um pouco mais sobre o que você precisa?", None, [], request_messages=request_messages)
         first = evidence[0]
         return GenerationResult("ANSWER", "Posso ajudar com sua dúvida. Pode me contar um pouco mais sobre o que precisa?", None, [str(first.retrieval_hit_id)], request_messages=request_messages)
+
+    def rerank_clinical(self, customer_text: str, candidate_text: str) -> bool:
+        # Deterministic test provider has no real semantic judgment — always
+        # keeps the RAG/dynamic candidate, matching its own conservative
+        # stand-in behavior elsewhere. Genuine reranking quality is smoke-
+        # tested against the real provider only (same split this codebase
+        # already uses for every other embedding/LLM-judgment feature).
+        return False
 
 
 class OpenAIGenerationProvider:
@@ -91,6 +118,24 @@ class OpenAIGenerationProvider:
             raise ValueError("provider returned empty answer draft")
         usage = response.usage
         return GenerationResult(status, draft_text, reason, used, usage.prompt_tokens if usage else None, usage.completion_tokens if usage else None, request_messages=request_messages)
+
+    def rerank_clinical(self, customer_text: str, candidate_text: str) -> bool:
+        """Human decision, 2026-08-19: a clinical-deflection candidate
+        participates as one more option, reranked against whatever answer
+        the normal pipeline produced — the RAG/dynamic candidate wins
+        whenever it's adequate; the deflection wins only when the message
+        is a genuinely uncovered clinical question. Real LLM judgment call
+        (open-ended clinical-topic detection, not a closed candidate set —
+        unlike GB-2's ordinal/embedding matching, this is not something a
+        deterministic parser can reliably do)."""
+        system_prompt = _RERANK_SYSTEM_PROMPT_TEMPLATE.format(candidate_text=candidate_text, deflection_text=CLINICAL_DEFLECTION_TEXT)
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": customer_text}],
+            response_format={"type": "json_object"},
+        )
+        payload = json.loads(response.choices[0].message.content or "{}")
+        return payload.get("chosen") == "B"
 
 
 def configured_generation_provider() -> GenerationProvider:

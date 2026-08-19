@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from customer_care.ai.providers import GenerationResult, configured_generation_provider
+from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT, GenerationResult, configured_generation_provider
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
@@ -275,6 +275,7 @@ def generate_draft(
         dynamic_cause = None
         dynamic_extra: dict[str, object] | None = None
         offered_rows: Sequence[Any] | None = None
+        clinical_deflection_applied = False
         effective_trigger = trigger
         embedding_provider = configured_embedding_provider()
         guided = guided_booking_result(session, embedding_provider, conversation, selected_messages)
@@ -301,6 +302,25 @@ def generate_draft(
                     result = provider.generate(build_llm_history(history, instruction_text), qa_evidence, prompt.content)
                     provider_name = provider.name
                     model = provider.model
+                # Clinical reranking (human decision, 2026-08-19): outside
+                # GB/scheduling flow only (this whole branch is), and never
+                # against full_parent_draft's own result above — a matched
+                # clinical document is already the strongest possible
+                # grounding, not worth second-guessing. The fixed deflection
+                # text participates as one more candidate, reranked against
+                # whatever this branch just produced; RAG's own answer wins
+                # by default whenever it's adequate.
+                if result.status == "ANSWER":
+                    reranker = configured_generation_provider()
+                    if reranker.rerank_clinical(query, result.draft_text):
+                        clinical_deflection_applied = True
+                        result = GenerationResult("ANSWER", CLINICAL_DEFLECTION_TEXT, None, [])
+                        provider_name = "clinical-deflection-rerank"
+                        model = reranker.model
+                        dynamic_used = False
+                        dynamic_cause = None
+                        dynamic_extra = None
+                        offered_rows = None
         generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=triggering_message_id, retrieval_run_id=run.id, prior_generation_id=prior_generation_id, operator_id=operator_id, status=result.status, draft_text=result.draft_text, abstention_reason=result.reason_code, provider=provider_name, model=model, prompt_version=prompt_version, input_tokens=result.input_tokens, output_tokens=result.output_tokens, duration_ms=round((perf_counter() - started) * 1000), trigger=effective_trigger, manual_search_text=manual_search_text or None, dynamic_pattern_used=dynamic_used, instruction_text=instruction_text or None)
         session.add(generation)
         session.flush()
@@ -319,6 +339,8 @@ def generate_draft(
             record_event(session, "ai.dynamic_pattern_fallback", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "cause": dynamic_cause})
         elif dynamic_used:
             record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), **(dynamic_extra or {})})
+        if clinical_deflection_applied:
+            record_event(session, "ai.clinical_deflection_applied", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id)})
         session.commit()
         return generation, [evidence_dict(item) for item in evidence], result.request_messages
     except Exception as exc:

@@ -117,20 +117,54 @@ def persist_presented_offers(session: Session, provider: EmbeddingProvider, ai_g
         session.add(AppointmentOfferPresentation(ai_generation_id=ai_generation_id, slot_id=slot.slot_id, display_order=order, description=description, embedding=vector))
 
 
+_GB_FLOW_IN_PROGRESS_TRIGGERS = ("GUIDED_SLOT_SELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE")
+
+
 def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conversation) -> UUID | None:
     """005/GB-2: the most recent `appointment_availability` resolution's
-    offer set for this conversation, unless AA-10's own booking script has
-    already taken over (`conversation.booking_script_step is not None`) —
-    at that point guided selection stops offering branches entirely."""
+    offer set for this conversation — but only while it is genuinely
+    still *unconfirmed*. Returns `None` when either:
+
+    - AA-10's own booking script has already taken over
+      (`conversation.booking_script_step is not None`); or
+    - **(bug found 2026-08-19)** a slot from this exact offer set was
+      already picked — i.e. any `GUIDED_SLOT_SELECTION`/
+      `GUIDED_CPF_CONFIRMED`/`GUIDED_BOOKING_COMPLETE` generation exists
+      *after* it. Without this check, a completed (or mid-flight) booking
+      never stopped being "the pending offer set": once the flow reached
+      `GUIDED_BOOKING_COMPLETE` ("Agendamento realizado com sucesso. Há
+      algo mais que posso ajudar?"), the *next* customer message — even a
+      wholly unrelated clinical question — was still matched by
+      embedding-similarity against the same 4 old offers instead of
+      falling through to ordinary RAG/LLM composition, since nothing had
+      ever marked that offer set as resolved. A later, genuinely new
+      `appointment_availability` resolution creates its own newer offer
+      set, which this function then correctly picks up as the pending one
+      instead."""
     if conversation.booking_script_step is not None:
         return None
-    return session.scalar(
-        select(AppointmentOfferPresentation.ai_generation_id)
+    row = session.execute(
+        select(AppointmentOfferPresentation.ai_generation_id, AIGeneration.created_at)
         .join(AIGeneration, AIGeneration.id == AppointmentOfferPresentation.ai_generation_id)
         .where(AIGeneration.conversation_id == conversation.id)
         .order_by(AIGeneration.created_at.desc())
         .limit(1)
+    ).first()
+    if row is None:
+        return None
+    generation_id, resolved_at = row
+    already_acted_on = session.scalar(
+        select(AIGeneration.id)
+        .where(
+            AIGeneration.conversation_id == conversation.id,
+            AIGeneration.created_at > resolved_at,
+            AIGeneration.trigger.in_(_GB_FLOW_IN_PROGRESS_TRIGGERS),
+        )
+        .limit(1)
     )
+    if already_acted_on is not None:
+        return None
+    return generation_id
 
 
 def interpret_slot_choice(session: Session, provider: EmbeddingProvider, conversation: Conversation, customer_text: str) -> AppointmentOfferPresentation | None:
