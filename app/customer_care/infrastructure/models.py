@@ -267,6 +267,24 @@ class AIGenerationSource(Base):
     use_order: Mapped[int] = mapped_column(Integer)
 
 
+class AppointmentOfferPresentation(Base):
+    """005 (GB-1): one row per offer shown to a customer by a resolved
+    appointment_availability generation (up to 4). Append-only — never
+    updated; a later resolution inserts a fresh set tied to its own new
+    ai_generation_id. See specs/005-dynamic-pricing-and-guided-booking/
+    data-model.md §1."""
+
+    __tablename__ = "appointment_offer_presentations"
+    __table_args__ = (UniqueConstraint("ai_generation_id", "display_order"), {"schema": "customer_service"})
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    ai_generation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
+    slot_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("scheduling.schedule_slots.slot_id"))
+    display_order: Mapped[int] = mapped_column(Integer)
+    description: Mapped[str] = mapped_column(Text)
+    embedding: Mapped[list[float]] = mapped_column(Vector(1536))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+
+
 class MessageCitation(Base):
     __tablename__ = "message_citations"
     __table_args__ = {"schema": "customer_service"}

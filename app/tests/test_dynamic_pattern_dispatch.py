@@ -1,9 +1,10 @@
 """T052: regression proof for the NAMED_RESOLVERS dispatch added to
 ai/router.py's dynamic_pattern_result() (plan.md §2). A QA entry whose
-dynamic_resolver names something this cycle doesn't implement
-(price_lookup/payment_simulator/insurance_lookup) must abstain exactly as
-it did before this feature — no accidental widening of what resolves
-(acceptance outcome 8). A QA entry using the pre-existing generic
+dynamic_resolver names something still unimplemented
+(payment_simulator/insurance_lookup — price_lookup itself was added by
+005/PL, specs/005-dynamic-pricing-and-guided-booking/) must abstain
+exactly as it did before this feature — no accidental widening of what
+resolves (acceptance outcome 8). A QA entry using the pre-existing generic
 qa_dynamic_bindings mechanism (dynamic_resolver=NULL) must still resolve
 exactly as before — proves the dispatch change is additive, not a
 replacement. Real-database integration tests, mirroring
@@ -52,9 +53,9 @@ def _evidence_for(qa: QAEntry, retrieval_hit_id) -> Evidence:
 
 def test_unimplemented_resolver_name_still_abstains(operator_id) -> None:
     session_factory = get_session_factory()
-    qa_id = f"t052-price-{uuid4().hex[:8]}"
+    qa_id = f"t052-insurance-{uuid4().hex[:8]}"
     with session_factory() as db:
-        qa = QAEntry(qa_id=qa_id, category="smoke-fixture", question="Qual o valor?", answer_markdown="R$ {{price}}", dynamic_data_required=True, dynamic_resolver="price_lookup", customer_citation_allowed=False)
+        qa = QAEntry(qa_id=qa_id, category="smoke-fixture", question="Meu convênio cobre?", answer_markdown="Cobertura: {{coverage}}", dynamic_data_required=True, dynamic_resolver="insurance_lookup", customer_citation_allowed=False)
         db.add(qa)
         run = RetrievalRun(operator_id=operator_id, purpose="N2_MANUAL_SEARCH", query_text="t052", embedding_model="smoke", top_k=1, status="COMPLETED")
         db.add(run)
@@ -70,7 +71,7 @@ def test_unimplemented_resolver_name_still_abstains(operator_id) -> None:
             outcome = dynamic_pattern_result(db, [_evidence_for(qa, hit_id)], "qualquer pergunta")
 
         assert outcome is not None
-        result, dynamic_used, dynamic_cause, audit_extra = outcome
+        result, dynamic_used, dynamic_cause, audit_extra, offered_rows = outcome
         assert result.status == "ABSTAIN"
         assert result.reason_code == "DYNAMIC_DATA_UNAVAILABLE"
         assert result.draft_text == ""
@@ -109,7 +110,7 @@ def test_generic_qa_dynamic_bindings_path_still_resolves_unaffected(operator_id)
             outcome = dynamic_pattern_result(db, [_evidence_for(qa, hit_id)], "qualquer pergunta")
 
         assert outcome is not None
-        result, dynamic_used, dynamic_cause, audit_extra = outcome
+        result, dynamic_used, dynamic_cause, audit_extra, offered_rows = outcome
         assert result.status == "ANSWER"
         assert "vaga-livre" in result.draft_text
         assert dynamic_used is True

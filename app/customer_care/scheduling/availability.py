@@ -141,12 +141,17 @@ def _render_offers(rows: Sequence[_SlotRow]) -> str:
     return "\n\n".join(blocks)
 
 
-def resolve_appointment_availability(session: Session, query_text: str) -> DynamicResolution:
+def resolve_appointment_availability(session: Session, query_text: str) -> tuple[DynamicResolution, Sequence[_SlotRow]]:
     """Reads only. Never writes. If `schedule_slots` has nothing to offer,
     raises `DynamicResolutionError` — it does not generate data itself
     (that is exclusively `scheduling/seeding.py`'s job, AA-9, triggered
     only by an explicit operator action, never as a side effect of a
-    query). `plan.md` §4."""
+    query). `plan.md` §4.
+
+    Returns the offered rows alongside the rendered `DynamicResolution`
+    (005/GB-1, `data-model.md` §4) so the caller can persist exactly what
+    was shown to the customer — this function does not persist anything
+    itself, staying purely read-only as AA-2 requires."""
     params = extract_parameters(query_text)
     query = (
         select(ScheduleSlot, Specialty, Professional, ProfessionalSpecialty, Unit)
@@ -172,4 +177,27 @@ def resolve_appointment_availability(session: Session, query_text: str) -> Dynam
     rows = session.execute(query.order_by(ScheduleSlot.starts_at).limit(4)).all()
     if not rows:
         raise DynamicResolutionError(cause=f"no schedule_slots matched params={params}")
-    return DynamicResolution(_render_offers(rows), specialty_slug=params.specialty_slug, slot_count=len(rows))
+    return DynamicResolution(_render_offers(rows), specialty_slug=params.specialty_slug, slot_count=len(rows)), rows
+
+
+def resolve_price_lookup(session: Session, query_text: str) -> DynamicResolution:
+    """005/PL: deterministic, read-only, single-specialty price lookup —
+    reuses AA-3's specialty extraction (date/period are irrelevant here and
+    ignored) and the same `professional_specialties.fixed_price_cents`
+    source AA-10's own price line already reads
+    (`booking_script/service.py::lookup_recent_specialty_price`). Never
+    writes, never LLM-composed — matches AA-2/AA-5's precedent. `plan.md`
+    §4."""
+    params = extract_parameters(query_text)
+    row = session.execute(
+        select(Specialty.display_name, ProfessionalSpecialty.fixed_price_cents, ProfessionalSpecialty.appointment_duration_minutes)
+        .join(ProfessionalSpecialty, ProfessionalSpecialty.specialty_id == Specialty.specialty_id)
+        .where(Specialty.slug == params.specialty_slug)
+        .order_by(ProfessionalSpecialty.professional_id)  # stable, deterministic first-row pick — price is identical across professionals within one specialty in the seeded data
+        .limit(1)
+    ).first()
+    if row is None:
+        raise DynamicResolutionError(cause=f"no professional_specialties row for specialty_slug={params.specialty_slug}")
+    display_name, price_cents, duration_minutes = row
+    text = f"O valor da consulta de {display_name} é {format_price_brl(price_cents)} (simulação). Duração aproximada: {duration_minutes} minutos."
+    return DynamicResolution(text, specialty_slug=params.specialty_slug, slot_count=None)

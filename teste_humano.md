@@ -17,7 +17,7 @@ Run) — não é bug.
 ## 0. O que há de novo desde a última vez (leia isto primeiro)
 
 Você já testou a V2 (Seção 2 antiga, preservada abaixo como Seção 5). Desde
-então foram implementadas **duas coisas separadas**:
+então foram implementadas **três coisas separadas**:
 
 ### V3 — "Measured N2": mais controle e visibilidade sobre o N2
 
@@ -60,9 +60,28 @@ documento). Agora existe um resolvedor read-only real para uma categoria:
   cria uma reserva de verdade. Toda mensagem enviada por esse fluxo aparece
   marcada com um selo "automático" na tela do operador.
 
-Teste a Seção 3 (V3) e a Seção 4 (agendamento dinâmico) primeiro — são as
-novidades. A Seção 5 (checklist funcional V1/V2, ainda válido) e a Seção 6
-(avaliação de RAG) continuam como referência de regressão.
+### Dynamic Pricing and Guided Booking Selection (005) — preço real + seleção guiada
+
+Fecha o achado sobre `preco`/`pagamento` que a Seção 6.2 (versão anterior)
+documentou:
+
+- Perguntas de preço específicas ("Quanto custa uma consulta de
+  mastologia?") agora respondem com valor real, via resolvedor
+  `price_lookup` — mesma lógica determinística de `agenda`, sem LLM.
+- O conteúdo de `pagamento` foi corrigido — não descreve mais um link de
+  pagamento fictício que nunca existiu; agora descreve o fluxo real
+  (confirmação por sim/não dentro da conversa, Seção 4.3).
+- Nova assistência **por embedding** (não LLM) para o cliente escolher uma
+  das vagas oferecidas e confirmar a intenção de agendar — mas
+  **continua 100% dentro do N2**: cada resposta é só um rascunho, o
+  operador ainda precisa clicar enviar. Não estende a exceção de envio
+  autônomo do agendamento simulado.
+- `convenio` continua de fora, deliberadamente.
+
+Teste a Seção 3 (V3), a Seção 4 (agendamento dinâmico) e a Seção 4b
+(preço/seleção guiada) primeiro — são as novidades. A Seção 5 (checklist
+funcional V1/V2, ainda válido) e a Seção 6 (avaliação de RAG) continuam
+como referência de regressão.
 
 ---
 
@@ -296,15 +315,79 @@ atenção ao script exato:
 
 ### 4.4 O que continua fora de escopo (verificação negativa)
 
-- [ ] Nenhum outro `dynamic_resolver` (`price_lookup`, `payment_simulator`,
-  `insurance_lookup`) responde — devem continuar abstendo exatamente como
-  antes desta feature.
+- [ ] Os resolvedores ainda não implementados (`payment_simulator`,
+  `insurance_lookup`) continuam abstendo exatamente como antes desta
+  feature. (`price_lookup` foi implementado depois, pela feature 005 —
+  veja a Seção 4b.)
 - [ ] Não existe tela de CRUD para especialidades/profissionais/vagas
   individuais — só o botão "Garantir disponibilidade" e o resolvedor
   read-only. Isso é deliberado (deferido para futuro trabalho separado).
 - [ ] O fluxo simulado (4.3) só começa depois de uma vaga real ter sido
   mostrada — não dá para pular direto para "quero marcar" sem antes ver
   uma disponibilidade real na conversa.
+
+---
+
+## 4b. Preço dinâmico e seleção guiada de agendamento (feature 005)
+
+Fechou o achado da Seção 6.2 (versão anterior deste documento) para
+`preco`/`pagamento` — o mesmo padrão de "super-marcação" que `agenda`
+tinha antes da feature 004. `convenio` continua de fora, deliberadamente.
+
+### 4b.1 Preço real via resolvedor (`price_lookup`)
+
+- [ ] Pergunte "Quanto custa uma consulta de mastologia?" (ou colorretal,
+  ou "segunda opinião"). A resposta deve trazer um preço real, formatado
+  como `R$ X.XXX,XX (simulação)` e a duração aproximada — sem passar por
+  LLM (o rascunho é gerado por template, igual ao caminho de agenda).
+- [ ] Pergunte "Quanto custa uma consulta?" sem citar especialidade —
+  deve precificar a especialidade generalista (oncologia geral), nunca
+  abster por falta de especialidade.
+- [ ] Pergunte algo genérico de política de preço, como "O preço muda
+  conforme o horário?" ou "O valor inclui exames?" — agora deve responder
+  com texto estático correto, não mais abster.
+
+### 4b.2 Conteúdo de pagamento corrigido
+
+- [ ] Pergunte "Como faço o pagamento?" — a resposta agora deve descrever
+  o que o sistema realmente faz (confirmação por sim/não dentro da própria
+  conversa, ver Seção 4.3), **sem** mencionar nenhum link externo de
+  pagamento ou timer de 3 segundos — esse conteúdo antigo descrevia um
+  mecanismo que nunca existiu.
+- [ ] Pergunte "É seguro enviar dados do cartão no chat?" — a orientação
+  de segurança (nunca envie número de cartão) continua presente.
+
+### 4b.3 Seleção guiada de vaga (assistida por embedding, só rascunho)
+
+- [ ] Pergunte por disponibilidade (ex.: "Existe consulta disponível essa
+  semana?") e gere o rascunho — deve trazer até 4 vagas reais, igual à
+  Seção 4.2.
+- [ ] Envie essa resposta ao cliente. Do lado do cliente, responda com uma
+  **paráfrase real** de uma das vagas oferecidas (não precisa copiar o
+  texto exato — ex.: "pode ser aquele horário de manhã mesmo" ou "prefiro
+  o de quinta com o Dr. Fulano"). Gere um novo rascunho: deve identificar
+  corretamente qual vaga foi escolhida e perguntar "Deseja que eu confirme
+  o agendamento?" — **continua sendo só um rascunho**, o operador precisa
+  clicar enviar.
+- [ ] Responda com algo sem relação nenhuma com as vagas (ex.: "vocês têm
+  estacionamento?") — o rascunho deve voltar ao comportamento normal
+  (busca de evidência comum), não deve "forçar" uma vaga errada.
+
+### 4b.4 Confirmação guiada (assistida por embedding, só rascunho)
+
+- [ ] Depois de enviar a pergunta de confirmação (4b.3), responda do lado
+  do cliente com uma frase afirmativa **variada**, não literalmente "sim"
+  (ex.: "pode confirmar sim, por favor" ou "claro que sim!"). O próximo
+  rascunho deve reconhecer como confirmação e convidar o cliente a
+  prosseguir — ainda como rascunho, o operador precisa enviar.
+- [ ] Responda negativamente ou de forma ambígua — o próximo rascunho deve
+  perguntar de novo, com um texto **diferente** da pergunta original (não
+  deve parecer que o sistema travou repetindo a mesma frase).
+- [ ] Confirme que o texto desses rascunhos nunca é enviado sozinho — em
+  nenhum momento desta seção uma mensagem chega ao cliente sem o operador
+  clicar "Enviar" (essa é a fronteira que a feature 005 deliberadamente
+  manteve dentro do N2, sem estender a exceção de envio autônomo do
+  agendamento simulado, Seção 4.3).
 
 ---
 
@@ -399,17 +482,17 @@ conteúdo do documento**, não no prompt. Se uma resposta de Q&A está "sem
 refinamento", o problema pode estar nos dois lugares. Separe isso antes de
 mexer em qualquer coisa.
 
-### 6.2 Achado anterior, agora parcialmente resolvido: categoria `agenda`
+### 6.2 Achado anterior, agora resolvido para três das quatro categorias
 
-O achado da versão anterior deste documento (27 perguntas administrativas
-em 4 categorias sempre resultando em `ABSTAIN` por falta de vínculo
-dinâmico) segue válido para `preco`, `pagamento` e `convenio` — essas três
-continuam sem resolvedor. `agenda` agora tem uma solução real e parcial
-(Seção 4): perguntas que o extrator determinístico reconhece (especialidade
-+ data/período, ou nenhuma especialidade → generalista) podem responder de
-verdade. Perguntas de agenda fora desse padrão continuam abstendo.
+O achado original deste documento (27 perguntas administrativas em 4
+categorias sempre resultando em `ABSTAIN` por falta de vínculo dinâmico)
+está resolvido para `agenda` (feature 004, Seção 4) e para `preco`/
+`pagamento` (feature 005, Seção 4b): perguntas de preço específico
+respondem com valor real via `price_lookup`; as perguntas de política
+geral de `preco`/`pagamento` viraram conteúdo estático correto. Só
+`convenio` continua sem resolvedor, deliberadamente (D-032, `DECISIONS.md`).
 
-Rode de novo para ver como evoluiu:
+Rode de novo para ver o estado atual (deve mostrar só `convenio` agora):
 
 ```sql
 SELECT qa.category, count(*) AS entries_needing_binding
@@ -420,11 +503,11 @@ GROUP BY qa.category
 ORDER BY entries_needing_binding DESC;
 ```
 
-Para `preco`, `pagamento`, `convenio`, as mesmas três opções de antes
-continuam valendo: esperar uma feature futura equivalente à 004 para cada
-uma, reescrever como resposta estática "sempre verdadeira", ou aceitar a
-abstenção como lacuna de cobertura conhecida (e agora você pode registrar
-isso formalmente com "Escalar", Seção 3.3).
+Para `convenio`, as mesmas três opções de antes continuam valendo: esperar
+uma feature futura equivalente à 004/005 (`insurance_lookup`), reescrever
+como resposta estática "sempre verdadeira", ou aceitar a abstenção como
+lacuna de cobertura conhecida (e agora você pode registrar isso
+formalmente com "Escalar", Seção 3.3).
 
 ### 6.3 Roteiro de teste manual do RAG
 

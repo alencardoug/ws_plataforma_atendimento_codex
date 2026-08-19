@@ -12,6 +12,12 @@ Last updated: 2026-08-19
   (`specs/004-dynamic-appointment-availability`) is DONE (2026-08-19), as
   a separate feature from V2/V3. Its real booking/identity/payment follow-on
   remains deferred.
+- Dynamic pricing and guided booking selection
+  (`specs/005-dynamic-pricing-and-guided-booking`) is DONE (2026-08-19,
+  D-032), also separate from V2/V3. Implements `price_lookup` and
+  corrects `preco`/`pagamento` Q&A content; adds N2-only, embedding-
+  assisted guided booking selection. `insurance_lookup`/`convenio` and any
+  extension of Constitution Amendment 1.1.0 remain deferred.
 
 ## V1 baseline
 
@@ -184,8 +190,7 @@ before attempting a second deploy or tearing this one down.
 ## V3 implementation — DONE (2026-08-18)
 
 All 13 phases of `specs/003-v3-measured-n2/tasks.md` (T000-T134) are
-complete and committed to `main` (not yet pushed/redeployed — see the
-deploy-cadence note at the end of this section):
+complete and committed to `main`:
 
 - **Phase 1-2** — `content.categories` shared registry (backfilled from
   both `qa_entries.category` and `documents.cancer_type`, resolved
@@ -244,15 +249,12 @@ run, confirmed stable across repeated runs.
 Six real implementation gaps were found across this cycle by dedicated
 convergence/regression checks rather than by the phase-by-phase build
 gates (which all passed throughout) — each is now closed with regression
-coverage. Per this project's deploy-cadence practice, this V3 work is
-committed but not yet redeployed to production; deploy at the end of the
-current refinement window, not reactively per-commit.
+coverage.
 
 ## Dynamic appointment availability — DONE (2026-08-19)
 
 All 10 phases of `specs/004-dynamic-appointment-availability/tasks.md`
-(T000-T082, plus AA-10's T090-T098) are complete and committed locally;
-not pushed/redeployed:
+(T000-T082, plus AA-10's T090-T098) are complete and committed to `main`:
 
 - a narrowly activated `scheduling` schema with 4 specialties/12
   professionals, real synthetic price/duration data, and a purely
@@ -284,14 +286,76 @@ record and `analysis.md` §18. D-031 is now implemented. Real appointment
 booking/holds, identity persistence, payment processing, other resolver
 names, and a scheduling CRUD remain deferred.
 
+## Production deployment of V3+004 — DONE (2026-08-19)
+
+Deployed the same day as 004's closure: migrations applied to Neon
+(`scheduling` schema, AA-10 columns, `messages_check` widening), corpus
+re-ingested, backend redeployed to Cloud Run
+(`customer-care-backend`, ~89.4MB image), frontend redeployed to Firebase
+Hosting. Verified with a real end-to-end draft generation (not just
+`/health`/`/ready`, per this document's own standing incident lesson) and
+the `ensure-availability` seed action (idempotency confirmed with a
+second call). Validation-created conversations truncated afterward per
+`DEPLOYMENT.md` step 5. Production now serves V1+V2+V3+004 together for
+the first time. `teste_humano.md` was updated the same day with manual
+test coverage for everything new in V3 and 004.
+
+## Dynamic pricing and guided booking selection — DONE (2026-08-19, D-032)
+
+All 8 phases of `specs/005-dynamic-pricing-and-guided-booking/tasks.md`
+(T001-T074) are complete and committed to `main`:
+
+- **Phase 1** — two additive migrations:
+  `customer_service.appointment_offer_presentations` (GB-1's persisted-
+  offer table) and a widened `ai_generations.trigger` CHECK
+  (`'GUIDED_SLOT_SELECTION'`/`'GUIDED_CONFIRMATION'`).
+- **Phase 2 (PM)** — content correction: the 3 non-price-specific `preco`
+  entries and all 4 `pagamento` entries rewritten as static, accurate
+  text (the old `pagamento` content described a fictional payment link/
+  timer that contradicted AA-10's real sim/não step); `convenio`
+  untouched.
+- **Phase 3 (PL)** — `resolve_price_lookup()`, a real named resolver
+  reusing 004's `professional_specialties.fixed_price_cents` (no new data
+  source), registered in `NAMED_RESOLVERS`.
+- **Phase 4 (GB-1)** — `resolve_appointment_availability()` now also
+  returns its offered rows; a new `scheduling/guided_booking.py` module
+  persists them (specialty/professional/time description + embedding) per
+  resolving generation.
+- **Phase 5-6 (GB-2/GB-3/GB-4/GB-5)** — two new `generate_draft()`
+  branches: slot-choice interpretation (embedding-similarity against the
+  persisted offers) and confirmation-intent interpretation (embedding-
+  similarity, margin-gated, against a fixed affirmative/negative reference
+  set) — both produce an ordinary internal draft, never an autonomous
+  send. A genuine mid-implementation finding: the first threshold design
+  (a single guessed constant) failed against real embeddings — recalibrated
+  from measured real-provider distances (`SLOT_CHOICE_DISTANCE_THRESHOLD=0.68`,
+  `CONFIRMATION_MARGIN_THRESHOLD=0.08`), documented inline in
+  `guided_booking.py` and `acceptance.md`.
+- **Phase 7** — structural containment: `booking_script/*` verified
+  byte-for-byte unmodified with zero import coupling
+  (`test_005_booking_script_containment.py`), so Constitution Amendment
+  1.1.0's AA-10 exception is unchanged and not extended, matching the
+  human's explicit 2026-08-19 decision. Full regression suite reconfirmed
+  green (139 backend tests, up from 129; all 17 `smoke_*.py` scripts,
+  including the new `smoke_v5_guided_booking.py`).
+- **Phase 8** — `acceptance.md`'s Execution record (9 areas, all PASS)
+  and `analysis.md`'s convergence review (verdict GO). Two pre-existing
+  regression tests were updated because this feature's own new capability
+  (`price_lookup`) superseded their old "still abstains" assumption —
+  documented inline, not silently changed.
+
+Not yet deployed to production as of this writing — batch with the next
+scheduled deploy per this project's standing deploy-cadence practice, not
+reactively.
+
 ## Immediate next action for Claude Code
 
-V1 remains closed (GO, 2026-08-13), V2 is DONE (2026-08-17), V3
-("Measured N2") is DONE (2026-08-18), and dynamic appointment availability
-is DONE (2026-08-19). There is no open implementation work in these
-packages. The latest changes are committed locally but not pushed or
-redeployed; batch the next production deploy at the end of the current
-refinement window. The production environment described above still
-serves V1+V2 only until that happens. `ROADMAP.md`/`DECISIONS.md` govern
-what comes next; real appointment booking/holds/payment/identity and the
-full scheduling CRUD remain separate future specification work.
+V1 remains closed (GO, 2026-08-13); V2, V3, dynamic appointment
+availability, and dynamic pricing/guided booking selection are all DONE.
+There is no open implementation work in any of these packages. V3+004 are
+live in production (above); 005 is committed but not yet deployed — batch
+it with the next scheduled deploy. `ROADMAP.md`/`DECISIONS.md` govern what
+comes next; real appointment booking/holds/payment/identity,
+`insurance_lookup`/`convenio`, any extension of Constitution Amendment
+1.1.0, and the full scheduling CRUD remain separate future specification
+work.

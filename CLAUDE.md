@@ -49,6 +49,18 @@ Read and obey `AGENTS.md` first.
   `appointment_availability` (`price_lookup`/`payment_simulator`/
   `insurance_lookup`) remain explicitly deferred — see that package's
   `spec.md` §6.
+- **Dynamic pricing and guided booking selection is DONE (2026-08-19,
+  D-032).** Its package is
+  `specs/005-dynamic-pricing-and-guided-booking/`. Implements the
+  `price_lookup` named resolver (deferred by 004), corrects the
+  `preco`/`pagamento` Q&A content that previously described a payment
+  mechanism the system never had, and adds embedding-assisted guided
+  booking selection — slot-choice and confirmation-intent interpretation
+  that stays entirely inside N2 (ordinary operator-reviewable drafts
+  only). Constitution Amendment 1.1.0's AA-10 exception is unchanged and
+  was not extended — a deliberate human decision, verified structurally
+  (`booking_script/*` untouched, zero import coupling). `insurance_lookup`/
+  `convenio` remains deferred — see that package's `spec.md` §6.
 
 Read in this order:
 
@@ -120,6 +132,20 @@ the final verdict is GO (`analysis.md` §18). The implemented frontend
 surface is the operator's bounded D+1/D+7 seed button/status plus the
 optional autonomous-message transparency badge. Do not broaden AA-10 or
 start a deferred scheduling feature without a new authorized package.
+
+### Dynamic pricing and guided booking selection — complete
+
+`specs/005-dynamic-pricing-and-guided-booking/` is a completed package
+(D-032). Its `spec.md`, `plan.md`, `data-model.md`, `tasks.md`,
+`acceptance.md`, and `analysis.md` are complete; all 8 phases are DONE and
+the final verdict is GO (`analysis.md` §6). Implements `price_lookup`
+(reusing 004's pricing data), corrects the `preco`/`pagamento` Q&A
+content, and adds embedding-assisted guided booking selection (slot-choice
+and confirmation-intent interpretation) fully inside N2 — no frontend
+change was required (existing draft panel already renders the new
+generation content). Do not extend Constitution Amendment 1.1.0's AA-10
+exception, and do not implement `insurance_lookup`/`convenio` or real
+payment behavior without a new authorized package.
 
 ## General Claude Code behavior
 

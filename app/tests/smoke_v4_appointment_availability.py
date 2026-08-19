@@ -1,8 +1,10 @@
 """T071: real end-to-end HTTP smoke for dynamic appointment availability
 (AA-1..AA-9) against a rebuilt backend — real embeddings retrieval, real
 seed action, real resolver, zero LLM calls for a resolved generation, and
-confirms unimplemented resolvers (price_lookup/payment_simulator/
-insurance_lookup) still abstain exactly as before this feature.
+confirms unimplemented resolvers (payment_simulator/insurance_lookup)
+still abstain exactly as before this feature. price_lookup itself was
+implemented by 005 (specs/005-dynamic-pricing-and-guided-booking/) — its
+regression coverage moved to smoke_v5_guided_booking.py.
 specs/004-dynamic-appointment-availability/tasks.md T071, acceptance.md
 §A/§H."""
 
@@ -62,17 +64,20 @@ def run() -> None:
         assert forbidden not in body["draft_text"], body
     assert body["duration_ms"] < MAX_DYNAMIC_RESOLUTION_MS, body
 
-    # price_lookup/payment_simulator/insurance_lookup remain unimplemented —
-    # this entry still abstains exactly as before this feature (outcome 8).
+    # payment_simulator/insurance_lookup remain unimplemented — this entry
+    # still abstains exactly as before this feature (outcome 8). price_lookup
+    # itself was implemented by 005 (specs/005-dynamic-pricing-and-guided-
+    # booking/) — its own real-resolution regression coverage now lives in
+    # smoke_v5_guided_booking.py, not here.
     price_conversation = client.post("/api/v1/public/conversations")
     assert price_conversation.status_code == 201, price_conversation.text
     price_conversation_id = price_conversation.json()["conversation"]["id"]
     price_claim = client.post(f"/api/v1/operator/conversations/{price_conversation_id}/claim", headers=headers)
     assert price_claim.status_code == 200, price_claim.text
 
-    price_search = client.post("/api/v1/operator/knowledge/search", headers=headers, json={"query": "Quanto custa uma consulta de mastologia?", "top_k": 8})
+    price_search = client.post("/api/v1/operator/knowledge/search", headers=headers, json={"query": "Vocês atendem convênio?", "top_k": 8})
     assert price_search.status_code == 200, price_search.text
-    price_hit_id = _find_admin_qa_hit(price_search.json()["evidence"], "Quanto custa uma consulta de mastologia?")
+    price_hit_id = _find_admin_qa_hit(price_search.json()["evidence"], "Vocês atendem convênio?")
 
     price_selected = client.post(f"/api/v1/operator/knowledge/evidence/{price_hit_id}/select", headers=headers, json={"conversation_id": price_conversation_id})
     assert price_selected.status_code == 201, price_selected.text

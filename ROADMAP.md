@@ -5,8 +5,9 @@ scope** for any entry not already implemented. The human authorized the V2
 specification cycle on 2026-08-11; **V2 is now DONE (2026-08-17)** — see
 `PROJECT_STATE.md` and `specs/002-v2-commercial-product-experience/`.
 Dynamic appointment availability is also **DONE (2026-08-19)** under its
-own package. All other entries remain roadmap only until their own Spec
-Kit flow is authorized and completed.
+own package, as is dynamic pricing and guided booking selection (also
+**DONE 2026-08-19**, D-032). All other entries remain roadmap only until
+their own Spec Kit flow is authorized and completed.
 
 ## Era A — Existence
 
@@ -65,6 +66,38 @@ Explicitly deferred from this cycle:
   D+1/D+7 seed action and deliberately deferred as separate future work,
   since the button alone covers this cycle's actual need. Its own Spec Kit
   package would be required before implementation, same as this feature.
+
+### Dynamic pricing and guided booking selection — **DONE (2026-08-19)**
+
+Closes the RAG coverage gap `teste_humano.md` §6.2 documented for
+`preco`/`pagamento`/`convenio` after this feature's own launch (the same
+over-flagged-`dynamic_data_required` pattern `agenda` had before this
+feature). Human-authorized 2026-08-19 (D-032):
+`specs/005-dynamic-pricing-and-guided-booking/`.
+
+Implemented scope:
+
+- a real `price_lookup` named resolver for genuinely per-query price
+  questions, reusing this feature's own `professional_specialties` data —
+  no new source;
+- content correction for the other `preco` entries and all `pagamento`
+  entries (static, accurate to what AA-10 actually does — the old content
+  described a payment-link/timer mechanism that was never built);
+- embedding-assisted guided booking selection: helping the customer pick
+  one of the resolver's offered slots, and interpreting a confirmation
+  reply, both via real-embedding similarity classification against a
+  small candidate/reference set — never an LLM call, never autonomous
+  send (stays inside N2, ordinary operator-reviewable drafts only).
+
+Explicitly deferred:
+
+- `insurance_lookup`/`convenio` — stays abstaining, unchanged;
+- a real `payment_simulator` resolver, any payment link, or any payment
+  timer mechanism;
+- any extension of Constitution Amendment 1.1.0's AA-10 exception — the
+  human explicitly chose to keep the new guided-selection interpretation
+  inside N2 rather than extend the exception, after that tradeoff was made
+  explicit (D-032).
 
 ### V2 — Commercial product experience — **DONE (2026-08-17)**
 

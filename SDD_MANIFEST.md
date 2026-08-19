@@ -31,6 +31,13 @@ own `tasks.md`/`acceptance.md`/`analysis.md` for full evidence.
 - `specs/004-dynamic-appointment-availability` — **DONE (2026-08-19)**;
   final execution evidence is in `acceptance.md`, with post-implementation
   convergence and AA-10 containment in `analysis.md` §18.
+- `specs/005-dynamic-pricing-and-guided-booking` — **DONE (2026-08-19)**;
+  a real `price_lookup` resolver, a content correction for the
+  `preco`/`pagamento` Q&A categories, and embedding-assisted guided
+  booking selection (stays inside N2, does not extend Constitution
+  Amendment 1.1.0). Final execution evidence is in `acceptance.md`;
+  cross-artifact convergence and the AA-10 containment re-verification are
+  in `analysis.md` §6.
 
 ## Required pre-code review
 

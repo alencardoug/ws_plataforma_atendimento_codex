@@ -36,6 +36,19 @@ payment, identity persistence, scheduling CRUD, and every other
 `dynamic_resolver` besides `appointment_availability` remain out of scope —
 see that package's `spec.md` §6.
 
+Dynamic pricing and guided booking selection: `specs/005-dynamic-pricing-
+and-guided-booking` — explicitly authorized by the human on 2026-08-19 and
+**DONE 2026-08-19** (D-032). Implements a real `price_lookup` named
+resolver (reuses 004's `professional_specialties` data, no new source),
+corrects the `preco`/`pagamento` Q&A content, and adds embedding-assisted
+guided booking selection (slot-choice and confirmation-intent
+interpretation) that stays entirely inside N2 — every output is an
+ordinary operator-reviewable draft, never an autonomous send.
+Constitution Amendment 1.1.0's AA-10 exception is unchanged and unextended
+(verified structurally, `booking_script/*` byte-identical, zero import
+coupling). `insurance_lookup`/`convenio` remains deferred — see that
+package's `spec.md` §6.
+
 ## Required SDD flow
 
 Before code:

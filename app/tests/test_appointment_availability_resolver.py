@@ -70,14 +70,14 @@ def seeded_slots() -> tuple[date, list[str]]:
 class TestSpecialtyFiltering:
     def test_each_specialty_keyword_returns_only_that_specialtys_slots(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution = resolve_appointment_availability(db, "Tem vaga de mastologia?")
+            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia?")
         assert "Mastologia" in resolution.pattern_text
         for other_name in ("Cirurgia colorretal", "Segunda opinião", "Oncologia geral"):
             assert other_name not in resolution.pattern_text
 
     def test_no_specialty_keyword_returns_only_generalist_slots_never_a_mix(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution = resolve_appointment_availability(db, "Será que tem vaga disponível?")
+            resolution, _rows = resolve_appointment_availability(db, "Será que tem vaga disponível?")
         assert "Oncologia geral" in resolution.pattern_text
         for other_name in ("Mastologia oncológica", "Cirurgia colorretal oncológica", "Segunda opinião oncológica"):
             assert other_name not in resolution.pattern_text
@@ -86,13 +86,13 @@ class TestSpecialtyFiltering:
 class TestPeriodFiltering:
     def test_morning_keyword_returns_only_morning_slots(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution = resolve_appointment_availability(db, "Tem vaga de mastologia de manhã?")
+            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia de manhã?")
         assert "09:00" in resolution.pattern_text
         assert "15:00" not in resolution.pattern_text
 
     def test_afternoon_keyword_returns_only_afternoon_slots(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution = resolve_appointment_availability(db, "Tem vaga de mastologia à tarde?")
+            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia à tarde?")
         assert "15:00" in resolution.pattern_text
         assert "09:00" not in resolution.pattern_text
 
@@ -107,13 +107,13 @@ class TestZeroMatchAbstain:
 class TestRenderedTextShape:
     def test_rendered_text_contains_no_raw_table_or_column_name(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution = resolve_appointment_availability(db, "Tem vaga de mastologia?")
+            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia?")
         for forbidden in ("schedule_slots", "specialty_id", "professional_id", "SELECT", "scheduling."):
             assert forbidden not in resolution.pattern_text
 
     def test_rendered_text_marks_every_price_as_simulation(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution = resolve_appointment_availability(db, "Tem vaga de mastologia?")
+            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia?")
         assert "(simulação)" in resolution.pattern_text
         assert "R$" in resolution.pattern_text
 
