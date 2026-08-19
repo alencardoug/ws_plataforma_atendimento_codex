@@ -9,6 +9,31 @@ own package, as is dynamic pricing and guided booking selection (also
 **DONE 2026-08-19**, D-032). All other entries remain roadmap only until
 their own Spec Kit flow is authorized and completed.
 
+## Priority ordering (human decision, 2026-08-19)
+
+Not a scope change — a sequencing decision for what gets authorized next,
+once the items already registered under "Era A — Existence" below
+(specialty scheduling breadth and its date-range/volume seeding, and
+natural-language date/time parsing) are done:
+
+1. **V4 (N3 governed autonomy/Supervisor) and V9 (N4 HOTL), built with
+   real frontend support** — not backend-only; the human wants these
+   viable end-to-end through the UI, together.
+2. **Then Telegram** (`Cross-cutting — Telegram` below).
+3. That completes what the human calls "the essential phase."
+
+**Deferred until after the essential phase** (explicitly, by the human):
+V5 (mature human handoff and queue operations), a scheduling-data CRUD
+admin UI (analogous to V2-8's knowledge-entry CRUD, not yet its own named
+roadmap item — managing `professional_specialties`/`schedule_slots` etc.
+through an admin UI instead of direct seeding/SQL), and other remaining
+construction items not listed above.
+
+**Stated goal:** after the essential phase, shift from building new
+capabilities to refining what exists — the human's own framing is making
+this project's production deployment ("plataforma_atendimento_prod") a
+satisfactory product, not adding more construction for its own sake.
+
 ## Era A — Existence
 
 ### V1 — Functional assisted-service core
@@ -118,6 +143,35 @@ intenso" section):
   (psico-oncologia, nutrição, endocrinologia, fisioterapia oncológica) —
   today `price_lookup`/`appointment_availability` cover only the
   specialties already seeded in `professional_specialties`;
+- **added 2026-08-19, human request:** once seeded, availability should
+  not be limited to today's D+1/D+7 pattern (`ensure-availability`, AA-9)
+  — populate a much wider window of bookable slots, for every specialty
+  (both the existing ones and the four new ones above), through
+  **2026-12-30**, 08:00-18:00, spaced 45 minutes apart, skipping
+  holidays. This is a seeding-volume/date-range decision, separate from
+  (but related to) `extract_parameters` (AA-3) not yet parsing an
+  explicit calendar date like "23/11/2026" from a customer's own message
+  (D-035, `DECISIONS.md`) — both need to work together for a customer to
+  actually reach one of these far-future slots by naming a specific date;
+- **Decided 2026-08-19 (human decision):** `extract_parameters` (AA-3)
+  needs to understand richer natural-language date/time expressions
+  beyond its current fixed keyword table — human's own examples: "daqui a
+  2 terças-feira", "daqui a um mês", "terceira quinta de outubro entre 10
+  da manhã e 2 da tarde". Design: **LLM for structured extraction, code
+  for the arithmetic** — an LLM call turns the free-text expression into
+  a structured intent (e.g. `{relative_unit, relative_count, weekday,
+  nth_weekday_of_month, month, time_range}`, exact shape TBD by the
+  future spec), and deterministic code (extending AA-3's existing
+  pattern, same category as GB-2's ordinal parser) computes the actual
+  date/time range from that structure and queries `schedule_slots` —
+  the LLM never computes or states a date itself, only classifies/
+  structures the customer's phrasing; calendar arithmetic is a known LLM
+  failure mode (miscounting "terceira quinta"), so keeping that
+  deterministic preserves the auditability this project's other
+  date/ordinal parsing already relies on. Still not authorized for
+  implementation — the future spec/plan cycle still needs to define the
+  exact structured-intent shape, prompt, and fallback behavior when the
+  LLM's extraction doesn't cleanly resolve to a query.
 - must go through a proper discovery/spec/plan/tasks cycle like every
   other feature — in particular, whether/how this interacts with the
   Constitution Amendment 1.1.0 boundary (it shouldn't need to) and with
