@@ -1,17 +1,23 @@
 """005: real end-to-end HTTP smoke for dynamic pricing (PL) and guided
 booking selection (GB) against a rebuilt backend — real embeddings, zero
 LLM calls for any resolved/guided generation, confirms genuine paraphrase
-recognition (not just exact-text match, which the deterministic-provider
-unit tests in test_guided_booking.py already cover), and confirms every
-guided-selection/confirmation output still requires an explicit operator
-send. specs/005-dynamic-pricing-and-guided-booking/tasks.md T045/T055,
-acceptance.md."""
+and ordinal-choice recognition (not just exact-text match, which the
+deterministic-provider unit tests in test_guided_booking.py already
+cover), the full direct-to-CPF/payment flow (D-033), and confirms every
+GB output still requires an explicit operator send.
+specs/005-dynamic-pricing-and-guided-booking/tasks.md T045/T055,
+acceptance.md, DECISIONS.md D-033."""
 
 import os
+from uuid import UUID
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from customer_care.bootstrap import create_app
+from customer_care.infrastructure.database import get_session_factory
+from customer_care.infrastructure.models import Message
+from customer_care.scheduling.guided_booking import GB_CPF_INPUT_REDACTION, GB_PAYMENT_INPUT_REDACTION
 
 
 def run() -> None:
@@ -75,32 +81,65 @@ def run() -> None:
     unrelated_draft = draft_on(unrelated_msg["id"])
     assert unrelated_draft["trigger"] != "GUIDED_SLOT_SELECTION", unrelated_draft
 
-    # GB-2: a real paraphrase (not the offer's own exact text) — all AA-9
-    # seeded generalist slots are 08:00 morning appointments, so "the
-    # morning one" is a genuine paraphrase of any offered slot without
-    # hardcoding which exact weekday got seeded this run.
-    choice_msg = send_customer("Pode ser aquele horário de manhã mesmo, o primeiro que vocês tiverem")
+    # GB-2 (D-033): an ordinal reference — "segunda opção" shares no
+    # semantic content with any offer's own specialty/day/time text, so
+    # only the deterministic ordinal parser (not embedding similarity)
+    # can resolve this, regardless of threshold. This is the exact bug
+    # report that produced D-033.
+    choice_msg = send_customer("segunda opção")
     choice_draft = draft_on(choice_msg["id"])
     assert choice_draft["trigger"] == "GUIDED_SLOT_SELECTION", choice_draft
     assert choice_draft["model"] == "not-applicable", choice_draft
-    assert "Deseja que eu confirme o agendamento?" in choice_draft["draft_text"], choice_draft
+    assert "Informe seu CPF" in choice_draft["draft_text"], choice_draft
+    assert "R$" in choice_draft["draft_text"], choice_draft
+    # D-033: no separate "Deseja que eu confirme?" gate — details (offer +
+    # price) and the CPF request arrive together, one message.
+    assert "Deseja que eu confirme" not in choice_draft["draft_text"], choice_draft
     operator_send(choice_draft)
 
-    # GB-4: a real varied affirmative phrasing (not literally "sim").
-    confirm_msg = send_customer("Pode confirmar sim, por favor")
-    confirm_draft = draft_on(confirm_msg["id"])
-    assert confirm_draft["trigger"] == "GUIDED_CONFIRMATION", confirm_draft
-    assert confirm_draft["draft_text"] == "Perfeito, entendido! Pode me confirmar que deseja seguir com esse agendamento?", confirm_draft
-    # GB-5: still just a draft — nothing was sent to the customer automatically.
+    # GB-4 (D-033): invalid CPF re-asks (still requires operator send).
+    bad_cpf_msg = send_customer("Ah 123456a8910")
+    bad_cpf_draft = draft_on(bad_cpf_msg["id"])
+    assert bad_cpf_draft["draft_text"] == "CPF inválido. Informe um número válido de 11 dígitos.", bad_cpf_draft
+    operator_send(bad_cpf_draft)
+
+    # A valid CPF confirms and asks about payment, in one message — the
+    # real point of D-033: no independent "quero marcar" phrase needed.
+    cpf_msg = send_customer("tabom 123.456..789.10")
+    cpf_draft = draft_on(cpf_msg["id"])
+    assert cpf_draft["trigger"] == "GUIDED_CPF_CONFIRMED", cpf_draft
+    assert cpf_draft["draft_text"] == "CPF 123.456.789-10 confirmado. O valor foi pago? Responda sim ou não.", cpf_draft
+    operator_send(cpf_draft)
+
+    # Negative payment reply re-asks, still draft-only.
+    no_payment_msg = send_customer("Então, não paguei")
+    no_payment_draft = draft_on(no_payment_msg["id"])
+    assert no_payment_draft["draft_text"] == "O valor foi pago? Responda sim ou não.", no_payment_draft
+    operator_send(no_payment_draft)
+
+    # Affirmative reply completes the booking — same wording AA-10 itself uses.
+    paid_msg = send_customer("tabom simm paguei")
+    paid_draft = draft_on(paid_msg["id"])
+    assert paid_draft["trigger"] == "GUIDED_BOOKING_COMPLETE", paid_draft
+    assert paid_draft["draft_text"] == "Verificando pagamento. Pagamento verificado. Agendamento realizado com sucesso. Há algo mais que posso ajudar?", paid_draft
     detail_before_send = client.get(f"/api/v1/operator/conversations/{conversation_id}", headers=headers)
     assert detail_before_send.status_code == 200, detail_before_send.text
     operator_messages_before = [m for m in detail_before_send.json()["messages"] if m.get("author_type") == "OPERATOR"]
-    assert confirm_draft["draft_text"] not in [m["body"] for m in operator_messages_before], "GB-4 output must never reach the customer without an explicit operator send"
+    assert paid_draft["draft_text"] not in [m["body"] for m in operator_messages_before], "GB output must never reach the customer without an explicit operator send"
+    operator_send(paid_draft)
+
+    # D-033 redaction: the raw CPF/payment replies must never reach durable storage.
+    with get_session_factory()() as db:
+        bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == UUID(conversation_id))).all()]
+        assert GB_CPF_INPUT_REDACTION in bodies, bodies
+        assert GB_PAYMENT_INPUT_REDACTION in bodies, bodies
+        for raw_input in ("Ah 123456a8910", "tabom 123.456..789.10", "Então, não paguei", "tabom simm paguei"):
+            assert raw_input not in bodies, bodies
 
     close = client.post(f"/api/v1/operator/conversations/{conversation_id}/close", headers=headers)
     assert close.status_code == 200, close.text
 
-    print("smoke_v5_guided_booking_ok: real price_lookup resolution, real-paraphrase slot-choice and confirmation-intent recognition, zero LLM calls, GB-4 output confirmed draft-only")
+    print("smoke_v5_guided_booking_ok: real price_lookup resolution, ordinal slot-choice recognition, full direct-to-CPF/payment flow (D-033), zero LLM calls, redaction confirmed, every step draft-only")
 
 
 if __name__ == "__main__":

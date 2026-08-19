@@ -300,10 +300,10 @@ second call). Validation-created conversations truncated afterward per
 the first time. `teste_humano.md` was updated the same day with manual
 test coverage for everything new in V3 and 004.
 
-## Dynamic pricing and guided booking selection — DONE (2026-08-19, D-032)
+## Dynamic pricing and guided booking selection — DONE (2026-08-19, D-032, corrected D-033)
 
-All 8 phases of `specs/005-dynamic-pricing-and-guided-booking/tasks.md`
-(T001-T074) are complete and committed to `main`:
+All 9 phases of `specs/005-dynamic-pricing-and-guided-booking/tasks.md`
+(T001-T086) are complete and committed to `main`:
 
 - **Phase 1** — two additive migrations:
   `customer_service.appointment_offer_presentations` (GB-1's persisted-
@@ -343,6 +343,31 @@ All 8 phases of `specs/005-dynamic-pricing-and-guided-booking/tasks.md`
   regression tests were updated because this feature's own new capability
   (`price_lookup`) superseded their old "still abstains" assumption —
   documented inline, not silently changed.
+- **Phase 9 — correction (D-033), same day.** Real use immediately
+  surfaced two defects Phase 5-6's own design missed: embedding
+  similarity cannot resolve ordinal replies ("segunda opção", "3") at
+  all — not a threshold problem, a category mismatch — and the standalone
+  confirmation step (original GB-4) led nowhere without the customer
+  independently typing a booking-intent phrase, which felt broken in
+  practice. Fixed with (a) a deterministic ordinal/positional parser tried
+  before embedding similarity, and (b) removing the standalone confirm
+  step entirely — GB now goes directly from a chosen slot through CPF and
+  payment, reusing `booking_script.parsing`'s exact deterministic parsers
+  (`extract_cpf`/`extract_payment_confirmation`, the one disclosed,
+  narrow import from `booking_script/*` — `booking_script/service.py`
+  itself remains untouched) — while staying entirely inside N2, one
+  operator click per step, per the human's original D-032 decision. The
+  now-dead embedding-based confirmation design
+  (`CONFIRMATION_MARGIN_THRESHOLD`, reference-phrase classification) was
+  removed rather than left unused. A second real finding, caught only by
+  writing the actual end-to-end smoke test: raw CPF/payment replies can't
+  be read from a persisted `Message` at draft-generation time, since
+  they're already redacted by then — fixed by interpreting them
+  synchronously at message-creation time instead (mirroring AA-10's own
+  request-local-only principle) and staging only the safe result on two
+  new transient `conversations` columns. 153 backend tests pass (was
+  139); full smoke suite re-run green, including AA-10's own
+  `smoke_v4_booking_script.py`, unaffected.
 
 Not yet deployed to production as of this writing — batch with the next
 scheduled deploy per this project's standing deploy-cadence practice, not

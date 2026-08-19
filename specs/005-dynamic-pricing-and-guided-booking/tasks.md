@@ -173,6 +173,44 @@ per `AGENTS.md`'s required SDD flow.
 - [x] **T074** Update `teste_humano.md` with a new section covering PL/GB
   manual test steps, same pattern as the V3/004 update.
 
+## Phase 9 — Correction (2026-08-19, D-033)
+
+Found through real use immediately after Phase 8 closed. spec.md §10,
+plan.md §11, data-model.md §7 are authoritative.
+
+- [x] **T080** Deterministic ordinal/positional parser
+  (`_parse_ordinal_choice`) in `guided_booking.py`, tried before embedding
+  similarity in `interpret_slot_choice` (spec.md GB-2 revised).
+- [x] **T081** Two new migrations: `conversations.guided_booking_pending_text`/
+  `guided_booking_pending_trigger` (`20260819_0007`); widen
+  `ai_generations_trigger_check` for `GUIDED_CPF_CONFIRMED`/
+  `GUIDED_BOOKING_COMPLETE` (`20260819_0008`).
+- [x] **T082** `interpret_cpf_reply`/`interpret_payment_reply` in
+  `guided_booking.py`, reusing `booking_script.parsing.extract_cpf`/
+  `extract_payment_confirmation` verbatim.
+- [x] **T083** `advance_guided_booking()` — the message-creation-time
+  orchestrator, wired into `anonymous_access/router.py::send_customer_message()`
+  alongside AA-10's own `advance_booking_script()`.
+- [x] **T084** Redaction: `pending_redaction_step`/`persisted_customer_body`
+  in `guided_booking.py`; wired into `send_customer_message()`'s existing
+  `persisted_customer_body` call (checked only when AA-10 itself didn't
+  already redact).
+- [x] **T085** Rewrote `guided_booking_result()` (`ai/router.py`) to check
+  `conversation.guided_booking_pending_text` first (consuming/clearing
+  it), removed the old standalone GB-4 confirmation branch and its
+  `GB4_AFFIRMATIVE_TEXT`/`GB4_REASK_TEXT` constants.
+- [x] **T086 [Gate]** Updated `test_005_booking_script_containment.py`
+  (AST-based, not raw-text — a docstring mentioning "send_scripted_message"
+  must not false-positive) to verify the *precise* disclosed coupling
+  (`booking_script.parsing.extract_cpf`/`extract_payment_confirmation`
+  only) rather than zero coupling. Rewrote `test_guided_booking.py`'s
+  GB-4-era tests as CPF/payment/redaction tests. Rewrote
+  `smoke_v5_guided_booking.py`'s GB section for the ordinal case
+  ("segunda opção") and the full real CPF/payment flow, including a
+  redaction assertion. 153 backend tests pass (was 139); all smoke
+  scripts re-run pass, including `smoke_v4_booking_script.py` (AA-10
+  itself, unaffected) and `smoke_v4_appointment_availability.py`.
+
 ## Dependency summary
 
 ```

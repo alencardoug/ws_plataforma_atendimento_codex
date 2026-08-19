@@ -306,3 +306,30 @@ is a single indexed query (`data-model.md` §1 index).
   acknowledgement template (unit-tested, §5.3).
 - No new customer-visible autonomous send — every GB output is an
   `AIGeneration`, reachable only through the existing explicit-send path.
+
+## 11. Correction (2026-08-19, D-033)
+
+`spec.md` §10 is the authoritative record. Summary of what changed in this
+document's own design, superseding §5.2/§5.3 above where they conflict:
+
+- **§5.2** — `interpret_slot_choice` now tries a deterministic ordinal/
+  positional parser (`_parse_ordinal_choice`) before the embedding-distance
+  query shown above, not instead of it. `SLOT_CHOICE_DISTANCE_THRESHOLD`
+  (0.68) is unchanged.
+- **§5.3** — the standalone `interpret_confirmation_intent`/
+  `CONFIRMATION_MARGIN_THRESHOLD`/reference-phrase design is removed
+  entirely, replaced by `interpret_cpf_reply`/`interpret_payment_reply`,
+  which reuse `booking_script.parsing.extract_cpf`/
+  `extract_payment_confirmation` verbatim — regex-based, not
+  embedding-based. The raw customer reply these two functions receive is
+  never read from a persisted `Message` (which is already redacted by
+  then) — it is read once, synchronously, at message-creation time
+  (`scheduling.guided_booking.advance_guided_booking()`, called from
+  `anonymous_access/router.py::send_customer_message()` alongside AA-10's
+  own `advance_booking_script()`), and only the resulting safe text is
+  staged on two new transient `conversations` columns
+  (`data-model.md` §9) for the next draft-generation call to consume.
+- New trigger values: `GUIDED_CPF_CONFIRMED`, `GUIDED_BOOKING_COMPLETE`
+  (migration `20260819_0008`). `GUIDED_CONFIRMATION` (migration
+  `20260819_0006`) is no longer produced by any code path — left in the
+  CHECK allowlist unused, per this project's additive-only convention.

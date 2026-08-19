@@ -42,6 +42,13 @@ class Conversation(Base):
     # AA-10: transient flow-position marker for booking_script/service.py.
     # NULL = no script in progress. Never holds the customer's CPF/payment answer.
     booking_script_step: Mapped[str | None] = mapped_column(Text)
+    # 005/D-033: GB's own parallel transient staging fields — the already-
+    # interpreted result of a raw CPF/payment reply (never the raw value
+    # itself), set synchronously at message-creation time and consumed/
+    # cleared by the next draft-generation call. Never read or written by
+    # booking_script/*. See scheduling/guided_booking.py.
+    guided_booking_pending_text: Mapped[str | None] = mapped_column(Text)
+    guided_booking_pending_trigger: Mapped[str | None] = mapped_column(Text)
 
 
 class ConversationAssignment(Base):

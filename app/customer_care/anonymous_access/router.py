@@ -14,6 +14,8 @@ from customer_care.audit.service import record_event
 from customer_care.booking_script.service import advance_booking_script, persisted_customer_body
 from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
+from customer_care.scheduling.guided_booking import advance_guided_booking
+from customer_care.scheduling.guided_booking import persisted_customer_body as guided_persisted_customer_body
 from customer_care.shared.dependencies import DbSession, customer_bearer
 from customer_care.shared.errors import api_error
 from customer_care.shared.http import client_ip
@@ -88,8 +90,12 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
         raise api_error(409, "CONVERSATION_CLOSED", "Conversation is closed")
     # AA-10 parses CPF/payment replies only from the request-local value.
     # At those two script steps the durable message carries a fixed marker,
-    # never the customer's raw input (spec.md outcome 13).
+    # never the customer's raw input (spec.md outcome 13). 005/D-033: GB's
+    # own parallel CPF/payment flow gets the same treatment — checked only
+    # when AA-10 itself didn't already redact.
     durable_body = persisted_customer_body(conversation.booking_script_step, payload.body)
+    if durable_body == payload.body:
+        durable_body = guided_persisted_customer_body(session, conversation, payload.body)
     message = Message(conversation_id=conversation.id, author_type="CUSTOMER", body=durable_body)
     session.add(message)
     session.flush()
@@ -104,6 +110,7 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
         payload={"message_id": str(message.id), "length": len(durable_body)},
     )
     advance_booking_script(session, conversation, payload.body)  # AA-10 — raw input remains request-local; never calls an LLM
+    advance_guided_booking(session, conversation, payload.body)  # 005/D-033 — same principle, GB's own parallel N2-draft flow; no-op if AA-10 just took over
     session.commit()
     session.refresh(message)
     return message

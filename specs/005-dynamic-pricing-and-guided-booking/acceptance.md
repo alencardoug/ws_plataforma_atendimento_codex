@@ -67,3 +67,27 @@ failure is confirmed unrelated via baseline comparison; the one real
 mid-implementation defect (threshold calibration) was found by this
 package's own acceptance protocol and corrected before this record was
 written, not after.
+
+## Correction record (2026-08-19, D-033)
+
+Found through real use immediately after the record above closed: (1) GB-2
+could not resolve ordinal replies ("segunda opção", "3") at all — an
+embedding-similarity design flaw, not a threshold problem; (2) the
+standalone confirmation step felt broken in practice, with no continuous
+path to CPF/payment without the customer independently typing a
+booking-intent phrase.
+
+| Area | Result | Real evidence |
+|---|---|---|
+| J — Ordinal slot-choice matching | PASS | `test_guided_booking.py::TestInterpretSlotChoice` (6 parametrized cases: "segunda opção", "a segunda", "2", "primeira", "1", embedded-in-sentence); `smoke_v5_guided_booking.py` real end-to-end with "segunda opção" against real offers. Out-of-range ordinal falls through without raising. |
+| K — Direct-to-CPF/payment flow | PASS | `smoke_v5_guided_booking.py`: real HTTP flow — slot chosen (ordinal) → draft states details+price+CPF request in one message (no confirm question) → invalid CPF re-asks → valid CPF confirms + asks payment → negative payment re-asks → affirmative payment completes with AA-10's own exact final wording. Every step confirmed still draft-only (`assert ... not in [operator message bodies]` before send). |
+| L — Reused, not reimplemented, parsing | PASS | `test_005_booking_script_containment.py::TestDisclosedParsingReuse` (2/2): exactly one `booking_script` import in `guided_booking.py`, exactly `extract_cpf`/`extract_payment_confirmation` — AST-verified, not text-matched (a docstring mentioning the forbidden function name by name, to explain why it's forbidden, must not false-positive; caught and fixed during this correction's own test-writing). |
+| M — Raw CPF/payment never persisted, GB's own redaction | PASS | `test_guided_booking.py::TestRedaction` (3/3) + `smoke_v5_guided_booking.py`'s real DB assertion: `GB_CPF_INPUT_REDACTION`/`GB_PAYMENT_INPUT_REDACTION` present, all 4 raw customer inputs absent from every `Message.body` in the conversation. |
+| N — AA-10 itself unaffected | PASS | `smoke_v4_booking_script.py` re-run unmodified: full 10-message autonomous script, zero operator clicks, still passes byte-for-byte identically. `booking_script/service.py`/`parsing.py` structural containment (`test_005_booking_script_containment.py`, `test_booking_script_containment.py`) both green. |
+| O — Full regression | PASS | 153 backend tests (was 139 after the original D-032 close); all smoke scripts re-run (including `smoke_v4_appointment_availability.py`, `smoke_core`/`smoke_n2`/`smoke_v3_taxonomy_hcr` dependency-ordered sequences) pass. `smoke_ingestion_changed.py` not runnable from the local venv (hardcodes the Docker container's `/workspace/documents` path) — pre-existing environment constraint, unrelated to this correction, not newly introduced. |
+
+**GO (correction).** Both real defects are fixed with real evidence; AA-10
+itself (the constitutionally-scoped exception) is verified unmodified and
+unaffected; the one narrow, disclosed coupling this correction introduces
+(reusing two pure parsing functions) is verified precisely, not just
+assumed absent.

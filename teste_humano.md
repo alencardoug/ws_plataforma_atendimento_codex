@@ -334,6 +334,14 @@ Fechou o achado da Seção 6.2 (versão anterior deste documento) para
 `preco`/`pagamento` — o mesmo padrão de "super-marcação" que `agenda`
 tinha antes da feature 004. `convenio` continua de fora, deliberadamente.
 
+**Atualizado 2026-08-19 (D-033):** depois do primeiro teste real, duas
+coisas foram corrigidas — (1) a escolha de vaga agora reconhece "segunda
+opção"/"3"/ordinais, não só paráfrase; (2) não existe mais uma pergunta
+separada de "Deseja que eu confirme?" — ao escolher a vaga, o rascunho já
+mostra os detalhes (data/hora/preço) e pede o CPF direto, seguindo para
+pagamento em seguida. Continua 100% dentro do N2 (um clique do operador
+por etapa) — só ficou mais direto.
+
 ### 4b.1 Preço real via resolvedor (`price_lookup`)
 
 - [ ] Pergunte "Quanto custa uma consulta de mastologia?" (ou colorretal,
@@ -357,37 +365,57 @@ tinha antes da feature 004. `convenio` continua de fora, deliberadamente.
 - [ ] Pergunte "É seguro enviar dados do cartão no chat?" — a orientação
   de segurança (nunca envie número de cartão) continua presente.
 
-### 4b.3 Seleção guiada de vaga (assistida por embedding, só rascunho)
+### 4b.3 Seleção guiada de vaga — ordinal ou paráfrase (só rascunho)
 
 - [ ] Pergunte por disponibilidade (ex.: "Existe consulta disponível essa
   semana?") e gere o rascunho — deve trazer até 4 vagas reais, igual à
-  Seção 4.2.
-- [ ] Envie essa resposta ao cliente. Do lado do cliente, responda com uma
-  **paráfrase real** de uma das vagas oferecidas (não precisa copiar o
-  texto exato — ex.: "pode ser aquele horário de manhã mesmo" ou "prefiro
-  o de quinta com o Dr. Fulano"). Gere um novo rascunho: deve identificar
-  corretamente qual vaga foi escolhida e perguntar "Deseja que eu confirme
-  o agendamento?" — **continua sendo só um rascunho**, o operador precisa
+  Seção 4.2. Envie essa resposta ao cliente.
+- [ ] Do lado do cliente, responda com uma referência **ordinal/posicional**
+  — "segunda opção", "a terceira", ou simplesmente "3". Gere um novo
+  rascunho: deve identificar corretamente qual vaga (pela posição, não por
+  significado) foi escolhida.
+- [ ] Em outra tentativa, responda com uma **paráfrase real** do conteúdo
+  da vaga (não precisa copiar o texto exato — ex.: "pode ser aquele
+  horário de manhã mesmo" ou "prefiro o de quinta com o Dr. Fulano") — deve
+  continuar funcionando via similaridade de embedding, como antes.
+- [ ] Em qualquer um dos dois casos, o rascunho resultante deve mostrar os
+  detalhes da vaga (especialidade, profissional, dia/hora) **e o preço**,
+  seguido direto de "Informe seu CPF - é uma simulação, informe qualquer
+  número de 11 dígitos" — **sem** nenhuma pergunta de "Deseja que eu
+  confirme?" no meio. Continua sendo só um rascunho — o operador precisa
   clicar enviar.
 - [ ] Responda com algo sem relação nenhuma com as vagas (ex.: "vocês têm
   estacionamento?") — o rascunho deve voltar ao comportamento normal
   (busca de evidência comum), não deve "forçar" uma vaga errada.
 
-### 4b.4 Confirmação guiada (assistida por embedding, só rascunho)
+### 4b.4 CPF e pagamento direto (reaproveitando o script do AA-10, só rascunho)
 
-- [ ] Depois de enviar a pergunta de confirmação (4b.3), responda do lado
-  do cliente com uma frase afirmativa **variada**, não literalmente "sim"
-  (ex.: "pode confirmar sim, por favor" ou "claro que sim!"). O próximo
-  rascunho deve reconhecer como confirmação e convidar o cliente a
-  prosseguir — ainda como rascunho, o operador precisa enviar.
-- [ ] Responda negativamente ou de forma ambígua — o próximo rascunho deve
-  perguntar de novo, com um texto **diferente** da pergunta original (não
-  deve parecer que o sistema travou repetindo a mesma frase).
-- [ ] Confirme que o texto desses rascunhos nunca é enviado sozinho — em
-  nenhum momento desta seção uma mensagem chega ao cliente sem o operador
-  clicar "Enviar" (essa é a fronteira que a feature 005 deliberadamente
-  manteve dentro do N2, sem estender a exceção de envio autônomo do
-  agendamento simulado, Seção 4.3).
+Depois de enviar o rascunho da Seção 4b.3 (que já pede CPF), o fluxo segue
+exatamente como o script simulado da Seção 4.3 — mesmo texto, mesma
+lógica de validação — mas cada mensagem agora é um **rascunho que o
+operador precisa enviar**, não envio automático.
+
+- [ ] Responda com um CPF inválido (ex.: "Ah 123456a8910") — o rascunho
+  deve pedir um CPF válido de 11 dígitos. Envie.
+- [ ] Responda com 11 dígitos em qualquer formato (ex.: "tabom
+  123.456.789.10") — o rascunho deve confirmar o CPF formatado **e já
+  perguntar se o valor foi pago**, no mesmo rascunho (sem etapa extra).
+  Envie.
+- [ ] Responda negativamente (ex.: "não paguei") — o rascunho deve
+  perguntar de novo. Envie.
+- [ ] Responda afirmativamente, de forma variada (ex.: "tabom simm
+  paguei") — o rascunho final deve trazer exatamente a mesma confirmação
+  de sucesso do fluxo autônomo original ("Agendamento realizado com
+  sucesso. Há algo mais que posso ajudar?").
+- [ ] Confirme que, em nenhum momento desta seção, uma mensagem chega ao
+  cliente sem o operador clicar "Enviar" — essa é a fronteira que a
+  feature 005 deliberadamente manteve dentro do N2 (D-032, reafirmada em
+  D-033), sem estender a exceção de envio autônomo do agendamento
+  simulado (Seção 4.3, que continua sendo a única exceção do sistema).
+- [ ] (Opcional, verificação técnica) O CPF e a resposta de pagamento
+  digitados aqui não devem aparecer em texto puro em nenhum lugar do
+  sistema — mesma regra de não retenção que a Seção 4.3 já garante para o
+  fluxo autônomo.
 
 ---
 

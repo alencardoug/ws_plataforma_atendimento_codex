@@ -38,16 +38,18 @@ see that package's `spec.md` §6.
 
 Dynamic pricing and guided booking selection: `specs/005-dynamic-pricing-
 and-guided-booking` — explicitly authorized by the human on 2026-08-19 and
-**DONE 2026-08-19** (D-032). Implements a real `price_lookup` named
-resolver (reuses 004's `professional_specialties` data, no new source),
-corrects the `preco`/`pagamento` Q&A content, and adds embedding-assisted
-guided booking selection (slot-choice and confirmation-intent
-interpretation) that stays entirely inside N2 — every output is an
-ordinary operator-reviewable draft, never an autonomous send.
-Constitution Amendment 1.1.0's AA-10 exception is unchanged and unextended
-(verified structurally, `booking_script/*` byte-identical, zero import
-coupling). `insurance_lookup`/`convenio` remains deferred — see that
-package's `spec.md` §6.
+**DONE 2026-08-19** (D-032, corrected same day by D-033). Implements a
+real `price_lookup` named resolver (reuses 004's `professional_specialties`
+data, no new source), corrects the `preco`/`pagamento` Q&A content, and
+adds guided booking selection — ordinal/positional and embedding-assisted
+slot-choice interpretation, then a direct-to-CPF/payment flow reusing
+`booking_script.parsing`'s deterministic parsers — entirely inside N2:
+every output is an ordinary operator-reviewable draft, never an autonomous
+send. Constitution Amendment 1.1.0's AA-10 exception is unchanged and
+unextended (verified structurally — `booking_script/service.py`
+byte-identical, `booking_script/parsing.py`'s two pure functions are the
+one disclosed, narrow import GB has). `insurance_lookup`/`convenio`
+remains deferred — see that package's `spec.md` §6/§10.
 
 ## Required SDD flow
 

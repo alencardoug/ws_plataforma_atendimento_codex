@@ -17,10 +17,9 @@ from customer_care.knowledge.dynamic_binding import DynamicResolution, DynamicRe
 from customer_care.rag.service import Evidence, configured_embedding_provider, evidence_dict, load_evidence, retrieve
 from customer_care.scheduling.availability import resolve_appointment_availability, resolve_price_lookup
 from customer_care.scheduling.guided_booking import (
-    interpret_confirmation_intent,
     interpret_slot_choice,
+    offer_price_text,
     persist_presented_offers,
-    preceding_confirmation_question_generation_id,
 )
 from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
@@ -216,30 +215,38 @@ def dynamic_pattern_result(session: DbSession, evidence: list[Evidence], query_t
         return GenerationResult("ABSTAIN", "", "DYNAMIC_DATA_UNAVAILABLE", []), False, exc.cause, None, None
 
 
-GB4_AFFIRMATIVE_TEXT = "Perfeito, entendido! Pode me confirmar que deseja seguir com esse agendamento?"
-GB4_REASK_TEXT = "Não entendi sua resposta. Você confirma que deseja seguir com esse agendamento? Responda sim ou não."
-
-
 def guided_booking_result(session: DbSession, provider: Any, conversation: Conversation, selected_messages: list[Message]) -> tuple[GenerationResult, str] | None:
-    """005/GB-2..GB-5: tried before ordinary evidence-based composition
-    (`plan.md` §5.2) — a pending guided-selection/confirmation exchange
-    takes priority over a new question, but a `None` return here falls
-    through unchanged to `full_parent_draft`/`dynamic_pattern_result`/the
-    LLM path (GB-3). Only ever applies to the customer's own latest
-    selected message — never manual-search-only drafts. Returns
-    `(result, trigger_override)`; both outputs are fixed templates, never
-    LLM-composed, matching AA-5/D-028's precedent extended to
-    interpretation (spec.md §9 item 3)."""
+    """005/GB-2..GB-8 (corrected 2026-08-19, D-033): tried before ordinary
+    evidence-based composition (`plan.md` §5.2) — a pending guided-
+    selection/CPF/payment exchange takes priority over a new question, but
+    a `None` return here falls through unchanged to
+    `full_parent_draft`/`dynamic_pattern_result`/the LLM path (GB-3).
+
+    Checks `conversation.guided_booking_pending_text` first — set
+    synchronously at message-creation time by
+    `scheduling.guided_booking.advance_guided_booking()` (the only place a
+    raw CPF/payment reply is ever read, since the durable message is
+    already redacted by the time a draft is generated). This takes
+    priority over `selected_messages` entirely: it reflects what the
+    customer's actual latest message said, regardless of what the operator
+    later selects. Falls back to `interpret_slot_choice` (ordinal-first,
+    embedding-second, GB-2/GB-3) for the customer's own latest selected
+    message — never manual-search-only drafts. Every output here is a
+    fixed template, never LLM-composed, matching AA-5/D-028's precedent
+    extended to interpretation (spec.md §9 item 3)."""
+    if conversation.guided_booking_pending_text is not None:
+        text = conversation.guided_booking_pending_text
+        trigger = conversation.guided_booking_pending_trigger or "GUIDED_CPF_CONFIRMED"
+        conversation.guided_booking_pending_text = None
+        conversation.guided_booking_pending_trigger = None
+        return GenerationResult("ANSWER", text, None, []), trigger
     if not selected_messages or selected_messages[-1].author_type != "CUSTOMER":
         return None
     customer_text = selected_messages[-1].body
-    if preceding_confirmation_question_generation_id(session, conversation) is not None:
-        confirmed = interpret_confirmation_intent(provider, customer_text)
-        text = GB4_AFFIRMATIVE_TEXT if confirmed is True else GB4_REASK_TEXT
-        return GenerationResult("ANSWER", text, None, []), "GUIDED_CONFIRMATION"
     offer = interpret_slot_choice(session, provider, conversation, customer_text)
     if offer is not None:
-        text = f"Entendi que você escolheu: {offer.description}. Deseja que eu confirme o agendamento?"
+        price_text = offer_price_text(session, offer)
+        text = f"Entendi que você escolheu: {offer.description} — {price_text}. Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos."
         return GenerationResult("ANSWER", text, None, []), "GUIDED_SLOT_SELECTION"
     return None
 

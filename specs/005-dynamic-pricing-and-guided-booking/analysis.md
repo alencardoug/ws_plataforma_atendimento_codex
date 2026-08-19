@@ -102,3 +102,55 @@ boundary is verified intact by structural, not just behavioral, proof;
 the one real design defect found during implementation (threshold
 calibration) was corrected before this record closed, with the evidence
 that caught it preserved rather than discarded.
+
+## 7. Correction convergence (2026-08-19, D-033)
+
+Real use immediately after §6's verdict found two defects §1-§5's own
+analysis had not anticipated: embedding similarity cannot resolve ordinal
+replies at all (not a calibration gap — a category error, comparing
+positional language against content-based descriptions), and the
+standalone confirmation step created a dead end rather than a continuous
+flow. Both are now fixed (spec.md §10, `acceptance.md`'s Correction
+record).
+
+**Boundary re-verification, same rigor as §2 above, re-run after the
+correction:**
+
+- `git diff` on `booking_script/service.py`/`parsing.py`: still empty.
+- Import-graph containment re-verified, now precisely (not "zero
+  coupling" — D-033 introduces one disclosed import of two pure functions
+  from `booking_script.parsing`): `test_005_booking_script_containment.py`
+  asserts this via `ast` parsing specifically because a raw-text scan
+  falsely flagged the module's own docstring (which explains, in prose,
+  why `send_scripted_message` must never be called) — a real, if minor,
+  test-design lesson from this correction: verify source *structure*, not
+  substring presence, when the forbidden name is also worth explaining in
+  documentation.
+- `conversation.booking_script_step` is confirmed never read or written
+  by any D-033 code (`guided_booking.py`'s own new
+  `_latest_operator_message_trigger`/`pending_redaction_step`/
+  `interpret_cpf_reply`/`interpret_payment_reply`/`advance_guided_booking`
+  all key off `Message.source_generation_id` and `ai_generations.trigger`
+  instead) — grep-verified, not just asserted.
+- `smoke_v4_booking_script.py` (AA-10's own full autonomous script) re-run
+  unmodified and still passes byte-for-byte identically, confirming this
+  correction did not regress the one path it deliberately leaves alone.
+
+**A second, genuine finding surfaced only by attempting the real
+end-to-end smoke test** (not by static review): the original correction
+design assumed `interpret_cpf_reply`/`interpret_payment_reply` could read
+the customer's raw reply from the already-persisted `Message.body` at
+draft-generation time. This is impossible by construction — that value is
+redacted at message-creation time, before any later draft-generation call
+could ever see it. Caught immediately by writing the real HTTP smoke test
+this correction's own acceptance protocol requires, not discovered later.
+Fixed by moving the interpretation to message-creation time itself
+(`advance_guided_booking`, mirroring `advance_booking_script`'s own
+call-site shape) and staging only the safe, already-computed result.
+
+## 8. Final verdict (correction)
+
+**GO**, 2026-08-19. Both real defects are fixed with real evidence
+(`acceptance.md`'s Correction record); AA-10's constitutional boundary is
+re-verified structurally intact; the correction's own narrow, disclosed
+exception to the original "zero coupling" claim is verified precisely.

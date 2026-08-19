@@ -162,3 +162,41 @@ Two new, additive, forward-only Alembic migrations:
 
 Exact filenames/timestamps assigned in `tasks.md` at implementation time,
 per the project's existing Alembic numbering convention.
+
+## 7. Correction (2026-08-19, D-033)
+
+`spec.md` §10 and `plan.md` §11 are the authoritative record; this section
+covers the schema-level delta only.
+
+### 7.1 `conversations`: two new transient staging columns (migration `20260819_0007`)
+
+| Column | Type | Notes |
+|---|---|---|
+| `guided_booking_pending_text` | `text`, nullable | The already-interpreted CPF/payment-reply result — never the raw reply itself. Set by `advance_guided_booking()` at message-creation time; read and cleared by the next `generate_draft()` call. |
+| `guided_booking_pending_trigger` | `text`, nullable | The `ai_generations.trigger` value to assign the generation built from `guided_booking_pending_text`. |
+
+Same "transient flow-position state, not an audited durable fact" framing
+as `conversations.booking_script_step` (004's own precedent, this
+document's original §8) — GB's own parallel field, never read or written
+by `booking_script/*`. No CHECK constraint on
+`guided_booking_pending_trigger`'s value: it is set programmatically only
+from a small fixed set of string literals inside `guided_booking.py`, and
+`ai_generations.trigger`'s own CHECK (below) is the authoritative
+constraint once the value actually lands there.
+
+### 7.2 `ai_generations.trigger`: two more allowed values (migration `20260819_0008`)
+
+Adds `'GUIDED_CPF_CONFIRMED'` (CPF accepted, payment question asked —
+also reused as the "still awaiting a payment reply" re-ask state) and
+`'GUIDED_BOOKING_COMPLETE'` (terminal — the final success message; no
+branch treats this as "awaiting a reply", so a later unrelated customer
+message correctly falls through to ordinary composition instead of being
+misinterpreted forever). `'GUIDED_CONFIRMATION'`
+(`20260819_0006`) is no longer produced by any code path after this
+correction — left in the CHECK allowlist unused rather than removed,
+matching this project's additive-only migration convention.
+
+### 7.3 No change to `scheduling.*`, `booking_script_step`, or `messages_check`
+
+This correction's new CPF/payment flow, like the original GB design, never
+writes to `scheduling.*` and never touches AA-10's own state/columns.

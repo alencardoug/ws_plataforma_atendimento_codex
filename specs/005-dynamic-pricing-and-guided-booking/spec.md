@@ -177,65 +177,115 @@ model (§7) — everything about *which* slots were actually shown must be
 reconstructable later without re-running the resolver (whose live query
 could return different rows by the time the customer replies).
 
-### GB-2 — Slot-choice interpretation, embedding-assisted, draft-only
+### GB-2 — Slot-choice interpretation: ordinal-first, embedding-second, draft-only
 
-When an operator generates a draft (manually via "Gerar rascunho" or
-automatically via the existing V2-7 idle trigger) for a conversation whose
-most recent customer message follows a GB-1 offer set with no confirmed
-selection yet, generation takes a new branch instead of (not in addition
-to) ordinary RAG composition: it embeds the customer's message with the
-same `EmbeddingProvider` already used for retrieval (`rag/service.py`),
-compares it by cosine similarity against each presented offer's own
-description text (embedded once, at GB-1 persistence time — not
-re-embedded per attempt), and treats the highest-similarity offer above a
-fixed confidence threshold as the customer's selection. This is
-classification against a small, closed, already-known set of candidates —
-not open-ended text generation — so no LLM call is used or needed here;
-"embedding" is the literal mechanism, not a stand-in for "LLM" (matching
-the human's "LLM ou embedding" framing — embedding alone is sufficient and
-keeps this fully deterministic given a fixed model/input, same
-determinism-preference precedent as AA-5/D-028's "no LLM rewrite" rule,
-extended here to interpretation as well as composition, since nothing about
-that rule was meant to apply only to output text).
+**Corrected 2026-08-19 (D-033).** When an operator generates a draft
+(manually via "Gerar rascunho" or automatically via the existing V2-7 idle
+trigger) for a conversation whose most recent customer message follows a
+GB-1 offer set with no confirmed selection yet, generation takes a new
+branch instead of (not in addition to) ordinary RAG composition. Two
+interpretation strategies are tried in order, neither an LLM call:
+
+1. **Deterministic ordinal/positional parsing** — real usage found that
+   embedding similarity structurally cannot match a reply like "segunda
+   opção" or "3" to an offer: an ordinal reference shares no semantic
+   content with an offer's own specialty/day/time text, so no confidence
+   threshold fixes this. A small keyword table (`primeira`/`segunda`/
+   `terceira`/`quarta`, each with a masculine/feminine form) plus a
+   bounded 1-4 bare-digit fallback (there are never more than 4 offers,
+   AA-2) resolves this class of reply exactly, deterministically.
+2. **Embedding similarity** (original design, unchanged mechanism) — for
+   a genuine paraphrase of the offer's own content (e.g. "o de quinta de
+   manhã"), embeds the customer's message with the same `EmbeddingProvider`
+   already used for retrieval, compares it by cosine similarity against
+   each presented offer's own description text (embedded once, at GB-1
+   persistence time), and treats the highest-similarity offer above a
+   fixed confidence threshold as the customer's selection. Tried only when
+   ordinal parsing finds nothing (or a named ordinal is out of range for
+   this offer set).
+
+Both are classification against a small, closed, already-known set of
+candidates — not open-ended text generation — so no LLM call is used or
+needed either way; "embedding" is the literal mechanism for strategy 2,
+not a stand-in for "LLM" (matching the human's original "LLM ou embedding"
+framing — embedding alone is sufficient and keeps this fully deterministic
+given a fixed model/input, same determinism-preference precedent as
+AA-5/D-028's "no LLM rewrite" rule, extended here to interpretation as
+well as composition).
 
 The resulting `AIGeneration` (status `ANSWER`, `dynamic_pattern_used=true`,
-a new `trigger` value or reuse of the existing dynamic-pattern audit shape
-— `plan.md` decides the exact mechanism) has fixed, Python-rendered
-`draft_text` restating the selected offer's specifics and asking exactly
-one question: whether the operator should send a request to confirm the
-booking. **It is a draft like any other** — nothing sends automatically,
-the operator reviews and explicitly sends or edits, same as every existing
-draft path.
+`trigger='GUIDED_SLOT_SELECTION'`) has fixed, Python-rendered `draft_text`
+stating the selected offer's specifics **and its price** (reusing
+`professional_specialties.fixed_price_cents` through the offer's `slot_id`,
+same read-through-the-FK design as PL-3), followed directly by AA-10's own
+fixed CPF-request line — **not** a "do you confirm?" question (removed by
+D-033, see GB-4). **It is a draft like any other** — nothing sends
+automatically, the operator reviews and explicitly sends or edits, same as
+every existing draft path.
 
 ### GB-3 — Below-confidence match aborts to the existing manual/abstention path
 
-If no presented offer's similarity clears the confidence threshold (the
-customer's reply doesn't clearly match any of the 4, e.g. "nenhuma dessas
-serve" or an unrelated message), generation falls back to ordinary RAG
-composition instead — it does not force a wrong selection and does not
-invent a 5th option. This mirrors AA-8's "never fabricate, fall back to
-the existing safe path" precedent, adapted from data-lookup failure to
+If ordinal parsing finds nothing and no presented offer's embedding
+similarity clears the confidence threshold either (the customer's reply
+doesn't clearly match any of the 4, e.g. "nenhuma dessas serve" or an
+unrelated message), generation falls back to ordinary RAG composition
+instead — it does not force a wrong selection and does not invent a 5th
+option. This mirrors AA-8's "never fabricate, fall back to the existing
+safe path" precedent, adapted from data-lookup failure to
 classification-confidence failure.
 
-### GB-4 — Confirmation-intent interpretation, embedding-assisted, draft-only
+### GB-4 — Direct-to-CPF/payment flow, reusing AA-10's own parsers, draft-only
 
-Once GB-2 has produced a sent (operator-approved) confirmation-question
-message and the customer replies, the next draft-generation call for that
-conversation takes a second new branch: it classifies the customer's reply
-as affirmative/negative/unclear by embedding-similarity against a small,
-fixed set of canonical affirmative/negative reference phrases (not a
-regex list — this is the one piece of interpretation logic in this feature
-that genuinely benefits from embeddings' generalization over free
-phrasing, unlike GB-2's closed 4-candidate set, which a regex could not
-handle at all). An affirmative classification produces a draft whose fixed
-text is a plain, human-authored acknowledgement that invites the customer
-to proceed (never wording lifted from `BOOKING_INTENT_KEYWORDS` on the
-operator's behalf — the customer must still say something that
-independently satisfies `detect_booking_intent` for AA-10 to start; this
-feature does not shortcut that check). A negative or unclear classification
-produces a draft that asks the confirmation question again, plainly worded,
-not a repeat of the exact same sentence verbatim (avoids sounding broken on
-screen — an editorial constraint, not a data-model one).
+**Corrected 2026-08-19 (D-033), replacing the original standalone
+"Deseja que eu confirme o agendamento?" confirmation step entirely.** Real
+use found that step redundant and confusing: it asked the customer to
+reconfirm something they'd already stated by picking a slot, and even a
+clear "sim" reply led nowhere without the customer *separately* typing an
+independent booking-intent phrase (AA-10's own trigger) — no continuous
+path from "I picked a slot" to actually completing the simulated booking.
+The human decided (D-033) that once a slot's details are stated (GB-2),
+the flow should go directly to asking for CPF, then payment — the same
+two questions AA-10's autonomous script always asked — but **continue to
+stay inside N2**: one more explicit operator send per step, never an
+autonomous send, preserving the earlier decision made when GB was first
+authorized (spec.md §9 item 2 / D-032).
+
+This is GB's own parallel CPF/payment conversation, textually identical to
+AA-10's fixed messages but delivered as ordinary operator-approved drafts:
+
+- After a GB-2 slot-choice draft is sent, the customer's next reply is
+  interpreted by `extract_cpf()` — **reused verbatim from
+  `booking_script.parsing`** (the same digit-count-only validation, never
+  the real CPF check-digit algorithm, matching AA-10's "é uma simulação"
+  framing) — not reimplemented, to avoid two copies of format logic
+  drifting apart. Invalid → a draft re-asking for a valid CPF
+  (`trigger` stays `GUIDED_SLOT_SELECTION`). Valid → a draft confirming
+  the CPF and asking whether the value was paid
+  (`trigger='GUIDED_CPF_CONFIRMED'`).
+- After that draft is sent, the customer's next reply is interpreted by
+  `extract_payment_confirmation()` — also reused verbatim from
+  `booking_script.parsing`. Affirmative → a draft with AA-10's own final
+  success wording (`trigger='GUIDED_BOOKING_COMPLETE'`, terminal — no
+  further customer reply is specially interpreted after it). Negative or
+  unclear → a draft re-asking the payment question
+  (`trigger` stays `GUIDED_CPF_CONFIRMED`, unlimited retries, matching
+  AA-10's own no-retry-limit behavior).
+
+**The raw CPF/payment reply is parsed only from the request-local value**
+— same non-retention principle AA-10 already applies to its own script,
+extended here because GB now asks the same two sensitive questions.
+Concretely: `advance_guided_booking()` runs synchronously inside
+`anonymous_access/router.py`'s `send_customer_message()` (alongside, not
+instead of, AA-10's own `advance_booking_script()`), using the raw
+in-memory request body — the *only* place a raw CPF/payment reply is ever
+read. It never persists that raw value; it stages only the
+already-computed, safe *result* text (`conversations.guided_booking_pending_text`/
+`guided_booking_pending_trigger` — new transient columns, data-model.md
+§9) for the next draft-generation call to pick up and clear. The durable
+`Message.body` for those two customer replies carries a fixed disclosure
+marker instead, mirroring AA-10's own redaction exactly
+(`anonymous_access/router.py` checks GB's own pending state only when
+AA-10 itself didn't already redact).
 
 ### GB-5 — No new autonomous-send path (the constitutional boundary, restated)
 
@@ -244,13 +294,17 @@ through the existing draft-generation endpoints, sent only by the existing
 explicit-operator-send action. `booking_script/service.py` — the sole
 module authorized to call `send_scripted_message()` (Constitution
 Amendment 1.1.0, D-031) — is not modified, not imported from, and not
-imported by this feature's new code. `advance_booking_script()`'s trigger
+imported by this feature's code, and `conversation.booking_script_step` is
+never read or written by it either (GB-4 reuses only
+`booking_script.parsing`'s pure, non-DB, non-autonomous-send functions —
+disclosed precisely, not "zero coupling," per `test_005_booking_script_containment.py`'s
+D-033-revised assertions). `advance_booking_script()`'s own trigger
 condition (`detect_booking_intent()` on a raw customer message, checked
-only while `conversation.booking_script_step is None`) is unchanged byte
--for-byte. GB-4's affirmative path increases the *likelihood* that the
-customer's next real message satisfies that existing check by having
-already confirmed intent in plain language — it does not alter, bypass, or
-special-case the check itself.
+only while `conversation.booking_script_step is None`) is unchanged byte-
+for-byte — a customer who independently types a booking-intent phrase at
+any point (bypassing GB entirely) still reaches AA-10's autonomous script
+exactly as before this feature existed; GB and AA-10 are two structurally
+separate paths to conceptually similar outcomes, not a combined one.
 
 ## 6. What this cycle does **not** authorize
 
@@ -298,23 +352,35 @@ special-case the check itself.
    of a payment link or timer that doesn't exist.
 3. `convenio` questions still abstain exactly as before this feature —
    unchanged behavior, regression-checked.
-4. After a resolved `appointment_availability` generation offers up to 4
-   slots, a customer reply naming/describing one of them (in at least 2
-   distinct phrasings per offer) produces a draft that correctly restates
-   that specific offer and asks whether to proceed — never sent
+4. **(D-033)** After a resolved `appointment_availability` generation
+   offers up to 4 slots, a customer reply naming/describing one of them —
+   by ordinal/position ("segunda opção", "3") or by paraphrase (in at
+   least 2 distinct phrasings per offer) — produces a draft that
+   correctly restates that specific offer with its price and asks for
+   CPF directly (no separate confirm-question round trip) — never sent
    automatically.
-5. A customer reply that doesn't clearly match any offered slot produces
-   an ordinary RAG-composed draft instead of a wrong/forced selection.
-6. Following a sent GB-2 confirmation-question message, a customer's
-   affirmative reply (in at least 3 distinct phrasings, not just "sim")
-   produces a draft inviting the customer to proceed — still requiring
-   explicit operator send.
-7. A negative or unclear reply to the same question produces a draft that
-   re-asks, worded differently from the original question.
+5. A customer reply that doesn't clearly match any offered slot (by
+   ordinal or embedding) produces an ordinary RAG-composed draft instead
+   of a wrong/forced selection.
+6. **(D-033)** A valid CPF reply produces a draft confirming the CPF and
+   asking about payment; an invalid CPF reply produces a draft re-asking
+   for a valid one — matching AA-10's own CPF-parsing behavior exactly
+   (`extract_cpf`, reused not reimplemented) — still requiring explicit
+   operator send at each step.
+7. **(D-033)** An affirmative payment reply (in at least 3 distinct
+   phrasings, not just "sim") produces a draft with AA-10's own final
+   success wording; a negative/unclear reply produces a draft that
+   re-asks the payment question, unlimited retries — matching AA-10's own
+   payment-parsing behavior exactly (`extract_payment_confirmation`,
+   reused not reimplemented).
 8. `booking_script/service.py` and `booking_script/parsing.py` are
    byte-for-byte unmodified by this feature's implementation (a literal
    diff check in the acceptance protocol, mirroring how 004 verified AA-10's
-   structural containment).
+   structural containment) — **except** that `guided_booking.py` now
+   imports exactly two named functions from `booking_script.parsing`
+   (`extract_cpf`, `extract_payment_confirmation`), verified precisely by
+   `test_005_booking_script_containment.py` (D-033 correction) rather than
+   asserting zero import coupling.
 9. The full pre-existing `smoke_*` suite (16 scripts) and the
    `v1/v2/v3/v4` Playwright suite continue passing unmodified — no V1-004
    regression.
@@ -338,9 +404,46 @@ special-case the check itself.
    none and reuses 100% of the existing explicit-send/audit/draft
    machinery.
 3. **"LLM ou embedding"** — resolved as embedding-only similarity
-   matching for both GB-2 (closed 4-candidate classification) and GB-4
-   (open-phrasing yes/no classification against a fixed reference set),
-   not a live LLM call, to stay consistent with this codebase's existing
+   matching for GB-2's closed 4-candidate classification, not a live LLM
+   call, to stay consistent with this codebase's existing
    determinism-for-dynamic-answers precedent (AA-5/D-028) and avoid adding
    a new LLM-latency/cost path for what is fundamentally a classification
-   problem over a small candidate set.
+   problem over a small candidate set. (D-033 later replaced GB-4's own
+   embedding-based yes/no classification with `booking_script.parsing`'s
+   deterministic regex parsers — see item 4 below — so embedding
+   similarity now applies only to GB-2's paraphrase fallback.)
+
+## 10. Correction (2026-08-19, D-033)
+
+Two real defects found through actual use, immediately after this
+package's original acceptance closed:
+
+4. **GB-2 needed deterministic ordinal/positional parsing, not just
+   embedding similarity.** A reply like "segunda opção" or "3" shares no
+   semantic content with an offer's own specialty/day/time description —
+   embedding similarity cannot resolve this at any threshold, since it is
+   not a calibration problem. Fixed by trying a small ordinal-word/digit
+   parser first, falling back to the original embedding-similarity
+   approach only when no ordinal is present or a named ordinal is out of
+   range (§5 GB-2, revised).
+5. **The standalone confirmation step (original GB-4) was removed.**
+   Real use found the extra "Deseja que eu confirme o agendamento?"
+   round trip, followed by requiring the customer to *independently* type
+   a booking-intent phrase for AA-10 to start, felt broken rather than
+   continuous. The human decided (2026-08-19) that once a slot's details
+   are stated, the flow should proceed directly through CPF and payment —
+   reusing AA-10's own fixed wording and deterministic parsers
+   (`extract_cpf`, `extract_payment_confirmation`, imported from
+   `booking_script.parsing` — the one disclosed, narrow exception to this
+   package's original "zero import coupling with `booking_script/*`"
+   claim, §5 GB-5 revised) — while still keeping every step an
+   operator-approved N2 draft, explicitly re-confirming the N2-only
+   decision from item 2 above rather than reopening it. The raw CPF/
+   payment reply is parsed only at message-creation time, request-local,
+   never persisted — the same principle AA-10 already followed, now
+   extended to this parallel path (§5 GB-4, revised; `data-model.md` §9).
+
+`booking_script/service.py` (home of the actual autonomous-send mechanism,
+`send_scripted_message`) remains completely untouched and unimported by
+this correction — only `booking_script/parsing.py`'s two pure functions
+are reused, verified precisely by `test_005_booking_script_containment.py`.
