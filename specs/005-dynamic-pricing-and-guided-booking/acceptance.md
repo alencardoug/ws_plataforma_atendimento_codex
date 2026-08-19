@@ -91,3 +91,40 @@ itself (the constitutionally-scoped exception) is verified unmodified and
 unaffected; the one narrow, disclosed coupling this correction introduces
 (reusing two pure parsing functions) is verified precisely, not just
 assumed absent.
+
+## Correction record (2026-08-19, D-034)
+
+Found through further real use immediately after D-033 closed: (1) a
+completed booking never stopped being "the pending offer set" — the next
+customer message, even an unrelated clinical question, still matched the
+same 4 stale offers; (2) a genuinely uncovered clinical question could
+surface a substantively wrong `ANSWER` draft instead of deflecting.
+
+| Area | Result | Real evidence |
+|---|---|---|
+| P — Post-completion messages fall through | PASS | `test_guided_booking.py::TestLatestUnconfirmedOfferGenerationId` regression case; `smoke_v5_guided_booking.py`: after `GUIDED_BOOKING_COMPLETE`, "Em quanto tempo descubro se eu tenho câncer?" no longer routes to `GUIDED_SLOT_SELECTION`. |
+| Q — Clinical-question reranker | PASS | `test_ai_providers.py` (3 new cases, deterministic + real-provider both directions); `smoke_v5_guided_booking.py`: the same post-completion clinical question resolves to `CLINICAL_DEFLECTION_TEXT` via one real LLM reranking call, confirmed never applied inside the GB flow or against `full_parent_draft`'s own match. |
+
+**GO (correction).**
+
+## Correction record (2026-08-19, D-035)
+
+Human-requested after using the D-033 direct-to-CPF/payment flow in
+practice: (1) "Voltar"/"Cancelar"/"Alterar horário" (and variations) must
+let the customer step back to a fresh slot choice, both at the CPF step
+and the payment step; (2) the GB-2/GB-4 message texts needed reformatting
+to the exact multi-paragraph shape specified, ending with a "Digite
+Voltar para escolher outro horário." hint.
+
+| Area | Result | Real evidence |
+|---|---|---|
+| R — Step back at the CPF step | PASS | `test_guided_booking.py::TestInterpretCpfReply` (8 parametrized phrases + one end-to-end interpretation-layer test); `smoke_v5_guided_booking.py`: "na verdade quero voltar" during the CPF step returns `trigger=GUIDED_SLOT_RESELECTION` with the same original offers re-listed, never "CPF inválido"; a fresh ordinal choice afterward resolves normally. |
+| S — Step back at the payment step | PASS | `test_guided_booking.py::TestInterpretPaymentReply` (8 parametrized phrases); `smoke_v5_guided_booking.py`: "quero voltar" after CPF confirmation also returns `trigger=GUIDED_SLOT_RESELECTION`; required fixing a real bug found via this same smoke run — the original "was this trigger *ever* seen" exclusion permanently blocked re-matching once `GUIDED_CPF_CONFIRMED` had occurred, which is *always* true by the time the payment step is reached; revised to "is the *latest* GB-flow trigger terminal" (`test_guided_booking.py::TestLatestUnconfirmedOfferGenerationId`, 5 cases covering every non-terminal trigger plus the CPF-then-voltar sequence). |
+| T — Message reformatting | PASS | `smoke_v5_guided_booking.py`: exact-text assertions on the GB-2 slot-choice message (starts with `"Entendi que você escolheu:\n\n"`, ends with the Voltar hint) and both GB-4 messages (CPF-confirmed, payment re-ask). |
+| U — Full regression | PASS | 178 backend tests (was 168 before this correction); `ruff`/`mypy` clean; full `smoke_v5_guided_booking.py` re-run passes end-to-end including both step-back points. |
+
+**GO (correction).** Both requested behaviors are implemented with real
+evidence; the payment-step exclusion bug found mid-implementation (not
+present in the original ask) was fixed and locked in with a dedicated
+regression test before this record was written, matching this package's
+own acceptance protocol.

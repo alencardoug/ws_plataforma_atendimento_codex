@@ -99,6 +99,156 @@ Explicitly deferred:
   inside N2 rather than extend the exception, after that tradeoff was made
   explicit (D-032).
 
+### Registered for a future SDD round — specialty citation and scheduling breadth
+
+Not authorized for implementation yet — a note for discovery/specification
+before any code changes. Human request, 2026-08-19 (content-only correction
+made the same day: unprompted self-harm/"autoagressão" phrasing was removed
+from Q&A and clinical content per the same instruction; see D-033's
+correction record and `documents/GOVERNANCE.md`'s "Sofrimento emocional
+intenso" section):
+
+- when relevant to what the customer's own message is actually asking,
+  encourage the generated answer to cite psico-oncologia — already partly
+  present in existing content (QA-080/QA-081, `apoio-emocional.md`) — and
+  extend the same encouragement to nutrição, endocrinologia, and
+  fisioterapia specialized in oncology, when genuinely connected to the
+  customer's call, rather than only appearing incidentally;
+- add a scheduling/booking option for each of these four specialties
+  (psico-oncologia, nutrição, endocrinologia, fisioterapia oncológica) —
+  today `price_lookup`/`appointment_availability` cover only the
+  specialties already seeded in `professional_specialties`;
+- must go through a proper discovery/spec/plan/tasks cycle like every
+  other feature — in particular, whether/how this interacts with the
+  Constitution Amendment 1.1.0 boundary (it shouldn't need to) and with
+  GB's existing offer-presentation/slot-choice mechanics needs its own
+  analysis, not an ad hoc content tweak.
+
+### Registered for a future SDD round — completed booking visible to the operator
+
+Not authorized for implementation yet. Human request, 2026-08-19: once a
+guided-booking (GB) flow reaches `GUIDED_BOOKING_COMPLETE` (or AA-10's own
+autonomous script completes), the specific appointment that was booked —
+e.g. "Oncologia geral (triagem) com Dra. Renata Silveira (simulação),
+quarta-feira 26/08 às 08:00" — should be visible somewhere in the
+operator's conversation view, not only recoverable by reading back through
+the chat transcript.
+
+- today neither GB nor AA-10 writes anything to `schedule_slots` or any
+  other durable record marking a slot as booked (both are deliberately
+  read/interpret/draft-only, GB-5/spec.md §5 AA-10) — there is no queryable
+  "this conversation's booking" fact yet, only the chat messages
+  themselves; this needs its own data-model decision (a durable booking
+  record, or a cheaper derived-from-messages view?), not just a UI change;
+- must go through a proper discovery/spec/plan/tasks cycle — in
+  particular, whether a durable booking record changes any V1/AA-10 safety
+  invariant (identity/payment persistence is explicitly deferred, `specs/
+  004-dynamic-appointment-availability/spec.md` §6) needs its own analysis
+  before implementation, not an ad hoc frontend addition.
+
+### Registered for a future SDD round — draft-generation status visible to the customer
+
+Not authorized for implementation yet. Human request, 2026-08-19: the
+"gerando resposta" status the operator already sees while an automatic
+draft is being prepared should also show to the customer, next to the
+send button.
+
+- today this status only exists operator-side: `frontend/src/main.tsx`
+  renders "Respondendo em Ns…" / "Gerando resposta…" (~line 606) from
+  `automatic_draft_eligible`/`automatic_draft_seconds_remaining`,
+  fields returned only by the
+  operator-authenticated `GET /operator/conversations/:id` endpoint
+  (polled every 2s) — there is no equivalent field on any customer-facing
+  endpoint today;
+- `CustomerPage` deliberately renders no such status today — confirmed by
+  explicit code comments in `main.tsx` stating these fields/UI are kept
+  off the customer projection; exposing any part of it is a new decision,
+  not a bug fix — needs its own analysis of exactly what's safe/useful to
+  reveal to the customer (a generic "preparando resposta" cue vs. the
+  literal countdown-in-seconds AA-2/AA-9 currently show only internally,
+  and whether it should also cover the customer-typing-heartbeat-driven
+  draft trigger, not just the idle-timeout one);
+- must go through a proper discovery/spec/plan/tasks cycle like every
+  other feature, not an ad hoc frontend addition.
+
+### Registered for a future SDD round — two-phase clinical evidence: child chunk first, parent on demand
+
+Not authorized for implementation yet. Human request, 2026-08-19, clarified
+through follow-up questions (see below) — goal stated by the human: "duas
+fases para verificações clínicas, mais controle" (two phases for clinical
+checks, more control).
+
+**Today:** `ManualEvidence` (`frontend/src/main.tsx:127-129`, rendered in
+the "IA e evidências" sidebar, `main.tsx:638-662`) shows one card per
+evidence item with the *full* `content` (the parent document's entire
+text, for CLINICAL hits) and one "Selecionar" button that immediately
+POSTs to `/operator/knowledge/evidence/{retrieval_hit_id}/select`
+(`ai/router.py`'s `select_evidence()`), which reuses `full_parent_draft()`
+and replaces the draft with that full text right away. Automatic
+(idle-triggered) draft evidence has no select mechanism at all today —
+citations are inert labels next to an already-composed LLM draft
+(`main.tsx:657`). The `Evidence` dataclass (`rag/service.py:15-25`)
+already carries the child chunk's own text separately
+(`matched_child_excerpt`) alongside the full parent `content` — both are
+already computed, just not displayed separately today.
+
+**Requested design (from the human's clarification):**
+
+- For a clinical question, the sidebar should show multiple *simultaneous*
+  candidate options, not one evidence list feeding one draft:
+  - the auto-generated **LLM suggestion** (unchanged mechanism — still
+    auto-composed, still goes through the D-034 clinical-question
+    reranker) — button **"Usar sugestão"**/**"Selecionar"**;
+  - any matching **Q&A entries** — same button, directly usable;
+  - the retrieved **clinical child chunk(s)** — shown with *only* the
+    child excerpt, **not** the full parent — button **"Trazer
+    documento"** instead of a direct select.
+- **Hard constraint, added 2026-08-19: a parent document must never be
+  displayed by default/up front.** It only appears after the operator
+  explicitly clicks "Trazer documento" on its corresponding child chunk —
+  there is no path that shows a clinical parent's full content before
+  that action, for any evidence source (manual search or automatic
+  draft).
+- Clicking **"Trazer documento"** on a child chunk brings the *full
+  parent document* into the sidebar (a new/expanded card) — this parent
+  card gets its own selection action.
+- **Resolved 2026-08-19:** "Selecionar" was the human's general
+  suggestion, not a fixed requirement — the actual button label/action for
+  selecting the revealed parent (and whether/how it becomes editable
+  before send) should follow whatever the current selection/edit flow
+  already does, adapted for least impact, rather than introducing new
+  selection semantics. Implementer should read the existing
+  `select_evidence()`/draft-editing behavior first and fit this into it.
+- **Resolved 2026-08-19:** hiding the parent is a **frontend-only**
+  concern — the backend does not need to withhold the parent's full text
+  from the payload; today's `Evidence` object already carries both, so no
+  new endpoint or response-shape change is required just for this.
+- Scroll behavior, requested alongside this: clicking any "Selecionar"
+  button (whichever kind) scrolls to the send button; clicking "Trazer
+  documento" scrolls to the top of the page.
+- Explicitly confirmed by the human: the automatic LLM-generation +
+  reranking pipeline itself is **unchanged** — this adds child-chunk
+  options *alongside* it, it does not replace or gate the LLM suggestion
+  behind an extra click.
+
+**Open design questions for the future spec/plan cycle (not yet
+resolved):**
+
+- how manual search (`/operator/knowledge/search`) and automatic-draft
+  evidence display converge on one shared sidebar component showing
+  multiple simultaneously-selectable candidates, given today's manual
+  search and automatic draft are different code paths with different UI
+  treatments;
+- exact rendering rule for when a "child chunk" card vs. an "LLM
+  suggestion" card vs. a "Q&A" card applies (keyed off `knowledge_type`
+  and whatever marks a hit as clinical-child vs. clinical-parent-already-
+  matched, vs. `provider_name` for the LLM/dynamic-pattern candidate);
+- must go through a proper discovery/spec/plan/tasks cycle — this is a
+  meaningful evidence-UI redesign, not a small tweak, and should confirm
+  it doesn't regress D-013/D-014's clinical parent-context-expansion
+  guarantee (the parent must remain reachable and unmodified when
+  selected, just gated behind one more click for clinical content).
+
 ### V2 — Commercial product experience — **DONE (2026-08-17)**
 
 Feature package: `specs/002-v2-commercial-product-experience/`. All items

@@ -246,7 +246,12 @@ def guided_booking_result(session: DbSession, provider: Any, conversation: Conve
     offer = interpret_slot_choice(session, provider, conversation, customer_text)
     if offer is not None:
         price_text = offer_price_text(session, offer)
-        text = f"Entendi que você escolheu: {offer.description} — {price_text}. Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos."
+        text = (
+            f"Entendi que você escolheu:\n\n"
+            f"{offer.description} — {price_text}.\n\n"
+            f"Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos.\n\n"
+            f"Digite Voltar para escolher outro horário."
+        )
         return GenerationResult("ANSWER", text, None, []), "GUIDED_SLOT_SELECTION"
     return None
 

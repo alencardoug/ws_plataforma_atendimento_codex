@@ -66,11 +66,21 @@ o resolver indicado e consultam o PostgreSQL antes da resposta.
 - Mensagens com medo, angústia ou menção a morte devem ser acolhidas antes de
   qualquer conteúdo transacional (ex.: não responder só sobre preço ou SUS
   quando a mensagem também expressa medo).
-- Sinais de desesperança, isolamento ou pensamento de autoagressão são
-  emergência: orientar serviço de emergência imediatamente, sem aguardar
-  agendamento comum.
+- Sofrimento intenso ou isolamento devem ser acolhidos com orientação para
+  buscar ajuda (equipe, apoio psicológico/psico-oncológico); citar
+  autoagressão ou pensamento de se machucar apenas quando o próprio cliente
+  trouxer esse tema explicitamente na conversa — não incluir esse tipo de
+  menção como conteúdo padrão/preventivo em respostas gerais sobre medo,
+  tristeza ou prognóstico (decisão humana, 2026-08-19).
+- Quando o cliente trouxer esse tema explicitamente, orientar serviço de
+  emergência imediatamente, sem aguardar agendamento comum.
 - Essas entradas ficam na categoria `apoio_emocional` do Q&A, também com
   `metadata.escalation_recommended=true`.
+- A citação de psico-oncologia (e, quando pertinente, nutrição,
+  endocrinologia e fisioterapia especializadas em oncologia) é incentivada
+  sempre que houver conexão real com a mensagem do cliente — ver
+  `ROADMAP.md` para a extensão dessas quatro especialidades ao agendamento,
+  registrada para uma futura rodada de SDD.
 
 ### Acesso pelo SUS
 

@@ -301,7 +301,10 @@ export function CustomerPage() {
       </section>
       <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}>
         <label htmlFor="customer-message">Mensagem<textarea id="customer-message" value={text} onChange={(event) => setText(event.target.value)} required disabled={conversation?.status === "CLOSED"} /></label>
-        <button disabled={conversation?.status === "CLOSED"}>Enviar</button>
+        <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+          <button disabled={conversation?.status === "CLOSED"}>Enviar</button>
+          {text.trim().length > 0 && conversation?.status !== "CLOSED" && <span aria-live="polite" className="typing-indicator">Digitando…</span>}
+        </div>
       </form>
       {conversation?.status !== "CLOSED" && (confirmingClose
         ? <CloseConfirmPrompt onConfirm={() => void close().catch((caught) => setError(errorMessage(caught)))} onCancel={() => setConfirmingClose(false)} />
@@ -603,7 +606,7 @@ export function OperatorPage() {
       {selected ? <>
         <h1>Conversa {selected.effective_mode}</h1>
         {selected.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}
-        {countdown !== null && <p aria-live="polite" className="typing-indicator">{countdown > 0 ? `Rascunho automático em ${countdown}s…` : "Gerando rascunho automaticamente…"}</p>}
+        {countdown !== null && <p aria-live="polite" className="typing-indicator">{countdown > 0 ? `Respondendo em ${countdown}s…` : "Gerando resposta…"}</p>}
         <button type="button" className="btn-ghost" onClick={clearMessageSelection}>Desmarcar conversas</button>
         <div className="messages">
           {selected.messages.length === 0 && <p className="empty-state">Sem mensagens nesta conversa ainda.</p>}

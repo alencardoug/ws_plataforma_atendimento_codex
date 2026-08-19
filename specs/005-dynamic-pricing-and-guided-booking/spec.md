@@ -447,3 +447,64 @@ package's original acceptance closed:
 `send_scripted_message`) remains completely untouched and unimported by
 this correction — only `booking_script/parsing.py`'s two pure functions
 are reused, verified precisely by `test_005_booking_script_containment.py`.
+
+## 11. Correction (2026-08-19, D-034)
+
+Two more real defects found through further use, immediately after D-033
+shipped:
+
+6. **`latest_unconfirmed_offer_generation_id` never recognized a
+   completed booking as finished.** After `GUIDED_BOOKING_COMPLETE`, the
+   next customer message — even an unrelated clinical question — still
+   matched the same 4 stale offers via embedding similarity instead of
+   falling through to ordinary RAG/LLM composition. Fixed by treating any
+   GB-flow-progress generation found after the offer-resolving one as
+   proof the set is no longer pending.
+7. **A genuinely uncovered clinical question could still surface a
+   technically-`ANSWER` but substantively wrong draft** (e.g. an
+   unrelated scheduling Q&A), instead of deflecting to a professional.
+   The human decided against a hard clinical-topic gate in favor of a
+   reranking step: the fixed clinical-deflection text becomes one more
+   candidate compared, via one real LLM judgment call
+   (`GenerationProvider.rerank_clinical`), against whatever the normal
+   pipeline already produced — that candidate wins by default whenever
+   adequate, the deflection wins only for a genuinely uncovered clinical
+   question. Scoped outside the GB/scheduling flow and never applied
+   against `full_parent_draft`'s own clinical-document match. New audit
+   event `ai.clinical_deflection_applied` (`docs/architecture/EVENT_CATALOG.md`).
+
+## 12. Correction (2026-08-19, D-035)
+
+Human-requested after using the D-033 direct-to-CPF/payment flow:
+
+8. **"Voltar"/"Cancelar"/"Alterar horário" (and natural variations) now
+   let the customer step back to a fresh slot choice**, both while GB's
+   CPF question is pending and while its payment question is pending.
+   Checked before `extract_cpf`/`extract_payment_confirmation` in
+   `interpret_cpf_reply`/`interpret_payment_reply` respectively; the
+   response re-presents the *same* originally offered set (never a fresh
+   query) as a numbered list, with a new `trigger='GUIDED_SLOT_RESELECTION'`
+   (new allowed `ai_generations.trigger` value) so the next reply is
+   routed back through GB-2's own ordinal/embedding matching instead of
+   re-entering CPF/payment parsing.
+9. **The GB-2/GB-4 message texts were reformatted** into multi-paragraph
+   text (offer details, then the CPF/payment question, then a "Digite
+   Voltar para escolher outro horário." hint), matching the exact format
+   the human specified.
+10. **`latest_unconfirmed_offer_generation_id`'s D-034 exclusion was
+    revised from "was this trigger ever seen after the resolution" to
+    "is the *latest* GB-flow trigger the terminal one"** — the original
+    "ever" check permanently locked a picked offer set out of
+    re-matching the moment `GUIDED_CPF_CONFIRMED` occurred even once,
+    which broke "voltar" at the payment step specifically (by
+    construction, reaching the payment step means `GUIDED_CPF_CONFIRMED`
+    already happened). Only `GUIDED_BOOKING_COMPLETE` being the most
+    recent GB-flow generation now excludes; D-034's original
+    post-completion fix is unaffected since that state is always the
+    latest one once reached (it is terminal — no further customer reply
+    is specially interpreted after it).
+
+Also answered a related human question, logged in `ROADMAP.md` rather
+than implemented now: explicit calendar dates (e.g. "23/11/2026") are
+**not** currently parsed by `extract_parameters` (AA-3) — only relative
+keywords (`amanhã`, `sábado`, `semana que vem`, ...).

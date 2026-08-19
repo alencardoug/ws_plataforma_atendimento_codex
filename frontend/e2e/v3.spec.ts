@@ -184,7 +184,7 @@ test.describe("V3 acceptance (tasks.md T132)", () => {
       await login(operator);
       await operator.getByRole("button", { name: /^Aguardando/ }).click();
 
-      const countdown = operator.locator(".typing-indicator", { hasText: /Rascunho automático em|Gerando rascunho automaticamente/ });
+      const countdown = operator.locator(".typing-indicator", { hasText: /Respondendo em|Gerando resposta/ });
       await expect(countdown).toBeVisible({ timeout: 10_000 });
       await expect(countdown).not.toContainText("-");
 

@@ -300,7 +300,7 @@ second call). Validation-created conversations truncated afterward per
 the first time. `teste_humano.md` was updated the same day with manual
 test coverage for everything new in V3 and 004.
 
-## Dynamic pricing and guided booking selection — DONE (2026-08-19, D-032, corrected D-033)
+## Dynamic pricing and guided booking selection — DONE (2026-08-19, D-032, corrected D-033/D-034/D-035)
 
 All 9 phases of `specs/005-dynamic-pricing-and-guided-booking/tasks.md`
 (T001-T086) are complete and committed to `main`:
@@ -368,6 +368,36 @@ All 9 phases of `specs/005-dynamic-pricing-and-guided-booking/tasks.md`
   new transient `conversations` columns. 153 backend tests pass (was
   139); full smoke suite re-run green, including AA-10's own
   `smoke_v4_booking_script.py`, unaffected.
+- **Correction (D-034), same day.** Further real use found (a) a
+  completed booking never stopped being "the pending offer set" — the
+  next customer message, even an unrelated clinical question, still
+  matched the same stale offers — fixed by checking whether the flow has
+  actually reached `GUIDED_BOOKING_COMPLETE`; (b) a genuinely uncovered
+  clinical question could still surface a substantively wrong `ANSWER`
+  draft — fixed with a reranking step (`GenerationProvider.rerank_clinical`)
+  where the fixed clinical-deflection text competes, via one real LLM
+  judgment call, against whatever the normal pipeline produced, scoped
+  outside the GB flow and never applied against a matched clinical
+  document. New audit event `ai.clinical_deflection_applied`. 159 backend
+  tests pass.
+- **Correction (D-035), same day, human-requested after using D-033's
+  flow.** "Voltar"/"Cancelar"/"Alterar horário" (and variations) now step
+  the customer back to a fresh slot choice, both at the CPF step and the
+  payment step — re-presenting the same originally offered set, never a
+  fresh query, via a new `trigger='GUIDED_SLOT_RESELECTION'`. The GB-2/
+  GB-4 message texts were reformatted to multi-paragraph text ending with
+  a "Digite Voltar para escolher outro horário." hint, matching the exact
+  format specified. Implementation surfaced a real bug: the existing
+  post-completion exclusion (D-034) checked whether `GUIDED_CPF_CONFIRMED`
+  had *ever* occurred after the offer resolution — true by construction
+  once the payment step is reached — which permanently blocked "voltar"
+  there; revised to check only the *latest* GB-flow trigger, so a later
+  "voltar" correctly un-excludes a set even after CPF was confirmed,
+  while D-034's original post-completion fix (keyed on the terminal
+  `GUIDED_BOOKING_COMPLETE` state) is unaffected. Also answered a related
+  human question (logged in `ROADMAP.md`, not implemented): explicit
+  calendar dates like "23/11/2026" are not currently parsed by
+  `extract_parameters` — only relative keywords. 178 backend tests pass.
 
 Not yet deployed to production as of this writing — batch with the next
 scheduled deploy per this project's standing deploy-cadence practice, not

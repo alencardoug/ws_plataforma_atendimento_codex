@@ -3,10 +3,11 @@ booking selection (GB) against a rebuilt backend — real embeddings, zero
 LLM calls for any resolved/guided generation, confirms genuine paraphrase
 and ordinal-choice recognition (not just exact-text match, which the
 deterministic-provider unit tests in test_guided_booking.py already
-cover), the full direct-to-CPF/payment flow (D-033), and confirms every
-GB output still requires an explicit operator send.
+cover), the full direct-to-CPF/payment flow (D-033), the "Voltar"
+step-back-to-reselection flow (D-035), and confirms every GB output still
+requires an explicit operator send.
 specs/005-dynamic-pricing-and-guided-booking/tasks.md T045/T055,
-acceptance.md, DECISIONS.md D-033."""
+acceptance.md, DECISIONS.md D-033/D-035."""
 
 import os
 from uuid import UUID
@@ -96,7 +97,27 @@ def run() -> None:
     # D-033: no separate "Deseja que eu confirme?" gate — details (offer +
     # price) and the CPF request arrive together, one message.
     assert "Deseja que eu confirme" not in choice_draft["draft_text"], choice_draft
+    # D-035: new multi-line format, ending with the "Voltar" hint.
+    assert choice_draft["draft_text"].startswith("Entendi que você escolheu:\n\n"), choice_draft
+    assert choice_draft["draft_text"].endswith("Digite Voltar para escolher outro horário."), choice_draft
     operator_send(choice_draft)
+
+    # GB-4-back (D-035): "voltar" during the CPF step re-presents the same
+    # original offers instead of being parsed as an (invalid) CPF.
+    back_msg = send_customer("na verdade quero voltar")
+    back_draft = draft_on(back_msg["id"])
+    assert back_draft["trigger"] == "GUIDED_SLOT_RESELECTION", back_draft
+    assert "CPF inválido" not in back_draft["draft_text"], back_draft
+    assert "1." in back_draft["draft_text"] and "2." in back_draft["draft_text"], back_draft
+    operator_send(back_draft)
+
+    # A fresh ordinal choice against the same original offer set resolves
+    # normally — the whole point of "voltar".
+    reselect_msg = send_customer("primeira opção")
+    reselect_draft = draft_on(reselect_msg["id"])
+    assert reselect_draft["trigger"] == "GUIDED_SLOT_SELECTION", reselect_draft
+    assert "Informe seu CPF" in reselect_draft["draft_text"], reselect_draft
+    operator_send(reselect_draft)
 
     # GB-4 (D-033): invalid CPF re-asks (still requires operator send).
     bad_cpf_msg = send_customer("Ah 123456a8910")
@@ -109,13 +130,33 @@ def run() -> None:
     cpf_msg = send_customer("tabom 123.456..789.10")
     cpf_draft = draft_on(cpf_msg["id"])
     assert cpf_draft["trigger"] == "GUIDED_CPF_CONFIRMED", cpf_draft
-    assert cpf_draft["draft_text"] == "CPF 123.456.789-10 confirmado. O valor foi pago? Responda sim ou não.", cpf_draft
+    assert cpf_draft["draft_text"] == "CPF 123.456.789-10 confirmado.\n\nO valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", cpf_draft
     operator_send(cpf_draft)
+
+    # GB-4-back (D-035): "voltar" also works at the *payment* step, not
+    # just the CPF step — re-presents the same original offers again.
+    payment_back_msg = send_customer("quero voltar")
+    payment_back_draft = draft_on(payment_back_msg["id"])
+    assert payment_back_draft["trigger"] == "GUIDED_SLOT_RESELECTION", payment_back_draft
+    assert "1." in payment_back_draft["draft_text"] and "2." in payment_back_draft["draft_text"], payment_back_draft
+    operator_send(payment_back_draft)
+
+    # Walk the flow forward again to reach the payment step once more, so
+    # the rest of this smoke test continues from a real GUIDED_CPF_CONFIRMED
+    # state.
+    reselect_again_msg = send_customer("1")
+    reselect_again_draft = draft_on(reselect_again_msg["id"])
+    assert reselect_again_draft["trigger"] == "GUIDED_SLOT_SELECTION", reselect_again_draft
+    operator_send(reselect_again_draft)
+    cpf_again_msg = send_customer("123.456.789-10")
+    cpf_again_draft = draft_on(cpf_again_msg["id"])
+    assert cpf_again_draft["trigger"] == "GUIDED_CPF_CONFIRMED", cpf_again_draft
+    operator_send(cpf_again_draft)
 
     # Negative payment reply re-asks, still draft-only.
     no_payment_msg = send_customer("Então, não paguei")
     no_payment_draft = draft_on(no_payment_msg["id"])
-    assert no_payment_draft["draft_text"] == "O valor foi pago? Responda sim ou não.", no_payment_draft
+    assert no_payment_draft["draft_text"] == "O valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", no_payment_draft
     operator_send(no_payment_draft)
 
     # Affirmative reply completes the booking — same wording AA-10 itself uses.
@@ -135,10 +176,13 @@ def run() -> None:
     with get_session_factory()() as db:
         bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == UUID(conversation_id))).all()]
         assert GB_CPF_INPUT_REDACTION in bodies, bodies
-        for raw_cpf_input in ("Ah 123456a8910", "tabom 123.456..789.10"):
+        for raw_cpf_input in ("Ah 123456a8910", "tabom 123.456..789.10", "123.456.789-10"):
             assert raw_cpf_input not in bodies, bodies
         for raw_payment_input in ("Então, não paguei", "tabom simm paguei"):
             assert raw_payment_input in bodies, bodies
+        # D-035: "voltar" during the payment step is not itself a CPF
+        # reply, so it is deliberately not redacted.
+        assert "quero voltar" in bodies, bodies
 
     # Bug found 2026-08-19: after the booking flow completed, the *next*
     # customer message — even an unrelated clinical question — was still

@@ -40,7 +40,7 @@ A instituição informa dispor de consultas, exames, cirurgia, infusão, radiote
 
 ## Vocês oferecem psicologia?
 
-Sim. O apoio psicológico pode ser solicitado pelo paciente ou familiar em diferentes fases do cuidado (simulação). Em risco imediato de autoagressão, procure emergência e não aguarde agendamento comum.
+Sim. Contamos com apoio psicológico e psico-oncológico, que pode ser solicitado pelo paciente ou familiar em diferentes fases do cuidado (simulação).
 
 `qa_id: QA-007` · `categoria: instituicao`
 
@@ -478,13 +478,13 @@ Geralmente são pedidos cartão SUS (ou CPF, que pode gerá-lo na hora), documen
 
 ## Estou com muito medo desde que recebi o diagnóstico. Isso é normal?
 
-Sim, é uma reação comum. Medo, tristeza, raiva e negação podem aparecer e mudar de intensidade ao longo do tratamento. Você não precisa passar por isso sozinho: apoio psicológico e psico-oncológico pode ajudar. Se o sofrimento for muito intenso, houver isolamento, desesperança ou pensamento de se machucar, isso é uma emergência e exige ajuda imediata.
+Sim, é uma reação comum. Medo, tristeza, raiva e negação podem aparecer e mudar de intensidade ao longo do tratamento. Você não precisa passar por isso sozinho: apoio psicológico e psico-oncológico pode ajudar. Se o sofrimento for muito intenso ou houver isolamento, procure ajuda imediatamente.
 
 `qa_id: QA-080` · `categoria: apoio_emocional`
 
 ## Tenho medo de morrer por causa do câncer. Vocês podem me ajudar com isso?
 
-Esse medo é comum e válido, e merece espaço para ser conversado, não apenas respondido com informação técnica. A equipe de psico-oncologia pode ajudar a lidar com esse sentimento junto com o cuidado clínico. O prognóstico depende do seu caso específico e deve ser discutido com o médico responsável; nenhuma estimativa individual deve ser dada fora dessa consulta. Em caso de pensamento de se machucar ou risco imediato, procure emergência agora.
+Esse medo é comum e válido, e merece espaço para ser conversado, não apenas respondido com informação técnica. A equipe de psico-oncologia pode ajudar a lidar com esse sentimento junto com o cuidado clínico. O prognóstico depende do seu caso específico e deve ser discutido com o médico responsável; nenhuma estimativa individual deve ser dada fora dessa consulta.
 
 `qa_id: QA-081` · `categoria: apoio_emocional`
 

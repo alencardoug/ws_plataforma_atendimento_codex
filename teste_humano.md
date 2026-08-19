@@ -417,6 +417,29 @@ operador precisa enviar**, não envio automático.
   sistema — mesma regra de não retenção que a Seção 4.3 já garante para o
   fluxo autônomo.
 
+### 4b.5 Pergunta clínica após o fluxo terminar (D-034)
+
+- [ ] Complete o fluxo 4b.3/4b.4 até a mensagem final de sucesso. Depois,
+  pergunte algo clínico sem relação com o agendamento (ex.: "Em quanto
+  tempo descubro se eu tenho câncer?"). O rascunho **não** deve voltar a
+  oferecer as mesmas vagas antigas — deve trazer uma resposta curta
+  explicando que é uma pergunta clínica a ser respondida por um
+  profissional durante a consulta.
+
+### 4b.6 "Voltar" durante CPF ou pagamento (D-035)
+
+- [ ] Repita 4b.3 para escolher uma vaga. No rascunho que pede CPF,
+  responda "Voltar" (ou "Cancelar"/"Alterar horário") em vez de um CPF —
+  o rascunho deve reapresentar a mesma lista de vagas original (numerada),
+  **sem** dizer "CPF inválido". Escolha outra opção normalmente a partir
+  daí.
+- [ ] Avance de novo até a etapa de pagamento (depois do CPF confirmado).
+  Responda "Voltar" em vez de sim/não — deve reapresentar as mesmas vagas
+  de novo, do mesmo jeito.
+- [ ] Confirme que as duas mensagens novas ("Entendi que você escolheu...")
+  e a de CPF confirmado terminam com "Digite Voltar para escolher outro
+  horário." em uma linha separada.
+
 ---
 
 ## 5. Checklist funcional do estado atual (V1/V2 — regressão)

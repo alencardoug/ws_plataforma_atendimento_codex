@@ -19,7 +19,7 @@ Este material ajuda você e sua família a se prepararem, reconhecerem o que cos
 
 ## Orientação específica
 
-Medo e tristeza podem aparecer. Procure ajuda se houver sofrimento intenso, isolamento, desesperança ou pensamentos de se machucar; risco imediato exige emergência.
+Medo e tristeza podem aparecer. A equipe de psico-oncologia pode ajudar a lidar com esses sentimentos junto com o cuidado clínico. Procure ajuda se houver sofrimento intenso, isolamento ou desesperança.
 
 ## Antes do procedimento ou sessão
 
