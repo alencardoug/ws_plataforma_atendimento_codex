@@ -52,6 +52,7 @@ interface ConversationSummary {
   id: string;
   status: ConversationStatus;
   effective_mode: MaturityMode;
+  unread_customer_messages: number;
 }
 
 export interface Evidence {
@@ -632,6 +633,7 @@ export function OperatorPage() {
       >
         <StatusBadge status={conversation.status} />{" "}
         <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>
+        {conversation.unread_customer_messages > 0 && <span className="badge badge-waiting" title="Mensagens do cliente ainda sem resposta do operador">{conversation.unread_customer_messages} sem resposta</span>}
       </button>)}
       <button type="button" className="btn-ghost" onClick={() => void closeAllConversations().catch((caught) => setError(errorMessage(caught)))}>Encerrar todas as conversas</button>
       <button type="button" className="btn-ghost" onClick={() => void ensureAvailability().catch((caught) => setError(errorMessage(caught)))}>Garantir disponibilidade (D+1/D+7)</button>

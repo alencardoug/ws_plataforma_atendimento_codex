@@ -200,6 +200,29 @@ the chat transcript.
   004-dynamic-appointment-availability/spec.md` §6) needs its own analysis
   before implementation, not an ad hoc frontend addition.
 
+**Added 2026-08-20, human decision — customer-side rendering, session-only,
+no persistence:** once the appointment is booked (the same
+`GUIDED_BOOKING_COMPLETE`/AA-10-completion trigger as above), a single
+summary line of the specific details chosen — e.g. "Oncologia geral
+(triagem) — Dra. Renata Silveira (simulação), Unidade Central (simulação),
+quinta-feira 27/08 às 08:00 (America/São_Paulo)" — should also appear in
+the **customer's own tab** (`CustomerPage`), positioned directly below the
+"Enviar" button and above the "Encerrar conversa" button.
+
+- explicitly **not** a durable/persisted field — unlike the operator-facing
+  bullet above (which still needs its own data-model decision if a
+  durable booking record is chosen), this customer-facing line must be
+  session-only, scoped the same way `conversation_id`/`conversation_token`
+  already are (`sessionStorage`, cleared on tab close) — closing the
+  browser session or ending the conversation must lose it, with nothing
+  written to the database for this specific rendering;
+- this still needs its own discovery/spec/plan/tasks cycle before
+  implementation — in particular, exactly how the client derives this
+  line without persistence (e.g. computed client-side from the messages
+  already loaded in the open conversation, matching the trigger this
+  section's operator-facing bullet already identifies) is a decision for
+  that future cycle, not resolved by this note.
+
 ### Registered for a future SDD round — draft-generation status visible to the customer
 
 Not authorized for implementation yet. Human request, 2026-08-19: the

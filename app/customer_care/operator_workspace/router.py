@@ -3,7 +3,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Query, Request
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text
 
 from customer_care.ai.router import automatic_draft_status, evaluate_automatic_trigger, evidence_for_generation, generation_dict, is_customer_typing, latest_generation_dict
 from customer_care.audit.service import record_event
@@ -33,8 +33,37 @@ def require_assignment(session: DbSession, conversation_id: UUID, operator_id: U
     return conversation
 
 
-def summary(conversation: Conversation) -> dict:
-    return {"id": conversation.id, "status": conversation.status, "effective_mode": conversation.effective_mode, "created_at": conversation.created_at, "last_message_at": conversation.last_message_at, "unread_customer_messages": 0}
+def summary(conversation: Conversation, unread_by_conversation: dict[UUID, int] | None = None) -> dict:
+    unread = (unread_by_conversation or {}).get(conversation.id, 0)
+    return {"id": conversation.id, "status": conversation.status, "effective_mode": conversation.effective_mode, "created_at": conversation.created_at, "last_message_at": conversation.last_message_at, "unread_customer_messages": unread}
+
+
+def unread_customer_message_counts(session: DbSession, conversation_ids: list[UUID]) -> dict[UUID, int]:
+    """Trailing CUSTOMER messages sent after the conversation's own most recent
+    OPERATOR message (or all CUSTOMER messages, if the operator has never
+    replied) — i.e. how many of the customer's latest messages are still
+    unanswered. Batched into one query per call site instead of per
+    conversation, since this endpoint is polled every ~2s by every operator."""
+    if not conversation_ids:
+        return {}
+    last_operator_message = (
+        select(Message.conversation_id, func.max(Message.created_at).label("last_operator_at"))
+        .where(Message.conversation_id.in_(conversation_ids), Message.author_type == "OPERATOR")
+        .group_by(Message.conversation_id)
+        .subquery()
+    )
+    rows = session.execute(
+        select(Message.conversation_id, func.count())
+        .select_from(Message)
+        .outerjoin(last_operator_message, last_operator_message.c.conversation_id == Message.conversation_id)
+        .where(
+            Message.conversation_id.in_(conversation_ids),
+            Message.author_type == "CUSTOMER",
+            or_(last_operator_message.c.last_operator_at.is_(None), Message.created_at > last_operator_message.c.last_operator_at),
+        )
+        .group_by(Message.conversation_id)
+    ).all()
+    return {conversation_id: count for conversation_id, count in rows}
 
 
 def automatic_draft_fields(session: DbSession, conversation: Conversation) -> dict:
@@ -62,14 +91,15 @@ def list_conversations(
         rows = session.scalars(active.order_by(Conversation.last_message_at, Conversation.created_at)).all()
     else:
         rows = [*session.scalars(waiting).all(), *session.scalars(active).all()]
-    return [summary(row) for row in rows]
+    unread_by_conversation = unread_customer_message_counts(session, [row.id for row in rows])
+    return [summary(row, unread_by_conversation) for row in rows]
 
 
 @router.get("/conversations/{conversation_id}")
 def operator_conversation_detail(conversation_id: UUID, operator: CurrentOperator, session: DbSession) -> dict:
     conversation = require_assignment(session, conversation_id, operator.id)
     evaluate_automatic_trigger(session, conversation)
-    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
+    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/claim")
@@ -88,7 +118,7 @@ def claim(conversation_id: UUID, operator: CurrentOperator, session: DbSession, 
     conversation.status = "ACTIVE"
     record_event(session, "conversation.claimed", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"active_count_after": active_count + 1})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
+    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/release", response_model=ConversationSummaryOut)
@@ -102,7 +132,7 @@ def release(conversation_id: UUID, operator: CurrentOperator, session: DbSession
     conversation.status = "WAITING"
     record_event(session, "conversation.released", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id)
     session.commit()
-    return summary(conversation)
+    return summary(conversation, unread_customer_message_counts(session, [conversation.id]))
 
 
 @router.post("/conversations/{conversation_id}/close", response_model=ConversationSummaryOut)
@@ -117,7 +147,7 @@ def close(conversation_id: UUID, operator: CurrentOperator, session: DbSession, 
     conversation.closed_at = now
     record_event(session, "conversation.closed", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id)
     session.commit()
-    return summary(conversation)
+    return summary(conversation, unread_customer_message_counts(session, [conversation.id]))
 
 
 @router.post("/conversations/{conversation_id}/take-over")
@@ -129,7 +159,7 @@ def take_over(conversation_id: UUID, operator: CurrentOperator, session: DbSessi
     conversation.taken_over_at = datetime.now(UTC)
     record_event(session, "conversation.taken_over", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"from_mode": "N2", "to_mode": "N1"})
     session.commit()
-    return {**summary(conversation), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
+    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=OperatorMessageOut, status_code=201)
