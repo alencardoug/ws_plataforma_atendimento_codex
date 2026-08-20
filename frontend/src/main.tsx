@@ -193,6 +193,14 @@ export function CustomerPage() {
   const [tokenCopied, setTokenCopied] = useState(false);
   const [confirmingClose, setConfirmingClose] = useState(false);
   const [surveyState, setSurveyState] = useState<"pending" | "dismissed" | "submitted">("pending");
+  const [startCountdown, setStartCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    document.documentElement.dataset.page = "customer";
+    return () => {
+      delete document.documentElement.dataset.page;
+    };
+  }, []);
 
   const copyToken = async () => {
     try {
@@ -244,6 +252,28 @@ export function CustomerPage() {
     setConversation(data.conversation);
   };
 
+  // Purely cosmetic cold-start expectation-setter: begins 0.5s after the
+  // click and counts down 8s, but never gates the real request — whichever
+  // finishes first (the API response or the countdown) wins, since a
+  // successful start() unmounts this view via the `id` state change.
+  const handleStart = () => {
+    setError("");
+    setStartCountdown(null);
+    const reveal = window.setTimeout(() => setStartCountdown(8), 500);
+    void start().catch((caught) => {
+      window.clearTimeout(reveal);
+      setStartCountdown(null);
+      setError(errorMessage(caught));
+    });
+  };
+
+  const startCountdownActive = startCountdown !== null && startCountdown > 0;
+  useEffect(() => {
+    if (!startCountdownActive) return;
+    const timer = window.setInterval(() => setStartCountdown((current) => (current === null ? null : Math.max(0, current - 1))), 1000);
+    return () => window.clearInterval(timer);
+  }, [startCountdownActive]);
+
   const send = async (event: FormEvent) => {
     event.preventDefault();
     await api<Message>(`/public/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ body: text }) }, token);
@@ -273,9 +303,14 @@ export function CustomerPage() {
   if (!id) {
     return <main>
       <div className="card stack">
-        <h1>Atendimento</h1>
-        <p>Converse anonimamente com nossa equipe. Um código de acompanhamento será exibido assim que a conversa iniciar.</p>
-        <button onClick={() => void start().catch((caught) => setError(errorMessage(caught)))}>Iniciar conversa</button>
+        <h1>Canal de agendamento e informações</h1>
+        <p>Converse anonimamente com nossos atendentes e agentes. Agende consultas e consulte informações clínicas — por exemplo, como se preparar para procedimentos cirúrgicos e de tratamento, além dos cuidados após os procedimentos —, informações administrativas, diretrizes em casos de emergência e detalhes de acompanhamentos pós-tratamento, como atendimento psico-oncológico, nutricional, endocrinológico e fisioterapêutico.</p>
+        <button onClick={handleStart} disabled={startCountdown !== null}>Iniciar conversa</button>
+        {startCountdown !== null && (
+          <p aria-live="polite" className="typing-indicator">
+            {startCountdown > 0 ? `Preparando atendimento… ${startCountdown}s` : "Preparando atendimento…"}
+          </p>
+        )}
         {error && <p role="alert">{error}</p>}
       </div>
     </main>;

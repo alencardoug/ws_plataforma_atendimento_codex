@@ -12,7 +12,7 @@ afterEach(() => {
 describe("V1 routes", () => {
   it("renders the anonymous customer surface", () => {
     render(<MemoryRouter initialEntries={["/customer"]}><App /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "Atendimento" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Canal de agendamento e informações" })).toBeInTheDocument();
   });
 
   it("renders the operator surface", () => {
@@ -23,7 +23,7 @@ describe("V1 routes", () => {
   it("renders untrusted route content as text, never markup", () => {
     render(<MemoryRouter initialEntries={["/<img src=x onerror=alert(1)>"]}><App /></MemoryRouter>);
     expect(document.querySelector("img")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Atendimento" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Canal de agendamento e informações" })).toBeInTheDocument();
   });
 
   it("preserves line breaks in plain-text messages", () => {
