@@ -36,6 +36,8 @@ from sqlalchemy.orm import Session
 from customer_care.booking_script.parsing import extract_cpf, extract_payment_confirmation
 from customer_care.infrastructure.models import AIGeneration, AppointmentOfferPresentation, Conversation, Message
 from customer_care.knowledge.embeddings import EmbeddingProvider
+from customer_care.scheduling.availability import record_appointment_booking
+from customer_care.scheduling.models import ScheduleSlot
 
 # cosine_distance (lower = more similar). Calibrated 2026-08-19 against
 # real text-embedding-3-small output, not a guessed constant: genuine
@@ -229,6 +231,10 @@ def interpret_slot_choice(session: Session, provider: EmbeddingProvider, convers
             )
         )
         if offer is not None:
+            # 007/BS-2: stage which specific offer this was, for
+            # interpret_payment_reply() to source the booking record from
+            # once the flow actually completes (plan.md §2).
+            conversation.guided_booking_selected_offer_id = offer.id
             return offer
         # A named ordinal outside this offer set's actual range (e.g.
         # "quarta opção" with only 2 offers) falls through to embedding
@@ -243,6 +249,7 @@ def interpret_slot_choice(session: Session, provider: EmbeddingProvider, convers
     ).first()
     if best is None or best.distance > SLOT_CHOICE_DISTANCE_THRESHOLD:
         return None
+    conversation.guided_booking_selected_offer_id = best[0].id
     return best[0]
 
 
@@ -397,6 +404,15 @@ def interpret_payment_reply(session: Session, conversation: Conversation, custom
         if row is not None:
             return render_offer_reselection_text(session, row[0]), "GUIDED_SLOT_RESELECTION"
     if extract_payment_confirmation(customer_text) is True:
+        # 007/BS-2: source the completed-booking record from the specific
+        # offer GB-2's ordinal/embedding match identified — staged on the
+        # conversation since that step, several messages ago (plan.md §2).
+        if conversation.guided_booking_selected_offer_id is not None:
+            offer = session.get(AppointmentOfferPresentation, conversation.guided_booking_selected_offer_id)
+            slot = session.get(ScheduleSlot, offer.slot_id) if offer is not None else None
+            if slot is not None:
+                record_appointment_booking(session, conversation, source="guided_booking", specialty_id=slot.specialty_id, professional_id=slot.professional_id, unit_id=slot.unit_id, slot_starts_at=slot.starts_at)
+            conversation.guided_booking_selected_offer_id = None
         return "Verificando pagamento. Pagamento verificado. Agendamento realizado com sucesso. Há algo mais que posso ajudar?", "GUIDED_BOOKING_COMPLETE"
     return "O valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", "GUIDED_CPF_CONFIRMED"
 

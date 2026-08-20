@@ -49,6 +49,11 @@ class Conversation(Base):
     # booking_script/*. See scheduling/guided_booking.py.
     guided_booking_pending_text: Mapped[str | None] = mapped_column(Text)
     guided_booking_pending_trigger: Mapped[str | None] = mapped_column(Text)
+    # 007/BS-2: transient staging for "which specific offer GB-2
+    # identified" — set by interpret_slot_choice(), read and cleared by
+    # interpret_payment_reply() at the GUIDED_BOOKING_COMPLETE
+    # transition. See scheduling/guided_booking.py, plan.md §2.
+    guided_booking_selected_offer_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.appointment_offer_presentations.id"))
 
 
 class ConversationAssignment(Base):

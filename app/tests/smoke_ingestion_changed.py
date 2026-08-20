@@ -19,7 +19,7 @@ def run() -> None:
         corpus = Path(directory) / "documents"
         shutil.copytree("/workspace/documents", corpus)
         first = ingest(corpus, provider)
-        assert first["embedded"] == 658, first  # 656 + QA-087/088 (specs/004-dynamic-appointment-availability T070)
+        assert first["embedded"] == 664, first  # 656 + QA-087/088 (004 T070) + QA-089..QA-094 (006/SC, 6 new support-specialty entries)
         unchanged = ingest(corpus, provider)
         assert unchanged["embedded"] == 0 and unchanged["updated"] == 0, unchanged
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from customer_care.audit.service import record_event
 from customer_care.booking_script.parsing import detect_booking_intent, extract_cpf, extract_payment_confirmation
 from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Conversation, Message, QAEntry, RetrievalHit
-from customer_care.scheduling.availability import format_price_brl
+from customer_care.scheduling.availability import format_price_brl, record_appointment_booking
 from customer_care.scheduling.models import ProfessionalSpecialty, Specialty
 
 
@@ -170,6 +170,14 @@ def advance_booking_script(session: Session, conversation: Conversation, custome
             return  # stays on AWAITING_PAYMENT, no retry limit
         send_scripted_message(session, conversation, "Verificando pagamento", step=BookingScriptStep.AWAITING_PAYMENT.value)
         send_scripted_message(session, conversation, "Pagamento verificado", step=BookingScriptStep.AWAITING_PAYMENT.value)
+        # 007/BS-3: the one additive line this feature adds to this file —
+        # specialty-only, since AA-10 itself never tracks which specific
+        # slot the customer meant (spec.md §6, "the honesty limit").
+        generation = _latest_dynamic_generation(session, conversation)
+        specialty_slug = _resolved_specialty_slug(session, generation) if generation else None
+        specialty_id = session.scalar(select(Specialty.specialty_id).where(Specialty.slug == specialty_slug)) if specialty_slug else None
+        if specialty_id is not None:
+            record_appointment_booking(session, conversation, source="booking_script", specialty_id=specialty_id)
         send_scripted_message(session, conversation, "Agendamento realizado com sucesso. Há algo mais que posso ajudar?", step=BookingScriptStep.AWAITING_PAYMENT.value)
         conversation.booking_script_step = None
         return

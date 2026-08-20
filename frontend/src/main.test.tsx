@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { App, CustomerPage, KnowledgeAdminPage, ManualEvidence, MessageBody, OperatorPage } from "./main";
+import { App, CustomerPage, EvidenceCandidate, KnowledgeAdminPage, MessageBody, OperatorPage } from "./main";
 
 afterEach(() => {
   sessionStorage.clear();
@@ -34,22 +34,44 @@ describe("V1 routes", () => {
     expect(message).toHaveClass("message-body");
   });
 
-  it("displays the full manual-search evidence without turning it into a draft", () => {
-    render(<ManualEvidence evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "CLINICAL", rank: 1, title: "Documento-pai", section: "Cuidados", content: "Conteúdo completo do documento-pai.", matched_child_excerpt: "Trecho que corresponde à busca." }} />);
+  // 009/EV-1: a CLINICAL item's full parent document is never rendered by
+  // default — only its matched child excerpt, plus a "Trazer documento"
+  // action. Replaces the pre-009 ManualEvidence behavior, which showed the
+  // full parent up front.
+  it("shows only the matched child excerpt for clinical evidence until 'Trazer documento' is clicked (009/EV-1, EV-2)", () => {
+    const onReveal = vi.fn();
+    const { rerender } = render(<EvidenceCandidate evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "CLINICAL", rank: 1, title: "Documento-pai", section: "Cuidados", content: "Conteúdo completo do documento-pai.", matched_child_excerpt: "Trecho que corresponde à busca." }} revealed={false} onReveal={onReveal} />);
 
     expect(screen.getByText("Documento-pai")).toBeInTheDocument();
+    expect(screen.getByText("Trecho que corresponde à busca.")).toBeInTheDocument();
+    expect(screen.queryByText("Conteúdo completo do documento-pai.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Selecionar" })).toBeNull();
+
+    const revealButton = screen.getByRole("button", { name: "Trazer documento" });
+    fireEvent.click(revealButton);
+    expect(onReveal).toHaveBeenCalledTimes(1);
+
+    rerender(<EvidenceCandidate evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "CLINICAL", rank: 1, title: "Documento-pai", section: "Cuidados", content: "Conteúdo completo do documento-pai.", matched_child_excerpt: "Trecho que corresponde à busca." }} revealed={true} onReveal={onReveal} />);
     expect(screen.getByText("Conteúdo completo do documento-pai.")).toBeInTheDocument();
     expect(screen.getByText("Trecho que corresponde à busca.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Usar/ })).toBeNull();
   });
 
   it("offers a single select action per evidence item when onSelect is provided (V2-3)", () => {
     const onSelect = vi.fn();
-    render(<ManualEvidence evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "ADMIN_QA", rank: 1, title: "Pergunta administrativa", content: "Resposta aprovada." }} onSelect={onSelect} />);
+    render(<EvidenceCandidate evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "ADMIN_QA", rank: 1, title: "Pergunta administrativa", content: "Resposta aprovada." }} revealed={false} onReveal={vi.fn()} onSelect={onSelect} />);
 
+    expect(screen.getByText("Resposta aprovada.")).toBeInTheDocument();
     const button = screen.getByRole("button", { name: "Selecionar" });
     fireEvent.click(button);
 
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("reveals the full parent document via 'Selecionar' once already revealed, matching the existing select flow (009/EV-2)", () => {
+    const onSelect = vi.fn();
+    render(<EvidenceCandidate evidence={{ retrieval_hit_id: "evidence-1", knowledge_type: "CLINICAL", rank: 1, title: "Documento-pai", content: "Conteúdo completo do documento-pai.", matched_child_excerpt: "Trecho." }} revealed={true} onReveal={vi.fn()} onSelect={onSelect} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
     expect(onSelect).toHaveBeenCalledTimes(1);
   });
 
@@ -74,6 +96,91 @@ describe("V1 routes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copiar" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("SUB3B4GC"));
     expect(await screen.findByRole("button", { name: "Copiado!" })).toBeInTheDocument();
+  });
+
+  it("shows a generic 'preparing response' cue distinct from the customer's own typing indicator (008/CS-4)", async () => {
+    sessionStorage.setItem("conversation_id", "conv-1");
+    sessionStorage.setItem("conversation_token", "SUB3B4GC");
+    let preparing = true;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => ({
+        ok: true,
+        json: async () => ({ id: "conv-1", status: "ACTIVE", messages: [], preparing_response: preparing }),
+      })),
+    );
+
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+
+    expect(await screen.findByText("Preparando resposta…")).toBeInTheDocument();
+    expect(screen.queryByText("Digitando…")).toBeNull();
+
+    preparing = false;
+    await waitFor(() => expect(screen.queryByText("Preparando resposta…")).toBeNull(), { timeout: 3_000 });
+  });
+
+  it("does not show the 'preparing response' cue when the backend reports none pending (008/CS-4)", async () => {
+    sessionStorage.setItem("conversation_id", "conv-1");
+    sessionStorage.setItem("conversation_token", "SUB3B4GC");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: "conv-1", status: "ACTIVE", messages: [], preparing_response: false }),
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+
+    await screen.findByRole("button", { name: "Copiar" });
+    expect(screen.queryByText("Preparando resposta…")).toBeNull();
+  });
+
+  it("shows the customer-facing booking summary line below Enviar, above Encerrar conversa, once a booking completed (007/BS-6, BS-7)", async () => {
+    sessionStorage.setItem("conversation_id", "conv-1");
+    sessionStorage.setItem("conversation_token", "SUB3B4GC");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          id: "conv-1",
+          status: "ACTIVE",
+          messages: [],
+          booking_summary_line: "Oncologia geral (triagem) — Dra. Renata Silveira (simulação), Unidade Central (simulação), quinta-feira 27/08 às 08:00 (America/São_Paulo)",
+        }),
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+
+    const summary = await screen.findByLabelText("Agendamento realizado");
+    expect(summary).toHaveTextContent("Dra. Renata Silveira");
+    const sendButton = screen.getByRole("button", { name: "Enviar" });
+    const closeButton = screen.getByRole("button", { name: "Encerrar conversa" });
+    // DOM order matches document order — asserts BS-7's exact placement,
+    // not just presence.
+    const position = sendButton.compareDocumentPosition(summary);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const closePosition = closeButton.compareDocumentPosition(summary);
+    expect(closePosition & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it("shows no booking summary line when no booking has completed (007 outcome 8)", async () => {
+    sessionStorage.setItem("conversation_id", "conv-1");
+    sessionStorage.setItem("conversation_token", "SUB3B4GC");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ id: "conv-1", status: "ACTIVE", messages: [], booking_summary_line: null }),
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/customer"]}><CustomerPage /></MemoryRouter>);
+
+    await screen.findByRole("button", { name: "Copiar" });
+    expect(screen.queryByLabelText("Agendamento realizado")).toBeNull();
   });
 
   it("defaults message selection to the trailing customer run and lets the operator clear it (V2-4)", async () => {
@@ -156,6 +263,71 @@ describe("V1 routes", () => {
     expect(await screen.findByText("Cliente está digitando…")).toBeInTheDocument();
     expect(await screen.findByText("Resposta automática sintética.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Usar sugestão" })).toBeInTheDocument();
+  });
+
+  it("shows the operator-facing booking summary once a booking flow completed, distinguishing full and specialty-only detail (007/BS-5)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const conversationDetail = {
+      id: "conv-1",
+      status: "ACTIVE",
+      effective_mode: "N2",
+      messages: [{ id: "cust-1", author_type: "CUSTOMER", body: "Olá" }],
+      booking_summary: { source: "guided_booking", line: "Mastologia oncológica — Dra. Ana, Unidade Central, quinta-feira 27/08 às 08:00 (America/São_Paulo)", has_slot_detail: true },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-1", status: "ACTIVE", effective_mode: "N2" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-1")) {
+          return { ok: true, json: async () => conversationDetail };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
+
+    expect(await screen.findByLabelText("Agendamento realizado")).toHaveTextContent("Mastologia oncológica");
+  });
+
+  it("shows no operator-facing booking summary when no booking has completed (007 outcome 8)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const conversationDetail = {
+      id: "conv-1",
+      status: "ACTIVE",
+      effective_mode: "N2",
+      messages: [{ id: "cust-1", author_type: "CUSTOMER", body: "Olá" }],
+      booking_summary: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) {
+          return { ok: true, json: async () => [{ id: "conv-1", status: "ACTIVE", effective_mode: "N2" }] };
+        }
+        if (url.endsWith("/operator/runtime-config")) {
+          return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-1")) {
+          return { ok: true, json: async () => conversationDetail };
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
+
+    await screen.findByText("Olá");
+    expect(screen.queryByLabelText("Agendamento realizado")).toBeNull();
   });
 
   it("lists knowledge records and creates a new Q&A entry (V2-8)", async () => {

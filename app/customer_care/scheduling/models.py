@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Text, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, Text, text
 from sqlalchemy.dialects.postgresql import ENUM as PGEnum
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -61,3 +61,22 @@ class ScheduleSlot(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(SlotStatus)
+
+
+class AppointmentBooking(Base):
+    """007 (BS-1): one row per completed booking flow (GB or AA-10), never
+    mutated after insert. `professional_id`/`unit_id`/`slot_starts_at` are
+    nullable because an AA-10-sourced row cannot populate them truthfully
+    — see spec.md §6 "the honesty limit". No CPF/payment field exists on
+    this table at all."""
+
+    __tablename__ = "appointment_bookings"
+    __table_args__ = (CheckConstraint("source IN ('guided_booking','booking_script')", name="appointment_bookings_source_check"), {"schema": "scheduling"})
+    booking_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    conversation_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("customer_service.conversations.id"))
+    source: Mapped[str] = mapped_column(Text)
+    specialty_id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), ForeignKey("scheduling.specialties.specialty_id"))
+    professional_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("scheduling.professionals.professional_id"))
+    unit_id: Mapped[UUID | None] = mapped_column(PGUUID(as_uuid=True), ForeignKey("scheduling.units.unit_id"))
+    slot_starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))

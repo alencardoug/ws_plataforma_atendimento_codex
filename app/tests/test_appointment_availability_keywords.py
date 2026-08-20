@@ -22,6 +22,28 @@ def test_each_diagnosis_specific_keyword_resolves_its_own_specialty() -> None:
     assert extract_parameters("quero uma segunda opiniao").specialty_slug == "segunda-opiniao"
 
 
+def test_each_support_specialty_keyword_resolves_its_own_specialty() -> None:
+    """006/SS-2: four new specialties, same word-boundary keyword mechanism
+    as the diagnostic ones above — no code branch distinguishes them."""
+    assert extract_parameters("apoio psicológico durante o tratamento").specialty_slug == "psico-oncologia"
+    assert extract_parameters("preciso falar com um psicólogo").specialty_slug == "psico-oncologia"
+    assert extract_parameters("quero orientação nutricional").specialty_slug == "nutricao-oncologica"
+    assert extract_parameters("preciso de um nutricionista").specialty_slug == "nutricao-oncologica"
+    assert extract_parameters("estou com alterações hormonais").specialty_slug == "endocrinologia-oncologica"
+    assert extract_parameters("problema na tireoide").specialty_slug == "endocrinologia-oncologica"
+    assert extract_parameters("quero fazer fisioterapia").specialty_slug == "fisioterapia-oncologica"
+    assert extract_parameters("estou com linfedema no braço").specialty_slug == "fisioterapia-oncologica"
+
+
+def test_support_specialty_keywords_do_not_collide_with_existing_ones() -> None:
+    """No new keyword accidentally matches an existing specialty's own
+    query, and vice versa — checked directly, not just by inspection."""
+    assert extract_parameters("Tem vaga de mastologia?").specialty_slug == "mastologia-oncologica"
+    assert extract_parameters("suspeita colorretal").specialty_slug == "cirurgia-colorretal"
+    assert extract_parameters("quero uma segunda opinião").specialty_slug == "segunda-opiniao"
+    assert extract_parameters("é uma triagem inicial").specialty_slug == GENERALIST_SLUG
+
+
 def test_explicit_generalist_keywords_resolve_generalist_slug() -> None:
     assert extract_parameters("quero um clínico geral").specialty_slug == GENERALIST_SLUG
     assert extract_parameters("não sei qual especialidade preciso").specialty_slug == GENERALIST_SLUG

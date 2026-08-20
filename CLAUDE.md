@@ -61,15 +61,24 @@ Read and obey `AGENTS.md` first.
   was not extended — a deliberate human decision, verified structurally
   (`booking_script/*` untouched, zero import coupling). `insurance_lookup`/
   `convenio` remains deferred — see that package's `spec.md` §6.
-- The human authorized three more specification cycles on 2026-08-20
-  (D-036, D-037, D-038), each already registered in `ROADMAP.md`:
+- The human authorized four specification cycles on 2026-08-20 (D-036,
+  D-037, D-038, D-039), each registered in `ROADMAP.md`:
   `specs/006-specialty-scheduling-breadth/`,
-  `specs/007-completed-booking-visibility/`, and
-  `specs/008-customer-facing-draft-status/`. **`spec.md` is complete for
-  all three; `plan.md`/`data-model.md`/`tasks.md` are not started yet** —
-  none of the three is authorized for implementation. Follow the same
-  authority-order process as every prior cycle before writing code against
-  them.
+  `specs/007-completed-booking-visibility/`,
+  `specs/008-customer-facing-draft-status/`, and
+  `specs/009-two-phase-clinical-evidence/`. **All four are now
+  implementation-complete** — `spec.md`/`plan.md`/`data-model.md`/
+  `tasks.md`/`acceptance.md`/`analysis.md` are complete for all four
+  (implemented in order 009 → 008 → 007 → 006, smallest/lowest-risk
+  first), every gate runnable without a live Compose stack + operator/
+  OpenAI credentials has passed, and two real defects (content + a test
+  fact-check) were found and fixed along the way in 006. **Each package's
+  verdict is CONDITIONAL, not GO** — one credential-backed batch run
+  (backend `pytest` against a real seeded Postgres, the full `smoke_*.py`
+  suite including the new `smoke_v6_specialty_scheduling_breadth.py`, and
+  Playwright `v1`-`v3`+`v7`-`v9`) is still needed before any of the four
+  can be marked DONE. See `PROJECT_STATE.md`'s "Cycle status"/"Immediate
+  next action" sections for the full picture and exactly what's left.
 
 Read in this order:
 

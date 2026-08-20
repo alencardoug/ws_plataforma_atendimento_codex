@@ -7,15 +7,17 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from customer_care.ai.router import evaluate_automatic_trigger
+from customer_care.ai.router import automatic_draft_status, evaluate_automatic_trigger
 from customer_care.anonymous_access.rate_limit import enforce_not_locked_out, record_attempt
 from customer_care.anonymous_access.security import digest_conversation_token, issue_conversation_token
 from customer_care.audit.service import record_event
 from customer_care.booking_script.service import advance_booking_script, persisted_customer_body
 from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
+from customer_care.scheduling.availability import render_booking_summary_line
 from customer_care.scheduling.guided_booking import advance_guided_booking
 from customer_care.scheduling.guided_booking import persisted_customer_body as guided_persisted_customer_body
+from customer_care.scheduling.models import AppointmentBooking
 from customer_care.shared.dependencies import DbSession, customer_bearer
 from customer_care.shared.errors import api_error
 from customer_care.shared.http import client_ip
@@ -69,9 +71,35 @@ def create_conversation(session: DbSession, request: Request) -> dict:
     return {"conversation": customer_projection(session, conversation), "access_token": raw_token}
 
 
+def customer_draft_status(session: DbSession, conversation: Conversation) -> dict:
+    """008/CS-1: reuses automatic_draft_status()'s existing eligibility
+    computation verbatim — no duplicated logic, no new query. The countdown
+    number itself (`_seconds_remaining`) is discarded here, before it ever
+    reaches a response model, so it never crosses into any /public/*
+    response (CS-3). No evaluate_automatic_trigger() call here by design
+    (plan.md §2): this is a plain read of already-committed state, not a
+    mutation, so no same-request ORM-freshness concern applies — adding one
+    would make this GET side-effecting, a new trigger path spec.md never
+    asked for."""
+    eligible, _seconds_remaining = automatic_draft_status(session, conversation)
+    return {"preparing_response": eligible}
+
+
+def customer_booking_summary_fields(session: DbSession, conversation: Conversation) -> dict:
+    """007/BS-6: computed fresh from `appointment_bookings` on every read
+    — nothing written to `sessionStorage` or any other client store for
+    this field; it becomes unreachable the moment the conversation itself
+    does (spec.md §4/BS-6). Deliberately a separate function from the
+    operator-side `booking_summary_fields()` (spec.md's own stated reason:
+    keep this session-only promise structurally distinct), even though
+    both read the same row."""
+    booking = session.scalar(select(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation.id).order_by(AppointmentBooking.recorded_at.desc()))
+    return {"booking_summary_line": render_booking_summary_line(session, booking) if booking else None}
+
+
 @router.get("/{conversation_id}", response_model=ConversationOut)
 def read_conversation(conversation: Annotated[Conversation, Depends(token_bound_conversation)], session: DbSession) -> dict:
-    return customer_projection(session, conversation)
+    return {**customer_projection(session, conversation), **customer_draft_status(session, conversation), **customer_booking_summary_fields(session, conversation)}
 
 
 @router.post("/{conversation_id}", response_model=ConversationOut)

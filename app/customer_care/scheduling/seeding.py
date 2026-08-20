@@ -130,6 +130,98 @@ def create_slots_on(session: Session, target_date: date, needed: int, specialty_
 _SEED_LOCK_KEY = 725017001  # arbitrary, fixed — this operation's own pg_advisory_xact_lock scope
 
 
+WIDE_SEED_END_DATE = date(2026, 12, 30)
+WIDE_SEED_SLOT_MINUTES = 45
+_WIDE_SEED_LOCK_KEY = 725017002  # 006/SV-3: distinct from _SEED_LOCK_KEY, so this action and AA-9's D+1/D+7 button never block each other unnecessarily
+
+
+@dataclass(frozen=True)
+class SeedWideResult:
+    specialty_count: int
+    business_day_count: int
+    slots_created: int
+
+
+def _wide_seed_business_days(session: Session, today: date) -> list[date]:
+    """Every business day from tomorrow through WIDE_SEED_END_DATE
+    inclusive — reuses `next_business_day()` (already skips Sundays/
+    `scheduling.holidays` non-business-day rows, already seeded through
+    all of 2027) rather than duplicating that logic in Python."""
+    days: list[date] = []
+    candidate = today + timedelta(days=1)
+    while True:
+        business_day = next_business_day_sql(session, candidate)
+        if business_day > WIDE_SEED_END_DATE:
+            break
+        days.append(business_day)
+        candidate = business_day + timedelta(days=1)
+    return days
+
+
+def create_wide_slots_on(session: Session, target_date: date, specialty_id: UUID) -> int:
+    """006/SV-2: every missing 45-minute slot for every active
+    professional in this specialty, 08:00 up to (not including) 18:00 —
+    14 slots/day/professional (08:00, 08:45, ..., 17:45; confirmed by
+    direct computation, not hand arithmetic — (18:00-08:00)/45min = 13.33,
+    so 14 start times fit strictly before 18:00). Unlike `create_slots_on()`
+    (a fixed-count, round-robin-across-professionals target), this fills
+    the whole grid: every professional gets a slot at every interval.
+    `ON CONFLICT DO NOTHING` makes re-running safe by construction — no
+    `already_sufficient` short-circuit needed (SV-3).
+
+    Note: spec.md's own illustrative "13 slots/day/professional (08:00,
+    08:45, ..., 17:15)" example does not reconcile with its own stated
+    45-minute-spacing/18:00-exclusive rule under any reading — the actual
+    count is 14, ending at 17:45, not 13 ending at 17:15 (nor 13 ending at
+    17:00, an earlier miscount in this same file's own history — see git
+    blame). This implements the operative numeric rule (45-minute spacing,
+    08:00 start, 18:00-exclusive end), verified by both a direct Python
+    computation and a real-database test
+    (`test_appointment_wide_seeding.py`), not by hand arithmetic alone."""
+    created = 0
+    pairs = active_professional_specialty_pairs(session, specialty_id)
+    current = combine_sao_paulo(target_date, SEED_HOUR_START)
+    end = combine_sao_paulo(target_date, SEED_HOUR_END)
+    while current < end:
+        for professional_id, professional_specialty_id, duration in pairs:
+            result = session.execute(
+                pg_insert(ScheduleSlot)
+                .values(
+                    unit_id=DEFAULT_UNIT_ID,
+                    specialty_id=professional_specialty_id,
+                    professional_id=professional_id,
+                    starts_at=current,
+                    ends_at=current + timedelta(minutes=duration),
+                    status="available",
+                )
+                .on_conflict_do_nothing(index_elements=["professional_id", "starts_at"])
+                .returning(ScheduleSlot.slot_id)
+            )
+            if result.first() is not None:
+                created += 1
+        current += timedelta(minutes=WIDE_SEED_SLOT_MINUTES)
+    return created
+
+
+def ensure_wide_availability(session: Session) -> SeedWideResult:
+    """006/SV-1..SV-4: a new, separate, one-time bulk-fill action — AA-9's
+    own D+1/D+7 generalist-only button is untouched (it was deliberately
+    narrowed to single-specialty scope by a 2026-08-19 correction that
+    this action does not reopen). Every specialty is read live from
+    `scheduling.specialties` (SV-2's own "automatically covers any
+    specialty that exists by the time it runs" requirement) — never a
+    hardcoded list."""
+    session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _WIDE_SEED_LOCK_KEY})
+    today = _today_sao_paulo()
+    specialty_ids = session.scalars(select(Specialty.specialty_id)).all()
+    business_days = _wide_seed_business_days(session, today)
+    total_created = 0
+    for target_date in business_days:
+        for specialty_id in specialty_ids:
+            total_created += create_wide_slots_on(session, target_date, specialty_id)
+    return SeedWideResult(specialty_count=len(specialty_ids), business_day_count=len(business_days), slots_created=total_created)
+
+
 def ensure_seed_availability(session: Session) -> SeedResult:
     """Holds a transaction-scoped Postgres advisory lock for the duration
     of this call (released automatically at commit/rollback) so two

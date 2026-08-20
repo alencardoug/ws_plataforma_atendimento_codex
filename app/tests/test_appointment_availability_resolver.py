@@ -84,23 +84,45 @@ class TestSpecialtyFiltering:
 
 
 class TestPeriodFiltering:
+    """006/SV correction (found live, 2026-08-20): once the wide-availability
+    seed action has actually been exercised against a database (an
+    operator action this feature adds — not a per-test fixture), it seeds
+    dense same-specialty morning/afternoon slots starting tomorrow, every
+    business day through 2026-12-30. `resolve_appointment_availability()`'s
+    own `ORDER BY starts_at LIMIT 4` then always prefers those near-term
+    real slots over this fixture's own far-future (300+ days out) ones, so
+    asserting the *rendered text contains this fixture's own literal
+    09:00/15:00* stopped holding — not because period filtering broke, but
+    because the fixture's own slots are no longer guaranteed to be among
+    the nearest 4. Asserts the actual filtering property instead (every
+    *returned* row's local hour is in the requested half of the day),
+    which holds regardless of how much other real data exists."""
+
     def test_morning_keyword_returns_only_morning_slots(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia de manhã?")
-        assert "09:00" in resolution.pattern_text
-        assert "15:00" not in resolution.pattern_text
+            _resolution, rows = resolve_appointment_availability(db, "Tem vaga de mastologia de manhã?")
+        assert rows
+        assert all(row[0].starts_at.astimezone(SAO_PAULO).hour < 12 for row in rows)
 
     def test_afternoon_keyword_returns_only_afternoon_slots(self, seeded_slots: tuple[date, list[str]]) -> None:
         with get_session_factory()() as db:
-            resolution, _rows = resolve_appointment_availability(db, "Tem vaga de mastologia à tarde?")
-        assert "15:00" in resolution.pattern_text
-        assert "09:00" not in resolution.pattern_text
+            _resolution, rows = resolve_appointment_availability(db, "Tem vaga de mastologia à tarde?")
+        assert rows
+        assert all(row[0].starts_at.astimezone(SAO_PAULO).hour >= 12 for row in rows)
 
 
 class TestZeroMatchAbstain:
     def test_zero_match_raises_with_diagnostic_never_customer_facing_cause(self) -> None:
+        """006/SV correction (found live): the original query ("daqui a
+        {random hex} dias") relied on there being no *other* mastologia
+        slots anywhere in the system at all — true before this feature's
+        own wide-seed action had ever been exercised, false afterward
+        (every business day through 2026-12-30 is now seeded for every
+        specialty). "domingo" is deterministic (DATE_KEYWORDS, no LLM
+        involved) and reliably zero-match regardless of ambient seeded
+        data: neither AA-9 nor SV ever seeds a Sunday."""
         with get_session_factory()() as db, pytest.raises(DynamicResolutionError) as exc_info:
-            resolve_appointment_availability(db, f"Tem vaga de mastologia daqui a {uuid.uuid4().hex} dias?")
+            resolve_appointment_availability(db, "Tem vaga de mastologia domingo?")
         assert "no schedule_slots matched params=" in exc_info.value.cause
 
 

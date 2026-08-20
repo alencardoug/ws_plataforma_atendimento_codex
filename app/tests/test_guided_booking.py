@@ -11,7 +11,8 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from customer_care.auth.security import hash_password
 from customer_care.infrastructure.database import get_session_factory
@@ -34,7 +35,7 @@ from customer_care.scheduling.guided_booking import (
     pending_redaction_step,
     persisted_customer_body,
 )
-from customer_care.scheduling.models import ScheduleSlot
+from customer_care.scheduling.models import AppointmentBooking, ScheduleSlot
 
 # Real seeded mastologia-oncologica specialty/professional/unit — same IDs
 # test_appointment_availability_resolver.py already relies on.
@@ -102,8 +103,23 @@ def conversation_with_generation(operator_id):
         db.execute(delete(AIGeneration).where(AIGeneration.id == generation_id))
         db.execute(delete(ScheduleSlot).where(ScheduleSlot.slot_id == slot_id))
         db.execute(delete(RetrievalRun).where(RetrievalRun.operator_id == operator_id))
-        db.execute(delete(Conversation).where(Conversation.id == conversation_id))
         db.commit()
+    # 007/BS-4: a completed-booking test (or any future test reaching
+    # GUIDED_BOOKING_COMPLETE) writes an append-only audit_events row
+    # referencing this conversation_id (Constitution Article IX — a DB
+    # trigger rejects deleting audit_events, so the conversation can never
+    # be hard-deleted afterward either). This attempt is a separate
+    # transaction from the block above specifically so a failure here
+    # cannot roll back the legitimate deletes that already succeeded —
+    # matches test_booking_script_flow.py's own already-established
+    # "leave harmless synthetic test residue" precedent for the same
+    # constraint.
+    with session_factory() as db:
+        try:
+            db.execute(delete(Conversation).where(Conversation.id == conversation_id))
+            db.commit()
+        except IntegrityError:
+            db.rollback()
 
 
 def _send_operator_message(db, conversation_id, generation_id, operator_id, body: str) -> None:
@@ -446,6 +462,50 @@ class TestInterpretPaymentReply:
         text, next_trigger = result
         assert text == "Verificando pagamento. Pagamento verificado. Agendamento realizado com sucesso. Há algo mais que posso ajudar?"
         assert next_trigger == "GUIDED_BOOKING_COMPLETE"
+
+    def test_affirmative_records_an_appointment_booking_sourced_from_the_chosen_offer(self, conversation_with_generation, operator_id) -> None:
+        """007/BS-2: the full flow — interpret_slot_choice() (GB-2) stages
+        which offer was chosen, then interpret_payment_reply() (BS-2)
+        reads it back and records a scheduling.appointment_bookings row
+        with that offer's real specialty/professional/unit/slot detail."""
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            conversation = db.get(Conversation, conversation_id)
+            assert conversation is not None
+            offer = interpret_slot_choice(db, PROVIDER, conversation, descriptions[1])
+            assert offer is not None
+            db.commit()
+        with session_factory() as db:
+            generation = db.get(AIGeneration, generation_id)
+            assert generation is not None
+            generation.trigger = "GUIDED_CPF_CONFIRMED"
+            _send_operator_message(db, conversation_id, generation_id, operator_id, "CPF confirmado. O valor foi pago?")
+        with session_factory() as db:
+            _send_customer_message(db, conversation_id, "sim, paguei")
+        try:
+            with session_factory() as db:
+                conversation = db.get(Conversation, conversation_id)
+                assert conversation is not None
+                assert conversation.guided_booking_selected_offer_id == offer.id
+                result = interpret_payment_reply(db, conversation, "sim, paguei")
+                assert result is not None
+                db.commit()
+            with session_factory() as db:
+                conversation = db.get(Conversation, conversation_id)
+                assert conversation is not None
+                assert conversation.guided_booking_selected_offer_id is None, "must be cleared after being consumed"
+                booking = db.scalar(select(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation_id))
+                assert booking is not None
+                assert booking.source == "guided_booking"
+                assert booking.specialty_id == UUID(_SPECIALTY_ID)
+                assert booking.professional_id == UUID(_PROFESSIONAL_ID)
+                assert booking.unit_id == UUID(_UNIT_ID)
+                assert booking.slot_starts_at is not None
+        finally:
+            with session_factory() as db:
+                db.execute(delete(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation_id))
+                db.commit()
 
     def test_negative_reasks_staying_on_cpf_confirmed_trigger(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation

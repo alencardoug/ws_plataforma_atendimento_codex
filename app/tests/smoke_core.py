@@ -68,7 +68,11 @@ def run() -> None:
     assert customer_read.status_code == 200
     assert customer_read.json()["messages"][-1]["body"] == "Resposta manual sintética."
     assert "latest_generation" not in customer_read.json()
-    assert set(customer_read.json()) == {"id", "status", "messages", "created_at", "closed_at"}
+    # 008/CS-2 and 007/BS-6 each added one legitimate customer-facing
+    # computed field (preparing_response, booking_summary_line) — this
+    # exact-set assertion is updated to include both rather than weakened
+    # to a superset check, so it still catches any future unintended leak.
+    assert set(customer_read.json()) == {"id", "status", "messages", "created_at", "closed_at", "preparing_response", "booking_summary_line"}
     assert all("source_generation_id" not in message for message in customer_read.json()["messages"])
 
     with get_session_factory()() as db:

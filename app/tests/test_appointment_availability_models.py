@@ -3,31 +3,44 @@ real database created by the two Phase 1 migrations (T008's schema
 creation, T009's generalist specialty) before anything else is built on
 top of them. Real-database integration test, matching this package's
 established convention for DB-touching acceptance evidence
-(specs/004-dynamic-appointment-availability/tasks.md Phase 1 gate)."""
+(specs/004-dynamic-appointment-availability/tasks.md Phase 1 gate).
+
+Updated 2026-08-20 (006/SS): the original "exactly 4 specialties / 12
+professionals" assertions became stale the moment 006's own migration
+added 4 more support specialties (psico-oncologia, nutrição, endocrinologia,
+fisioterapia oncológica) and 12 more professionals — found by actually
+running this suite against a real, freshly-migrated database, not by
+inspection. Updated to assert the new total rather than weakened to a
+lower bound, since the exact count is still meaningful acceptance
+evidence for what these two migrations together produce."""
 
 from sqlalchemy import select
 
 from customer_care.infrastructure.database import get_session_factory
 from customer_care.scheduling.models import Professional, ProfessionalSpecialty, ScheduleSlot, Specialty, Unit
 
-EXPECTED_SLUGS = {"mastologia-oncologica", "cirurgia-colorretal", "segunda-opiniao", "oncologia-geral"}
+EXPECTED_SLUGS = {
+    "mastologia-oncologica", "cirurgia-colorretal", "segunda-opiniao", "oncologia-geral",
+    # 006/SS: four new support specialties.
+    "psico-oncologia", "nutricao-oncologica", "endocrinologia-oncologica", "fisioterapia-oncologica",
+}
 
 
-def test_all_four_specialties_round_trip() -> None:
+def test_all_eight_specialties_round_trip() -> None:
     with get_session_factory()() as db:
         specialties = db.scalars(select(Specialty)).all()
 
     assert {s.slug for s in specialties} == EXPECTED_SLUGS
-    assert len(specialties) == 4
+    assert len(specialties) == 8
 
 
-def test_all_twelve_professionals_round_trip_and_join_through_professional_specialties() -> None:
+def test_all_twentyfour_professionals_round_trip_and_join_through_professional_specialties() -> None:
     with get_session_factory()() as db:
         professionals = db.scalars(select(Professional)).all()
         links = db.scalars(select(ProfessionalSpecialty)).all()
 
-        assert len(professionals) == 12
-        assert len(links) == 12
+        assert len(professionals) == 24
+        assert len(links) == 24
         for link in links:
             assert db.get(Professional, link.professional_id) is not None
             assert db.get(Specialty, link.specialty_id) is not None

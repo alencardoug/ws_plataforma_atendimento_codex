@@ -31,6 +31,7 @@ from customer_care.infrastructure.models import (
     RetrievalHit,
     RetrievalRun,
 )
+from customer_care.scheduling.models import AppointmentBooking, Specialty
 from customer_care.audit.service import record_event
 
 MASTOLOGIA_SPECIALTY_SLUG = "mastologia-oncologica"
@@ -140,6 +141,31 @@ def test_full_happy_path_script_verbatim(conversation_with_resolved_availability
             "Agendamento realizado com sucesso. Há algo mais que posso ajudar?",
         ]
         assert conversation.booking_script_step is None
+
+
+def test_full_happy_path_records_a_specialty_only_appointment_booking(conversation_with_resolved_availability) -> None:
+    """007/BS-3: the one additive block this feature adds to
+    advance_booking_script()'s AWAITING_PAYMENT branch — specialty-only,
+    since AA-10 itself never tracks which specific slot the customer meant
+    (spec.md §6, "the honesty limit")."""
+    conversation_id = conversation_with_resolved_availability
+    session_factory = get_session_factory()
+
+    for body in ("Quero marcar essa consulta", "tabom 123.456..789.10", "tabom simm paguei"):
+        with session_factory() as db:
+            conversation = db.get(Conversation, conversation_id)
+            advance_booking_script(db, conversation, _customer_message(db, conversation, body))
+            db.commit()
+
+    with session_factory() as db:
+        booking = db.scalar(select(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation_id))
+        assert booking is not None
+        assert booking.source == "booking_script"
+        assert booking.professional_id is None
+        assert booking.unit_id is None
+        assert booking.slot_starts_at is None
+        specialty_slug = db.scalar(select(Specialty.slug).where(Specialty.specialty_id == booking.specialty_id))
+        assert specialty_slug == MASTOLOGIA_SPECIALTY_SLUG
 
 
 def test_invalid_cpf_then_valid_branch(conversation_with_resolved_availability) -> None:

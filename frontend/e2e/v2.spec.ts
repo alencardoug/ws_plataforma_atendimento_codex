@@ -15,7 +15,19 @@ const operatorPassword = requiredEnvironment("E2E_OPERATOR_PASSWORD");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function psql(sql: string): void {
-  execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  // A previous test's automatic-draft trigger (a real, slow LLM call) can
+  // still be running server-side after Playwright considers that test
+  // "done" — closing browser contexts does not cancel an already-in-flight
+  // backend request — occasionally racing this TRUNCATE into a genuine
+  // Postgres deadlock (found live, v8.spec.ts; recurs here once v1.spec.ts
+  // reliably completes its own real "Gerar rascunho" call instead of
+  // failing early). One retry after a short pause is enough in practice.
+  try {
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  } catch {
+    execFileSync("sleep", ["2"]);
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  }
 }
 
 function restartBackend(): void {

@@ -16,6 +16,8 @@ from customer_care.infrastructure.models import (
     MessageCitation,
     RetrievalHit,
 )
+from customer_care.scheduling.availability import booking_summary_dict
+from customer_care.scheduling.models import AppointmentBooking
 from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
 from customer_care.shared.schemas import ConversationSummaryOut, OperatorMessageOut, OperatorSendIn
@@ -71,6 +73,14 @@ def automatic_draft_fields(session: DbSession, conversation: Conversation) -> di
     return {"automatic_draft_eligible": eligible, "automatic_draft_seconds_remaining": seconds_remaining}
 
 
+def booking_summary_fields(session: DbSession, conversation: Conversation) -> dict:
+    """007/BS-5: the operator-facing computed field — read fresh from
+    `appointment_bookings` each time, matching how `automatic_draft_fields()`
+    is itself never persisted, just composed on top of `customer_projection()`."""
+    booking = session.scalar(select(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation.id).order_by(AppointmentBooking.recorded_at.desc()))
+    return {"booking_summary": booking_summary_dict(session, booking) if booking else None}
+
+
 @router.get("/runtime-config")
 def runtime_config(operator: CurrentOperator) -> dict:
     settings = get_settings()
@@ -99,7 +109,7 @@ def list_conversations(
 def operator_conversation_detail(conversation_id: UUID, operator: CurrentOperator, session: DbSession) -> dict:
     conversation = require_assignment(session, conversation_id, operator.id)
     evaluate_automatic_trigger(session, conversation)
-    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
+    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation), **booking_summary_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/claim")
@@ -118,7 +128,7 @@ def claim(conversation_id: UUID, operator: CurrentOperator, session: DbSession, 
     conversation.status = "ACTIVE"
     record_event(session, "conversation.claimed", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"active_count_after": active_count + 1})
     session.commit()
-    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
+    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation), **booking_summary_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/release", response_model=ConversationSummaryOut)
@@ -159,7 +169,7 @@ def take_over(conversation_id: UUID, operator: CurrentOperator, session: DbSessi
     conversation.taken_over_at = datetime.now(UTC)
     record_event(session, "conversation.taken_over", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"from_mode": "N2", "to_mode": "N1"})
     session.commit()
-    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation)}
+    return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation), **booking_summary_fields(session, conversation)}
 
 
 @router.post("/conversations/{conversation_id}/messages", response_model=OperatorMessageOut, status_code=201)

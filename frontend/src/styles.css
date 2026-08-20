@@ -162,6 +162,16 @@ button.btn-danger:hover:not(:disabled) { background: #8f1f19; }
 
 .typing-indicator { color: var(--brand-700); font-size: var(--font-size-small); font-weight: 600; }
 
+.booking-summary {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid #bfe3cb;
+  background: var(--success-100);
+  color: var(--success-600);
+  font-weight: 600;
+}
+
 .messages { min-height: 20rem; display: flex; flex-direction: column; gap: var(--space-3); }
 article.message {
   margin: 0;

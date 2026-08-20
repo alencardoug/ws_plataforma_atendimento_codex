@@ -1,9 +1,11 @@
 import json
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from openai import OpenAI
 
+from customer_care.ai.prompts import load_prompt
 from customer_care.rag.service import Evidence
 from customer_care.shared.settings import get_settings
 
@@ -19,12 +21,32 @@ class GenerationResult:
     request_messages: list[dict[str, str]] | None = None
 
 
+@dataclass(frozen=True)
+class StructuredDateIntent:
+    """006/ND-1: the LLM classifies only these fields from a customer's
+    free-text date/time expression — it never computes, states, or
+    outputs a date or weekday name itself. Every field is independently
+    optional; `scheduling/availability.py`'s deterministic arithmetic
+    (`_resolve_date_intent`) is the only code that turns this into an
+    actual `date`."""
+
+    relative_unit: str | None  # "day" | "week" | "month"
+    relative_count: int | None
+    weekday: int | None  # 0=Monday..6=Sunday
+    nth_weekday_of_month: int | None  # 1-5
+    month: int | None  # 1-12
+    day: int | None  # explicit day-of-month
+    time_range_start: int | None  # hour, 0-23
+    time_range_end: int | None  # hour, 0-23 (exclusive)
+
+
 class GenerationProvider(Protocol):
     name: str
     model: str
 
     def generate(self, history: list[dict[str, str]], evidence: list[Evidence], system_prompt: str) -> GenerationResult: ...
     def rerank_clinical(self, customer_text: str, candidate_text: str) -> bool: ...
+    def extract_date_intent(self, customer_text: str, reference_date: date) -> StructuredDateIntent | None: ...
 
 
 CLINICAL_DEFLECTION_TEXT = "Essa é uma pergunta de natureza clínica — recomendo conversar sobre isso com o profissional de saúde responsável durante a consulta. Posso ajudar com outra dúvida?"
@@ -83,6 +105,15 @@ class DeterministicTestGenerationProvider:
         # already uses for every other embedding/LLM-judgment feature).
         return False
 
+    def extract_date_intent(self, customer_text: str, reference_date: date) -> StructuredDateIntent | None:
+        # 006/ND: same conservative stand-in precedent as rerank_clinical
+        # above — no real semantic judgment, always "found nothing", so
+        # extract_parameters()'s LLM fallback is inert under the
+        # deterministic-test provider and every existing pure test keeps
+        # its exact current behavior. Genuine extraction quality is
+        # smoke-tested against the real provider only.
+        return None
+
 
 class OpenAIGenerationProvider:
     name = "openai"
@@ -136,6 +167,47 @@ class OpenAIGenerationProvider:
         )
         payload = json.loads(response.choices[0].message.content or "{}")
         return payload.get("chosen") == "B"
+
+    def extract_date_intent(self, customer_text: str, reference_date: date) -> StructuredDateIntent | None:
+        """006/ND-1: classifies only the 8 structured fields — never
+        computes or states a date itself (the prompt states this as a
+        hard constraint). Defensive parsing: any missing/invalid field
+        defaults to `None` rather than raising, matching this provider's
+        general style (`rerank_clinical`'s own `.get("chosen") == "B"`
+        never raises on a malformed response either). Returns `None` only
+        on a hard parse failure — a well-formed response with every field
+        `None` is a valid, distinct result, still returned (ND-1's own
+        `plan.md` §5.1 rationale: keeps "provider failed" and "provider
+        understood nothing" distinguishable for a future caller, even
+        though both fall through identically today)."""
+        prompt = load_prompt("date_intent.md")
+        user_content = json.dumps({"customer_text": customer_text, "reference_date": reference_date.isoformat()}, ensure_ascii=False)
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "system", "content": prompt.content}, {"role": "user", "content": user_content}],
+                response_format={"type": "json_object"},
+            )
+            payload = json.loads(response.choices[0].message.content or "{}")
+        except (json.JSONDecodeError, OSError):
+            return None
+
+        def _int_or_none(value: object) -> int | None:
+            return value if isinstance(value, int) else None
+
+        def _str_or_none(value: object) -> str | None:
+            return value if isinstance(value, str) else None
+
+        return StructuredDateIntent(
+            relative_unit=_str_or_none(payload.get("relative_unit")),
+            relative_count=_int_or_none(payload.get("relative_count")),
+            weekday=_int_or_none(payload.get("weekday")),
+            nth_weekday_of_month=_int_or_none(payload.get("nth_weekday_of_month")),
+            month=_int_or_none(payload.get("month")),
+            day=_int_or_none(payload.get("day")),
+            time_range_start=_int_or_none(payload.get("time_range_start")),
+            time_range_end=_int_or_none(payload.get("time_range_end")),
+        )
 
 
 def configured_generation_provider() -> GenerationProvider:

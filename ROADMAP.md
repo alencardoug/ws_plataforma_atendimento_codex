@@ -9,7 +9,19 @@ own package, as is dynamic pricing and guided booking selection (also
 **DONE 2026-08-19**, D-032). All other entries remain roadmap only until
 their own Spec Kit flow is authorized and completed.
 
-## Priority ordering (human decision, 2026-08-19)
+## Priority ordering (human decision, 2026-08-19, updated 2026-08-20)
+
+**2026-08-20 update:** the human authorized implementing all four
+currently-specified-but-not-yet-implemented cycles together —
+`006-specialty-scheduling-breadth`, `007-completed-booking-visibility`,
+`008-customer-facing-draft-status`, and `009-two-phase-clinical-evidence`
+(D-039) — ahead of V4/V9, with Telegram still deferred until after this
+refinement/these four cycles land. **006/008/009 are now DONE** (implemented
+plus credential-backed closure, both same-day 2026-08-20). **007 remains
+CONDITIONAL** — its own new `v7.spec.ts` has one unresolved intermittent
+failure found during closure — see `PROJECT_STATE.md`. The ordering below
+is otherwise unchanged for what comes after these four: V4/V9 with real
+frontend support, then Telegram.
 
 Not a scope change — a sequencing decision for what gets authorized next,
 once the items already registered under "Era A — Existence" below
@@ -124,12 +136,15 @@ Explicitly deferred:
   inside N2 rather than extend the exception, after that tradeoff was made
   explicit (D-032).
 
-### Specialty citation and scheduling breadth — specification underway
+### Specialty citation and scheduling breadth — DONE (2026-08-20)
 
-**Spec authorized 2026-08-20 (D-036); `spec.md` complete at
-`specs/006-specialty-scheduling-breadth/spec.md`.** Not yet authorized for
-*implementation* — `plan.md`/`data-model.md`/`tasks.md` are still to come,
-same authority-order process as every prior cycle. The bullets below
+**Spec authorized 2026-08-20 (D-036, extended same day by D-039 to full
+implementation); `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/
+`acceptance.md`/`analysis.md` all complete at
+`specs/006-specialty-scheduling-breadth/`, verdict GO.** Implementation
+plus the credential-backed closure batch (Playwright, `smoke_*.py`, full
+`pytest`, all against a real Compose stack) both passed 2026-08-20 — see
+`PROJECT_STATE.md` for the closure evidence summary. The bullets below
 preserve the original registration note. Human request, 2026-08-19 (content-only correction
 made the same day: unprompted self-harm/"autoagressão" phrasing was removed
 from Q&A and clinical content per the same instruction; see D-033's
@@ -181,11 +196,18 @@ intenso" section):
   GB's existing offer-presentation/slot-choice mechanics needs its own
   analysis, not an ad hoc content tweak.
 
-### Completed booking visible to the operator — specification underway
+### Completed booking visible to the operator — implemented, CONDITIONAL (2026-08-20)
 
-**Spec authorized 2026-08-20 (D-037); `spec.md` complete at
-`specs/007-completed-booking-visibility/spec.md`.** Not yet authorized for
-*implementation*. The bullets below preserve the original registration
+**Spec authorized 2026-08-20 (D-037, extended same day by D-039 to full
+implementation); `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/
+`acceptance.md`/`analysis.md` all complete at
+`specs/007-completed-booking-visibility/`, verdict CONDITIONAL GO.**
+Implementation is complete and the credential-backed closure batch (same
+stack as 006/008/009) passed every gate except one: its own new
+`frontend/e2e/v7.spec.ts` has one unresolved intermittent failure
+(reproducible only in the full-suite context, not in isolation) — see
+`acceptance.md`'s closure section. Not yet DONE. The bullets below preserve
+the original registration
 note. Human request, 2026-08-19: once a
 guided-booking (GB) flow reaches `GUIDED_BOOKING_COMPLETE` (or AA-10's own
 autonomous script completes), the specific appointment that was booked —
@@ -229,11 +251,15 @@ the **customer's own tab** (`CustomerPage`), positioned directly below the
   section's operator-facing bullet already identifies) is a decision for
   that future cycle, not resolved by this note.
 
-### Draft-generation status visible to the customer — specification underway
+### Draft-generation status visible to the customer — DONE (2026-08-20)
 
-**Spec authorized 2026-08-20 (D-038); `spec.md` complete at
-`specs/008-customer-facing-draft-status/spec.md`.** Not yet authorized for
-*implementation*. The bullets below preserve the original registration
+**Spec authorized 2026-08-20 (D-038, extended same day by D-039 to full
+implementation); `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/
+`acceptance.md`/`analysis.md` all complete at
+`specs/008-customer-facing-draft-status/`, verdict GO.** Implementation
+plus the credential-backed closure batch (same as 006/007/009) both
+passed 2026-08-20 — see `PROJECT_STATE.md`. The bullets below preserve the
+original registration
 note. Human request, 2026-08-19: the
 "gerando resposta" status the operator already sees while an automatic
 draft is being prepared should also show to the customer, next to the
@@ -257,9 +283,18 @@ send button.
 - must go through a proper discovery/spec/plan/tasks cycle like every
   other feature, not an ad hoc frontend addition.
 
-### Registered for a future SDD round — two-phase clinical evidence: child chunk first, parent on demand
+### Two-phase clinical evidence: child chunk first, parent on demand — DONE (2026-08-20)
 
-Not authorized for implementation yet. Human request, 2026-08-19, clarified
+**Spec authorized 2026-08-20 (D-039); `spec.md`/`plan.md`/`data-model.md`/
+`tasks.md`/`acceptance.md`/`analysis.md` all complete at
+`specs/009-two-phase-clinical-evidence/`, verdict GO.** Implemented
+together with 006/007/008 (human decision 2026-08-20 — see "Priority
+ordering" note above, which now supersedes the "essential phase"
+sequencing for these four items specifically). Implementation plus the
+credential-backed closure batch (same as 006/007/008) both passed
+2026-08-20 — see `PROJECT_STATE.md`. The bullets below preserve the
+original
+registration note. Human request, 2026-08-19, clarified
 through follow-up questions (see below) — goal stated by the human: "duas
 fases para verificações clínicas, mais controle" (two phases for clinical
 checks, more control).

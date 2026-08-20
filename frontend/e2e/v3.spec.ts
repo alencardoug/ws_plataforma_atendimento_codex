@@ -15,7 +15,19 @@ const operatorPassword = requiredEnvironment("E2E_OPERATOR_PASSWORD");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function psql(sql: string): void {
-  execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  // A previous test's automatic-draft trigger (a real, slow LLM call) can
+  // still be running server-side after Playwright considers that test
+  // "done" — closing browser contexts does not cancel an already-in-flight
+  // backend request — occasionally racing this TRUNCATE into a genuine
+  // Postgres deadlock (found live, v8.spec.ts; recurs here once v1.spec.ts
+  // reliably completes its own real "Gerar rascunho" call instead of
+  // failing early). One retry after a short pause is enough in practice.
+  try {
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  } catch {
+    execFileSync("sleep", ["2"]);
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  }
 }
 
 // Same rationale as v2.spec.ts: each scenario claims an operator
@@ -78,7 +90,13 @@ test.describe("V3 acceptance (tasks.md T132)", () => {
       await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 45_000 });
       const approveButton = operator.getByRole("button", { name: "Aprovar" });
       if (await approveButton.isVisible().catch(() => false)) {
-        const draftText = await operator.locator(".draft-panel .message-body").textContent();
+        // 009/EV-3 (D-039): draft.evidence now renders as EvidenceCandidate
+        // cards *inside* .draft-panel too, each with their own nested
+        // .message-body — direct-child combinator keeps this locator
+        // pinned to the draft's own text (a direct child of .draft-panel),
+        // not any evidence card's (nested one level deeper, inside
+        // article.evidence-item).
+        const draftText = await operator.locator(".draft-panel > .message-body").textContent();
         await approveButton.click();
         // A poll already in flight can be completing a real automatic draft
         // while quick-approve refreshes the conversation. Wait through that
@@ -210,36 +228,40 @@ test.describe("V3 acceptance (tasks.md T132)", () => {
     }
   });
 
-  test("selecting evidence scrolls to top and is not disturbed by the periodic poll (V3-10)", async ({ browser }) => {
+  // Corrected by 009/EV-5 (D-039): V3-10 originally scrolled to the page
+  // top on any "Selecionar" click. That top-of-page scroll now belongs to
+  // the new "Trazer documento" action (009.spec.ts) instead; "Selecionar"
+  // scrolls the reply textarea into view, since selecting now more often
+  // happens after the operator has already scrolled down to read a
+  // revealed document or a draft panel, and the next action is sending.
+  test("selecting evidence scrolls the reply textarea into view and is not disturbed by the periodic poll (V3-10, corrected by 009/EV-5)", async ({ browser }) => {
     const customerContext = await browser.newContext();
     // A short viewport guarantees the page is scrollable regardless of how
     // much content the workspace layout happens to have.
     const operatorContext = await browser.newContext({ viewport: { width: 1000, height: 400 } });
     try {
       const customer = await customerContext.newPage();
-      await startCustomerConversation(customer, "Pergunta para checar scroll-to-top (T132 V3-10)");
+      await startCustomerConversation(customer, "Pergunta para checar scroll-to-reply (T132 V3-10, 009/EV-5)");
 
       const operator = await operatorContext.newPage();
       await login(operator);
       await operator.getByRole("button", { name: /^Aguardando/ }).click();
 
-      await operator.evaluate(() => window.scrollTo(0, 400));
-      const scrolledBefore = await operator.evaluate(() => window.scrollY);
-      expect(scrolledBefore).toBeGreaterThan(0);
+      await operator.evaluate(() => window.scrollTo(0, 0));
 
       await operator.getByLabel("Busca manual").fill("horário de atendimento");
       await operator.getByRole("button", { name: "Buscar evidências" }).click();
       await expect(operator.locator(".evidence-item").first()).toBeVisible({ timeout: 15_000 });
       await operator.locator(".evidence-item").first().getByRole("button", { name: "Selecionar" }).click();
       await expect(operator.getByText(/ANSWER|ABSTAIN/)).toBeVisible({ timeout: 15_000 });
-      await expect.poll(() => operator.evaluate(() => window.scrollY)).toBeLessThan(50);
+      await expect(operator.locator("#operator-reply")).toBeInViewport();
 
-      // Scroll back down manually; the 2-second poll refreshing unrelated
-      // state must not yank the position back to top on its own.
-      await operator.evaluate(() => window.scrollTo(0, 400));
+      // Scroll back to the top manually; the 2-second poll refreshing
+      // unrelated state must not yank the position back down on its own.
+      await operator.evaluate(() => window.scrollTo(0, 0));
       await operator.waitForTimeout(3_000);
       const scrolledAfterPoll = await operator.evaluate(() => window.scrollY);
-      expect(scrolledAfterPoll).toBeGreaterThan(0);
+      expect(scrolledAfterPoll).toBe(0);
     } finally {
       await customerContext.close();
       await operatorContext.close();

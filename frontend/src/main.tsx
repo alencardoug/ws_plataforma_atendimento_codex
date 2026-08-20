@@ -36,6 +36,13 @@ interface CustomerConversation {
   id: string;
   status: ConversationStatus;
   messages: Message[];
+  // 008/CS-4: true only while an automatic-draft debounce window is open —
+  // never a seconds-remaining count (that stays operator-only).
+  preparing_response?: boolean;
+  // 007/BS-6: a single rendered summary line once a booking flow has
+  // completed for this conversation — session-only (never written to
+  // sessionStorage), computed fresh by the backend on every read.
+  booking_summary_line?: string | null;
 }
 
 interface OperatorConversation extends CustomerConversation {
@@ -46,6 +53,10 @@ interface OperatorConversation extends CustomerConversation {
   // generation — mirrors evaluate_automatic_trigger's own guard exactly.
   automatic_draft_eligible?: boolean;
   automatic_draft_seconds_remaining?: number | null;
+  // 007/BS-5: present once a booking flow has completed for this
+  // conversation — `has_slot_detail` distinguishes a full (GB) summary
+  // from a specialty-only (AA-10) one, matching spec.md §6's honesty limit.
+  booking_summary?: { source: string; line: string; has_slot_detail: boolean } | null;
 }
 
 interface ConversationSummary {
@@ -125,8 +136,31 @@ function StatusBadge({ status }: { status: ConversationStatus }) {
   return <span className={`badge badge-${status.toLowerCase()}`}>{STATUS_LABEL[status]}</span>;
 }
 
-export function ManualEvidence({ evidence, onSelect }: { evidence: Evidence; onSelect?: () => void }) {
-  return <article className="evidence-item"><strong>{evidence.title}</strong>{evidence.section && <small>Seção: {evidence.section}</small>}<MessageBody body={evidence.content} />{evidence.matched_child_excerpt && <><small>Trecho encontrado</small><MessageBody body={evidence.matched_child_excerpt} /></>}{onSelect && <button type="button" onClick={onSelect}>Selecionar</button>}</article>;
+// 009/EV-1..EV-2: a CLINICAL item's full parent document (`content`) is
+// never rendered by default — only its matched child excerpt, with a
+// "Trazer documento" action that reveals `content` (already present in the
+// fetched payload, no new request). An ADMIN_QA item has no parent to gate
+// and keeps the single-phase behavior this component's predecessor
+// (ManualEvidence) always had. Used for both manual-search evidence and
+// (009/EV-3) automatic-draft evidence — one shared rendering, since
+// select_evidence() already treats both sources identically.
+export function EvidenceCandidate({ evidence, onSelect, revealed, onReveal }: { evidence: Evidence; onSelect?: () => void; revealed: boolean; onReveal: () => void }) {
+  const isClinical = evidence.knowledge_type === "CLINICAL";
+  const showFull = !isClinical || revealed;
+  return <article className="evidence-item">
+    <strong>{evidence.title}</strong>
+    {evidence.section && <small>Seção: {evidence.section}</small>}
+    {isClinical && !showFull && evidence.matched_child_excerpt && <>
+      <small>Trecho encontrado</small>
+      <MessageBody body={evidence.matched_child_excerpt} />
+      <button type="button" className="btn-secondary" onClick={onReveal}>Trazer documento</button>
+    </>}
+    {showFull && <>
+      <MessageBody body={evidence.content} />
+      {isClinical && evidence.matched_child_excerpt && <><small>Trecho encontrado</small><MessageBody body={evidence.matched_child_excerpt} /></>}
+      {onSelect && <button type="button" onClick={onSelect}>Selecionar</button>}
+    </>}
+  </article>;
 }
 
 // Operator-only transparency pop-up: shows the exact `messages` array sent
@@ -335,6 +369,12 @@ export function CustomerPage() {
           {message.citations?.map((citation) => <small key={`${citation.title}-${citation.section || ""}`} className="message-citation">Fonte: {citation.title}{citation.section ? ` — ${citation.section}` : ""}</small>)}
         </article>)}
       </section>
+      {/* 008/CS-4: deliberately its own line, not sharing "Digitando…"'s
+          span below — distinct location as well as distinct copy, so the
+          two cues (this one reflects the operator's side preparing a
+          reply; "Digitando…" reflects the customer's own typing) can never
+          be mistaken for one another even if both are true at once. */}
+      {conversation?.preparing_response && <p aria-live="polite" className="typing-indicator">Preparando resposta…</p>}
       <form onSubmit={(event) => void send(event).catch((caught) => setError(errorMessage(caught)))}>
         <label htmlFor="customer-message">Mensagem<textarea id="customer-message" value={text} onChange={(event) => setText(event.target.value)} required disabled={conversation?.status === "CLOSED"} /></label>
         <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
@@ -342,6 +382,11 @@ export function CustomerPage() {
           {text.trim().length > 0 && conversation?.status !== "CLOSED" && <span aria-live="polite" className="typing-indicator">Digitando…</span>}
         </div>
       </form>
+      {/* 007/BS-6/BS-7: session-only — computed fresh from the response
+          already fetched by the poll above, nothing written to
+          sessionStorage. Position is exact per spec.md BS-7: below
+          "Enviar", above "Encerrar conversa". */}
+      {conversation?.booking_summary_line && <p className="booking-summary" aria-label="Agendamento realizado">{conversation.booking_summary_line}</p>}
       {conversation?.status !== "CLOSED" && (confirmingClose
         ? <CloseConfirmPrompt onConfirm={() => void close().catch((caught) => setError(errorMessage(caught)))} onCancel={() => setConfirmingClose(false)} />
         : <button type="button" className="btn-ghost" onClick={() => setConfirmingClose(true)}>Encerrar conversa</button>)}
@@ -364,6 +409,17 @@ export function OperatorPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [instructionText, setInstructionText] = useState("");
   const [searchEvidence, setSearchEvidence] = useState<Evidence[]>([]);
+  // 009/EV-1..EV-2: which CLINICAL evidence items have had their full
+  // parent document explicitly revealed ("Trazer documento"). Lifted here
+  // (not local state inside EvidenceCandidate) so a poll-driven re-render
+  // of `draft` never collapses an already-revealed card back to hidden.
+  const [revealedEvidenceIds, setRevealedEvidenceIds] = useState<Set<string>>(new Set());
+  const revealDocument = (retrievalHitId: string) => {
+    setRevealedEvidenceIds((prev) => new Set(prev).add(retrievalHitId));
+    // 009/EV-5: "Trazer documento" takes over the top-of-page scroll V3-10
+    // originally gave to evidence selection.
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [showRequestDebug, setShowRequestDebug] = useState(false);
   const [markedIncorrectIds, setMarkedIncorrectIds] = useState<Set<string>>(new Set());
@@ -477,6 +533,13 @@ export function OperatorPage() {
     const data = await api<{ created_d1: number; created_d7: number; already_sufficient: boolean; message: string }>("/operator/scheduling/ensure-availability", { method: "POST" }, token);
     setAvailabilityMessage(data.message);
   };
+  // 006/SV: a separate, wider one-time bulk fill — every specialty, every
+  // business day through 2026-12-30 — not a replacement for AA-9's own
+  // D+1/D+7 generalist-only button above.
+  const ensureWideAvailability = async () => {
+    const data = await api<{ specialty_count: number; business_day_count: number; slots_created: number; message: string }>("/operator/scheduling/ensure-wide-availability", { method: "POST" }, token);
+    setAvailabilityMessage(data.message);
+  };
   // Ops/testing convenience: `items` (scope=all) already scopes its ACTIVE
   // rows to this operator's own assignments server-side, so every close()
   // on an already-active conversation is authorized by construction. A
@@ -568,6 +631,7 @@ export function OperatorPage() {
     setSelected(null);
     setDraft(null);
     setSearchEvidence([]);
+    setRevealedEvidenceIds(new Set());
     await load();
   };
   const search = async (event: FormEvent) => {
@@ -585,11 +649,14 @@ export function OperatorPage() {
       method: "POST",
       body: JSON.stringify({ conversation_id: selected.id }),
     }, token));
-    // V3-10: scoped to evidence selection only (not "Gerar rascunho"/
-    // regenerate-with-instruction) — fires only here, inside this click
-    // handler, never inside a useEffect keyed on poll-refreshed state, so
-    // the 2-second poll's unrelated re-renders can never re-trigger it.
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    // V3-10, corrected by 009/EV-5 (D-039): originally scrolled to the page
+    // top; now scrolls the reply textarea into view instead, since
+    // "Trazer documento" (above) took over the top-of-page scroll for the
+    // one case (revealing a long parent) where starting at the top still
+    // helps. Fires only here, inside this click handler, never inside a
+    // useEffect keyed on poll-refreshed state, so the 2-second poll's
+    // unrelated re-renders can never re-trigger it.
+    document.getElementById("operator-reply")?.scrollIntoView({ behavior: "smooth", block: "center" });
   };
   // V3-7: purely client-side reset, independent of message-selection state
   // ("desmarcar conversas", V2-4). No server round-trip, no durable row
@@ -598,6 +665,7 @@ export function OperatorPage() {
   const clearDraftAndSearch = () => {
     setDraft(null);
     setSearchEvidence([]);
+    setRevealedEvidenceIds(new Set());
     setSearchQuery("");
     setInstructionText("");
     setShowRequestDebug(false);
@@ -632,16 +700,21 @@ export function OperatorPage() {
         onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}
       >
         <StatusBadge status={conversation.status} />{" "}
-        <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>
+        <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>{" "}
         {conversation.unread_customer_messages > 0 && <span className="badge badge-waiting" title="Mensagens do cliente ainda sem resposta do operador">{conversation.unread_customer_messages} sem resposta</span>}
       </button>)}
       <button type="button" className="btn-ghost" onClick={() => void closeAllConversations().catch((caught) => setError(errorMessage(caught)))}>Encerrar todas as conversas</button>
       <button type="button" className="btn-ghost" onClick={() => void ensureAvailability().catch((caught) => setError(errorMessage(caught)))}>Garantir disponibilidade (D+1/D+7)</button>
+      <button type="button" className="btn-ghost" onClick={() => void ensureWideAvailability().catch((caught) => setError(errorMessage(caught)))}>Preencher agenda ampla (até 30/12/2026)</button>
       {availabilityMessage && <p role="status" aria-live="polite">{availabilityMessage}</p>}
     </aside>
     <section className="card">
       {selected ? <>
         <h1>Conversa {selected.effective_mode}</h1>
+        {/* 007/BS-5: read fresh from appointment_bookings on every poll —
+            has_slot_detail distinguishes a full (GB) summary from a
+            specialty-only (AA-10) one (spec.md §6). */}
+        {selected.booking_summary && <p className="booking-summary" aria-label="Agendamento realizado">{selected.booking_summary.line}</p>}
         {selected.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}
         {countdown !== null && <p aria-live="polite" className="typing-indicator">{countdown > 0 ? `Respondendo em ${countdown}s…` : "Gerando resposta…"}</p>}
         <button type="button" className="btn-ghost" onClick={clearMessageSelection}>Desmarcar conversas</button>
@@ -691,10 +764,13 @@ export function OperatorPage() {
         <button onClick={() => setText(draft.draft_text)}>{useDraftLabel}</button>
         {draft.status === "ANSWER" && <button type="button" className="btn-secondary" onClick={() => void quickApprove().catch((caught) => setError(errorMessage(caught)))}>Aprovar</button>}
         {draft.request_messages && draft.request_messages.length > 0 && <button type="button" className="btn-ghost" onClick={() => setShowRequestDebug(true)}>Ver requisição enviada</button>}
-        {draft.evidence.map((item) => <small key={item.retrieval_hit_id} className="message-citation">{item.title}</small>)}
+        {/* 009/EV-3: previously an inert <small> citation label with no
+            selection mechanism — each item is now its own selectable
+            candidate card, alongside (not replacing) "Usar sugestão" above. */}
+        {draft.evidence.map((item) => <EvidenceCandidate key={item.retrieval_hit_id} evidence={item} revealed={revealedEvidenceIds.has(item.retrieval_hit_id)} onReveal={() => revealDocument(item.retrieval_hit_id)} onSelect={aiEligible ? () => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught))) : undefined} />)}
       </div>}
       {showRequestDebug && draft?.request_messages && <RequestDebugDialog messages={draft.request_messages} onClose={() => setShowRequestDebug(false)} />}
-      {searchEvidence.map((item) => <ManualEvidence key={item.retrieval_hit_id} evidence={item} onSelect={aiEligible ? () => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught))) : undefined} />)}
+      {searchEvidence.map((item) => <EvidenceCandidate key={item.retrieval_hit_id} evidence={item} revealed={revealedEvidenceIds.has(item.retrieval_hit_id)} onReveal={() => revealDocument(item.retrieval_hit_id)} onSelect={aiEligible ? () => void selectEvidence(item.retrieval_hit_id).catch((caught) => setError(errorMessage(caught))) : undefined} />)}
       {error && <p role="alert">{error}</p>}
     </aside>
   </main>;
