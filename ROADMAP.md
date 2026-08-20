@@ -124,10 +124,13 @@ Explicitly deferred:
   inside N2 rather than extend the exception, after that tradeoff was made
   explicit (D-032).
 
-### Registered for a future SDD round — specialty citation and scheduling breadth
+### Specialty citation and scheduling breadth — specification underway
 
-Not authorized for implementation yet — a note for discovery/specification
-before any code changes. Human request, 2026-08-19 (content-only correction
+**Spec authorized 2026-08-20 (D-036); `spec.md` complete at
+`specs/006-specialty-scheduling-breadth/spec.md`.** Not yet authorized for
+*implementation* — `plan.md`/`data-model.md`/`tasks.md` are still to come,
+same authority-order process as every prior cycle. The bullets below
+preserve the original registration note. Human request, 2026-08-19 (content-only correction
 made the same day: unprompted self-harm/"autoagressão" phrasing was removed
 from Q&A and clinical content per the same instruction; see D-033's
 correction record and `documents/GOVERNANCE.md`'s "Sofrimento emocional
@@ -178,9 +181,12 @@ intenso" section):
   GB's existing offer-presentation/slot-choice mechanics needs its own
   analysis, not an ad hoc content tweak.
 
-### Registered for a future SDD round — completed booking visible to the operator
+### Completed booking visible to the operator — specification underway
 
-Not authorized for implementation yet. Human request, 2026-08-19: once a
+**Spec authorized 2026-08-20 (D-037); `spec.md` complete at
+`specs/007-completed-booking-visibility/spec.md`.** Not yet authorized for
+*implementation*. The bullets below preserve the original registration
+note. Human request, 2026-08-19: once a
 guided-booking (GB) flow reaches `GUIDED_BOOKING_COMPLETE` (or AA-10's own
 autonomous script completes), the specific appointment that was booked —
 e.g. "Oncologia geral (triagem) com Dra. Renata Silveira (simulação),
@@ -223,9 +229,12 @@ the **customer's own tab** (`CustomerPage`), positioned directly below the
   section's operator-facing bullet already identifies) is a decision for
   that future cycle, not resolved by this note.
 
-### Registered for a future SDD round — draft-generation status visible to the customer
+### Draft-generation status visible to the customer — specification underway
 
-Not authorized for implementation yet. Human request, 2026-08-19: the
+**Spec authorized 2026-08-20 (D-038); `spec.md` complete at
+`specs/008-customer-facing-draft-status/spec.md`.** Not yet authorized for
+*implementation*. The bullets below preserve the original registration
+note. Human request, 2026-08-19: the
 "gerando resposta" status the operator already sees while an automatic
 draft is being prepared should also show to the customer, next to the
 send button.

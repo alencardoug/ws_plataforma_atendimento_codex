@@ -61,6 +61,15 @@ Read and obey `AGENTS.md` first.
   was not extended — a deliberate human decision, verified structurally
   (`booking_script/*` untouched, zero import coupling). `insurance_lookup`/
   `convenio` remains deferred — see that package's `spec.md` §6.
+- The human authorized three more specification cycles on 2026-08-20
+  (D-036, D-037, D-038), each already registered in `ROADMAP.md`:
+  `specs/006-specialty-scheduling-breadth/`,
+  `specs/007-completed-booking-visibility/`, and
+  `specs/008-customer-facing-draft-status/`. **`spec.md` is complete for
+  all three; `plan.md`/`data-model.md`/`tasks.md` are not started yet** —
+  none of the three is authorized for implementation. Follow the same
+  authority-order process as every prior cycle before writing code against
+  them.
 
 Read in this order:
 

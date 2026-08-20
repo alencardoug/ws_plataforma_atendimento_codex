@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-19
+Last updated: 2026-08-20
 
 ## Lifecycle and authority
 
@@ -18,6 +18,13 @@ Last updated: 2026-08-19
   corrects `preco`/`pagamento` Q&A content; adds N2-only, embedding-
   assisted guided booking selection. `insurance_lookup`/`convenio` and any
   extension of Constitution Amendment 1.1.0 remain deferred.
+- Three specification cycles were authorized 2026-08-20 (D-036/D-037/D-038):
+  `specs/006-specialty-scheduling-breadth`,
+  `specs/007-completed-booking-visibility`, and
+  `specs/008-customer-facing-draft-status`. **`spec.md` is complete for
+  all three; none has a `plan.md`/`data-model.md`/`tasks.md` yet and none
+  is authorized for implementation.** This is the specification phase
+  only, per Constitution Article I.
 
 ## V1 baseline
 
