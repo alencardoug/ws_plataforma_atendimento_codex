@@ -135,6 +135,22 @@ Read and obey `AGENTS.md` first.
   unreachable in every real scenario (GB always wins) — `booking_script/
   service.py` itself is unmodified and Amendment 1.1.0's exception remains
   exactly as narrow as authorized.
+- **D-043-2 correction is DONE (2026-08-21).** Second, immediate
+  follow-on correction, human-reported from a second real conversation
+  right after D-043 shipped, same root theme: a bare "Oi" autosent an
+  entire unrelated clinical document (`full_parent_draft()`'s clinical
+  shortcut had no relevance threshold at all — fixed with a real-score-
+  calibrated `_AUTONOMOUS_CLINICAL_MIN_SCORE=0.40`, autonomous-send-only,
+  N1/N2 manual drafting unaffected); and three customer replies GB
+  correctly interpreted got no reply at all (GB's own generations never
+  carried `trigger=="AUTOMATIC"`, so D-043's own extended N5 mechanism
+  still excluded them — fixed by extending N5 only, never N3/N4, to also
+  cover GB's own trigger values). See `DECISIONS.md` D-043-2 and
+  `PROJECT_STATE.md` for full detail, including a noted pre-existing test-
+  isolation gap: `test_governed_autonomy.py`/`test_ungoverned_n5.py`
+  assume `n5_kill_switch_enabled` starts false, but this shared dev DB's
+  own live/demo state has it true — clear it before running either file's
+  full suite and restore afterward.
 
 Read in this order:
 

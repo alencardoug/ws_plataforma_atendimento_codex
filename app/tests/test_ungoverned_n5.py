@@ -91,6 +91,34 @@ def _make_generation(db, *, status="ANSWER", trigger="AUTOMATIC", category_slug=
     return conversation, generation
 
 
+# Real seeded chunk/parent-document pair, reused rather than duplicated —
+# same pattern test_guided_booking.py's own _UNIT_ID/_SPECIALTY_ID uses.
+_REAL_CHUNK_ID = "COLORRETAL-APOIO_EMOCIONAL-001-C01"
+_REAL_PARENT_DOCUMENT_ID = "COLORRETAL-APOIO_EMOCIONAL-001"
+
+
+def _make_clinical_shortcut_generation(db, *, score: float, operator_id=None, category_slug=None):
+    """D-043-2: a full_parent_draft()-shaped generation — provider ==
+    "clinical-parent-document", with one real RetrievalHit/AIGenerationSource
+    pair carrying the given score, exactly the shape
+    _clinical_top_evidence_score() reads."""
+    conversation = Conversation(anonymous_token_digest=uuid4().hex, initial_mode="N2", effective_mode="N2")
+    db.add(conversation)
+    db.flush()
+    run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text="t011-clinical", embedding_model="smoke", top_k=1, status="COMPLETED")
+    db.add(run)
+    db.flush()
+    hit = RetrievalHit(retrieval_run_id=run.id, matched_kind="CLINICAL_CHILD", matched_chunk_id=_REAL_CHUNK_ID, expanded_parent_document_id=_REAL_PARENT_DOCUMENT_ID, rank=1, score=score)
+    db.add(hit)
+    db.flush()
+    generation = AIGeneration(conversation_id=conversation.id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER", draft_text="documento clínico completo (fixture)", provider="clinical-parent-document", model="not-applicable", prompt_version="not-applicable", trigger="AUTOMATIC", category_slug=category_slug)
+    db.add(generation)
+    db.flush()
+    db.add(AIGenerationSource(ai_generation_id=generation.id, retrieval_hit_id=hit.id, use_order=1))
+    db.commit()
+    return conversation, generation
+
+
 def _cleanup(db, conversation_id, generation_ids, operator_id):
     conversation = db.get(Conversation, conversation_id)
     if conversation:
@@ -220,6 +248,117 @@ class TestEligibilityGate:
             assert db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id)) is None
             other_generations = db.scalars(select(AIGeneration).where(AIGeneration.conversation_id == conversation.id, AIGeneration.id != generation.id)).all()
             assert other_generations == []
+            _cleanup(db, conversation.id, [generation.id], operator_id)
+
+
+class TestGuidedBookingEligibility:
+    """D-043-2 (2026-08-21): GB (005) generations are never trigger=='AUTOMATIC'
+    — 010's own governed branch must stay closed to them regardless of
+    switch state, while N5 (only) now delivers them, matching the
+    human decision to extend N5 (never N3/N4) to GB's own fixed-template
+    output once booking_script's own D-043 fix made it the only real
+    booking path."""
+
+    @pytest.mark.parametrize("gb_trigger", ["GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE"])
+    def test_gb_trigger_delivers_verbatim_under_n5(self, operator_id, category, gb_trigger: str) -> None:
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            settings = db.get(SystemSettings, True)
+            settings.n5_kill_switch_enabled = True
+            db.commit()
+            conversation, generation = _make_generation(db, operator_id=operator_id, trigger=gb_trigger, category_slug=None)
+            maybe_open_autonomous_window(db, generation, conversation)
+            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id))
+            assert pending is not None, f"{gb_trigger} must be eligible for N5 delivery"
+            assert pending.mechanism == "ungoverned_n5"
+            assert pending.category is None
+            assert pending.generation_id == generation.id, "GB output is delivered verbatim, never re-generated"
+            other_generations = db.scalars(select(AIGeneration).where(AIGeneration.conversation_id == conversation.id, AIGeneration.id != generation.id)).all()
+            assert other_generations == []
+            _cleanup(db, conversation.id, [generation.id], operator_id)
+
+    def test_gb_trigger_never_opens_a_window_when_n5_off(self, operator_id, category) -> None:
+        """Without N5, GB's own D-032 decision (operator must explicitly
+        send) still holds — no autonomy mechanism applies to GB output."""
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            conversation, generation = _make_generation(db, operator_id=operator_id, trigger="GUIDED_SLOT_SELECTION", category_slug=None)
+            maybe_open_autonomous_window(db, generation, conversation)
+            assert db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id)) is None
+            _cleanup(db, conversation.id, [generation.id], operator_id)
+
+    def test_gb_trigger_never_uses_governed_mechanism_even_with_both_switches_on(self, operator_id, category) -> None:
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            db.get(Category, category).autonomy_enabled = True
+            settings = db.get(SystemSettings, True)
+            settings.autonomy_kill_switch_enabled = True
+            settings.n5_kill_switch_enabled = True
+            db.commit()
+            # A GB generation never carries a category_slug, but exercise
+            # the governed-branch guard directly regardless.
+            conversation, generation = _make_generation(db, operator_id=operator_id, trigger="GUIDED_CPF_CONFIRMED", category_slug=category)
+            maybe_open_autonomous_window(db, generation, conversation)
+            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id))
+            assert pending is not None
+            assert pending.mechanism == "ungoverned_n5", "GB triggers must never use the governed (N3/N4) mechanism"
+            db.get(Category, category).autonomy_enabled = False
+            db.commit()
+            _cleanup(db, conversation.id, [generation.id], operator_id)
+
+
+class TestClinicalRelevanceGate:
+    """D-043-2 (2026-08-21): full_parent_draft()'s unconditional
+    clinical-rank-one shortcut is safe for N1/N2 manual review, not for
+    autonomous send — a low-score match (noise, e.g. a bare greeting) must
+    not autosend the full unrelated document."""
+
+    def test_weak_clinical_shortcut_falls_back_to_ungoverned_llm_under_n5(self, operator_id, category) -> None:
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            settings = db.get(SystemSettings, True)
+            settings.n5_kill_switch_enabled = True
+            db.commit()
+            conversation, generation = _make_clinical_shortcut_generation(db, score=0.31, operator_id=operator_id)
+            maybe_open_autonomous_window(db, generation, conversation)
+            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id))
+            assert pending is not None, "the customer must still get a reply — just not the irrelevant document"
+            assert pending.mechanism == "ungoverned_n5"
+            assert pending.generation_id != generation.id, "the weak clinical draft must not be delivered as-is"
+            ungoverned = db.get(AIGeneration, pending.generation_id)
+            assert ungoverned.provider == "ungoverned-n5"
+            assert ungoverned.status == "ANSWER"
+            _cleanup(db, conversation.id, [ungoverned.id, generation.id], operator_id)
+
+    def test_strong_clinical_shortcut_delivers_verbatim_under_n5(self, operator_id, category) -> None:
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            settings = db.get(SystemSettings, True)
+            settings.n5_kill_switch_enabled = True
+            db.commit()
+            conversation, generation = _make_clinical_shortcut_generation(db, score=0.7, operator_id=operator_id)
+            maybe_open_autonomous_window(db, generation, conversation)
+            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id))
+            assert pending is not None
+            assert pending.mechanism == "ungoverned_n5"
+            assert pending.generation_id == generation.id, "a genuinely relevant clinical match is delivered verbatim"
+            other_generations = db.scalars(select(AIGeneration).where(AIGeneration.conversation_id == conversation.id, AIGeneration.id != generation.id)).all()
+            assert other_generations == []
+            _cleanup(db, conversation.id, [generation.id], operator_id)
+
+    def test_weak_clinical_shortcut_blocks_the_governed_branch_too(self, operator_id, category) -> None:
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            db.get(Category, category).autonomy_enabled = True
+            settings = db.get(SystemSettings, True)
+            settings.autonomy_kill_switch_enabled = True
+            settings.n5_kill_switch_enabled = False
+            db.commit()
+            conversation, generation = _make_clinical_shortcut_generation(db, score=0.31, operator_id=operator_id, category_slug=category)
+            maybe_open_autonomous_window(db, generation, conversation)
+            assert db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id)) is None, "a weak clinical match must not be sent by N3/N4 either — it stays an ordinary N2 draft for a human to review"
+            db.get(Category, category).autonomy_enabled = False
+            db.commit()
             _cleanup(db, conversation.id, [generation.id], operator_id)
 
 

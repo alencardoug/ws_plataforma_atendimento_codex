@@ -120,6 +120,72 @@ def run() -> None:
         close3 = client.post(f"/api/v1/operator/conversations/{conversation3_id}/close", headers=headers)
         assert close3.status_code == 200, close3.text
 
+        # --- D-043-2 (2026-08-21) regression: GB's (005) own slot-selection
+        # output must still reach the customer under N5 with no operator
+        # manually sending it — GB was designed (D-032) to always require
+        # an explicit operator send, before N5 existed. Once booking_script
+        # became unreachable (D-043), GB is the only real booking path, so
+        # this gap left a customer who correctly picked a slot with no
+        # reply at all.
+        seeded = client.post("/api/v1/operator/scheduling/ensure-availability", headers=headers)
+        assert seeded.status_code == 200, seeded.text
+        conv4 = client.post("/api/v1/public/conversations").json()
+        conversation4_id = conv4["conversation"]["id"]
+        customer4_headers = {"Authorization": f"Bearer {conv4['access_token']}"}
+        claimed4 = client.post(f"/api/v1/operator/conversations/{conversation4_id}/claim", headers=headers)
+        assert claimed4.status_code == 200, claimed4.text
+        sent4 = client.post(f"/api/v1/public/conversations/{conversation4_id}/messages", headers=customer4_headers, json={"body": "Preciso agendar uma consulta."})
+        assert sent4.status_code == 201, sent4.text
+
+        def offers_sent_autonomously() -> bool:
+            detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()
+            return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" for m in detail["messages"])
+
+        assert _wait_for(offers_sent_autonomously, timeout_seconds=45), "expected the initial offers draft to autonomously send within 45s"
+
+        slot_msg = client.post(f"/api/v1/public/conversations/{conversation4_id}/messages", headers=customer4_headers, json={"body": "primeira opção"})
+        assert slot_msg.status_code == 201, slot_msg.text
+
+        def has_pending4_slot() -> bool:
+            detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers)
+            return detail.json().get("pending_autonomous_send") is not None
+
+        assert _wait_for(has_pending4_slot, timeout_seconds=40), "expected the GB slot-choice draft (trigger=GUIDED_SLOT_SELECTION) to become a pending N5 send — this is the exact bug report D-043-2 closes"
+        pending4 = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()["pending_autonomous_send"]
+        assert pending4["mechanism"] == "ungoverned_n5", pending4
+        assert "Informe seu CPF" in pending4["draft_text"], pending4
+
+        def slot_sent_autonomously() -> bool:
+            detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()
+            return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" and "Informe seu CPF" in m.get("body", "") for m in detail["messages"])
+
+        assert _wait_for(slot_sent_autonomously, timeout_seconds=10), "expected the GB slot-choice confirmation to autonomously send within 10s"
+        close4 = client.post(f"/api/v1/operator/conversations/{conversation4_id}/close", headers=headers)
+        assert close4.status_code == 200, close4.text
+
+        # --- D-043-2 regression: a bare greeting must never autosend an
+        # entire unrelated clinical document (real retrieval score ~0.31,
+        # well below _AUTONOMOUS_CLINICAL_MIN_SCORE=0.40 — noise, not a
+        # genuine match).
+        conv5 = client.post("/api/v1/public/conversations").json()
+        conversation5_id = conv5["conversation"]["id"]
+        customer5_headers = {"Authorization": f"Bearer {conv5['access_token']}"}
+        claimed5 = client.post(f"/api/v1/operator/conversations/{conversation5_id}/claim", headers=headers)
+        assert claimed5.status_code == 200, claimed5.text
+        sent5 = client.post(f"/api/v1/public/conversations/{conversation5_id}/messages", headers=customer5_headers, json={"body": "Oi"})
+        assert sent5.status_code == 201, sent5.text
+
+        def message5_sent_autonomously() -> bool:
+            detail = client.get(f"/api/v1/operator/conversations/{conversation5_id}", headers=headers).json()
+            return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" for m in detail["messages"])
+
+        assert _wait_for(message5_sent_autonomously, timeout_seconds=45), "expected a bare greeting to still autonomously send a reply within 45s — N5 must never leave the customer without one"
+        final5 = client.get(f"/api/v1/operator/conversations/{conversation5_id}", headers=headers).json()
+        greeting_message = next(m for m in final5["messages"] if m.get("autonomous_source") == "ungoverned_n5")
+        assert not greeting_message["body"].lstrip().startswith("#"), f"a bare greeting must never autosend a full clinical document verbatim: {greeting_message['body'][:200]!r}"
+        close5 = client.post(f"/api/v1/operator/conversations/{conversation5_id}/close", headers=headers)
+        assert close5.status_code == 200, close5.text
+
         # --- N5 does not duplicate an already-grounded governed answer ---
         governed_on = client.post("/api/v1/operator/autonomy-settings", headers=headers, json={"kill_switch_enabled": True})
         assert governed_on.status_code == 200, governed_on.text
@@ -147,7 +213,7 @@ def run() -> None:
         client.post("/api/v1/operator/knowledge/categories/preparo/autonomy", headers=headers, json={"enabled": False})
         client.post("/api/v1/operator/autonomy-settings", headers=headers, json={"kill_switch_enabled": False, "n5_kill_switch_enabled": False, "window_seconds": 30, "automatic_trigger_idle_seconds": 8})
 
-    print("smoke_v11_ungoverned_n5_ok: n5_kill_switch_enabled/automatic_trigger_idle_seconds endpoints, uncovered question autonomous send (mechanism=ungoverned_n5) with governed switch off, category-matched question keeps mechanism=governed_autonomy with both switches on")
+    print("smoke_v11_ungoverned_n5_ok: n5_kill_switch_enabled/automatic_trigger_idle_seconds endpoints, uncovered question autonomous send (mechanism=ungoverned_n5) with governed switch off, category-matched question keeps mechanism=governed_autonomy with both switches on, D-043 grounded-answer-delivered-verbatim regression, D-043-2 GB-under-N5 and weak-clinical-match regressions")
 
 
 if __name__ == "__main__":

@@ -648,3 +648,57 @@ cleanup ran); no other real data was touched. Lesson recorded for future
 sessions: never scope a cleanup query by a column value alone when real
 and synthetic rows can share it — scope by conversation id / a dedicated
 fixture-only marker instead.
+
+## D-043-2 correction — DONE (2026-08-21)
+
+Human-reported from a second real conversation
+(`c5215b3c-5569-452c-bc95-e615b5e901bb`), run against D-043's own rebuilt
+stack immediately after that fix shipped. Two further gaps, both the same
+root theme as D-043 itself: generation-composition logic written under an
+unconditional "a human reviews before send" assumption, never reconciled
+with autonomous send. Full detail in `DECISIONS.md` D-043-2.
+
+- A bare "Oi" autosent an entire, unrelated clinical parent document —
+  `full_parent_draft()`'s clinical-rank-one shortcut has no relevance
+  threshold at all (safe under N1/N2 because an operator judged
+  relevance; never revisited for N3/N4/N5). Calibrated against real
+  `text-embedding-3-small` scores: noise (~0.31-0.36) vs. genuine
+  on-topic matches (0.42-0.63). Gated with
+  `_AUTONOMOUS_CLINICAL_MIN_SCORE=0.40` — **autonomous send only**;
+  N1/N2 manual drafting is completely unaffected.
+- Three customer replies GB correctly interpreted ("Opção 3", "Terceira
+  opção", "Dra. Renata" — all three resolved to the same real slot) got
+  no reply at all: GB's own generations never carry `trigger=="AUTOMATIC"`
+  (D-032's own decision, made before N5 existed), so
+  `maybe_open_autonomous_window()`'s eligibility guard excluded every one
+  of them. Once D-043 made `booking_script` unreachable, GB became the
+  only real booking path, and an unattended conversation now dead-ended
+  at GB's first step. Human decision: extend **N5 only** (never N3/N4) to
+  also cover GB's own trigger values — GB's output is always a fixed,
+  deterministic template, at least as safe as AA-10's own
+  Amendment-1.1.0-covered autonomous messages.
+
+Verified: full backend `pytest` (247/247, 9 new tests — 3
+`TestGuidedBookingEligibility`, 3 `TestClinicalRelevanceGate`, excluding
+`test_appointment_seeding.py`'s pre-existing unrelated collision),
+ruff/mypy clean, and `smoke_v11_ungoverned_n5.py` extended with two new
+real end-to-end scenarios against the rebuilt stack (real Postgres, real
+embeddings, real `gpt-5-mini`): a full GB pick-then-CPF-prompt exchange
+autonomously delivered with no operator send, and a bare "Oi" confirmed
+to no longer autosend a raw clinical document.
+
+**Operational note confirmed again this session:** `test_governed_autonomy.py`
+and `test_ungoverned_n5.py` both assume `system_settings.n5_kill_switch_enabled`
+starts `false` — this shared dev DB's own live/demo state has it `true`
+(intentional — N5 is meant to be on for demo purposes). Running either
+file's full suite while that's the live value produces spurious
+`ERROR`s/`FAILED`s unrelated to any code change (confirmed by running
+clean with the switch forced `false` — 247/247 pass — then confirming the
+exact same pre-existing pattern reproduces with it `true`, both before
+and independent of this session's own fixes). Not fixed as part of this
+correction — a pre-existing test-isolation gap orthogonal to the 6 real
+defects (4 from D-043, 2 from D-043-2) this session closed. Before
+running either file's full suite, check/temporarily clear
+`n5_kill_switch_enabled` and restore it afterward, matching the exact
+value found (`autonomy_kill_switch_enabled=false`, `n5_kill_switch_enabled=true`
+as of 2026-08-21).

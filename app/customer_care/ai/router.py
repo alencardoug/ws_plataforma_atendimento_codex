@@ -600,6 +600,42 @@ def _open_pending(session: DbSession, generation: AIGeneration, conversation: Co
     session.commit()
 
 
+# D-043-2 (2026-08-21): GB (005) generations carry their own trigger
+# values, never "AUTOMATIC" — mirrors guided_booking.py's own
+# _GB_ALL_FLOW_TRIGGERS (kept as a separate constant here: importing that
+# one would mean reaching into a private, underscore-prefixed name).
+# GUIDED_BOOKING_COMPLETE deliberately included — it is GB's own final
+# confirmation message, exactly as safe as its predecessors here.
+_N5_ELIGIBLE_GB_TRIGGERS = frozenset({"GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE"})
+
+# D-043-2: calibrated 2026-08-21 against real text-embedding-3-small
+# scores (score = 1 - cosine_distance), not a guessed constant — the
+# noise floor for a query with no genuine match (greetings/small talk:
+# "Oi" 0.31, "Tudo bem?" 0.36, an intentionally uncovered smoke question
+# 0.35) sits clearly below real, on-topic clinical questions measured the
+# same way (0.42-0.63). 0.40 sits in that gap. Scoped narrowly to
+# full_parent_draft()'s own unconditional clinical-rank-one shortcut only
+# (provider == "clinical-parent-document") — that path has zero relevance
+# gate by original V1/V2 design, safe only because a human operator
+# always reviewed before send; autonomous send removes that review, so
+# this is the minimum gate needed to keep the same safety property.
+# N1/N2 manual drafting is completely unaffected — full_parent_draft()
+# itself, and every other generation path, keeps its unconditional score.
+_AUTONOMOUS_CLINICAL_MIN_SCORE = 0.40
+
+
+def _clinical_top_evidence_score(session: DbSession, generation: AIGeneration) -> float | None:
+    """D-043-2: meaningful only for provider == "clinical-parent-document"
+    generations — full_parent_draft()'s one used hit is always the rank-1
+    evidence item itself (generate_draft()'s own AIGenerationSource
+    bookkeeping writes exactly one row, use_order=1, for that branch)."""
+    source = session.scalar(select(AIGenerationSource).where(AIGenerationSource.ai_generation_id == generation.id, AIGenerationSource.use_order == 1))
+    if not source:
+        return None
+    hit = session.get(RetrievalHit, source.retrieval_hit_id)
+    return hit.score if hit else None
+
+
 def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, conversation: Conversation) -> None:
     """010/GA-2, GA-3 + 011 (Amendment 1.3.0, N5): the single point where
     category policy, both kill switches, and the ANSWER/evidence gate all
@@ -627,15 +663,43 @@ def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, c
     (no evidence, free-form) when `generation.status != "ANSWER"` — i.e.
     exactly the ABSTAIN-override case Amendment 1.3.0 clause (a) was
     written for. When a grounded `ANSWER` already exists, N5 delivers that
-    same generation verbatim instead of manufacturing a new one."""
-    if generation.trigger != "AUTOMATIC":
+    same generation verbatim instead of manufacturing a new one.
+
+    **Correction (D-043-2, 2026-08-21), two more real gaps found the same
+    day:**
+
+    - GB (005) was deliberately designed so every one of its own
+      generations must be explicitly sent by an operator (D-032) — a
+      decision made before N5 (011) existed. Once N5 makes booking_script
+      itself unreachable (D-043's own accepted consequence, GB is now the
+      only real booking path) and a conversation has no active operator,
+      a customer who correctly picked a slot got the right *interpretation*
+      (GB matched it) but no reply at all — every GB generation was
+      structurally excluded by the `trigger != "AUTOMATIC"` guard below.
+      Human decision 2026-08-21: extend N5 (never the governed N3/N4
+      branch) to also cover GB's own trigger values — GB's output is
+      always a fixed, deterministic template with real data substituted,
+      never LLM-composed, at least as safe as AA-10's own booking_script
+      messages already autonomously sent under Amendment 1.1.0.
+    - `full_parent_draft()` returns the complete clinical parent document
+      whenever the retrieval's rank-one hit is clinical, with no relevance
+      threshold at all — always safe under N1/N2 because an operator
+      reviewed for relevance before sending, but not once autonomy removes
+      that review: a bare "Oi" scored 0.31 (indistinguishable from noise)
+      yet still delivered an entire unrelated clinical document. Human
+      decision 2026-08-21: gate autonomous send (never manual N1/N2
+      drafting) on `_AUTONOMOUS_CLINICAL_MIN_SCORE` for this one shortcut."""
+    if generation.trigger != "AUTOMATIC" and generation.trigger not in _N5_ELIGIBLE_GB_TRIGGERS:
         return
     settings = session.get(SystemSettings, True)
     if not settings:
         return
+    weak_clinical_shortcut = generation.provider == "clinical-parent-document" and (_clinical_top_evidence_score(session, generation) or 0.0) < _AUTONOMOUS_CLINICAL_MIN_SCORE
 
-    # Governed branch (010, Amendment 1.2.0) — unchanged conditions.
-    if generation.status == "ANSWER" and generation.category_slug and settings.autonomy_kill_switch_enabled:
+    # Governed branch (010, Amendment 1.2.0) — unchanged conditions, plus
+    # the D-043-2 clinical-relevance gate; AUTOMATIC-trigger only, GB's
+    # own triggers were never in scope for N3/N4.
+    if generation.trigger == "AUTOMATIC" and generation.status == "ANSWER" and generation.category_slug and settings.autonomy_kill_switch_enabled and not weak_clinical_shortcut:
         category = session.get(Category, generation.category_slug)
         if category and category.autonomy_enabled:
             _open_pending(session, generation, conversation, category=category.slug, mechanism="governed_autonomy", window_seconds=settings.autonomy_window_seconds)
@@ -644,10 +708,18 @@ def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, c
     # Ungoverned branch (011, Amendment 1.3.0) — only reached when the
     # governed branch above did not already open a window.
     if settings.n5_kill_switch_enabled:
-        if generation.status == "ANSWER":
+        if generation.trigger in _N5_ELIGIBLE_GB_TRIGGERS:
+            # D-043-2: GB's own fixed-template output — never subject to
+            # the clinical-relevance gate (that only ever applies to
+            # provider == "clinical-parent-document", which GB never is).
+            _open_pending(session, generation, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
+        elif generation.status == "ANSWER" and not weak_clinical_shortcut:
             # D-043: a grounded answer already exists — N5 delivers it
             # as-is, never re-generating an evidence-free replacement.
             _open_pending(session, generation, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
         else:
+            # ABSTAIN, or an ANSWER too weak to trust unattended (D-043-2)
+            # — both fall back to a free-form, evidence-free reply rather
+            # than leaving the customer without one.
             ungoverned = generate_ungoverned_reply(session, conversation, generation)
             _open_pending(session, ungoverned, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
