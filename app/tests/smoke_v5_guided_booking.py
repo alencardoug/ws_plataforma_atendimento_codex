@@ -78,6 +78,25 @@ def run() -> None:
     assert availability_draft["evidence"][0]["title"] != "Quanto custa uma consulta de mastologia?", "query matched the price entry, not an availability one — retrieval ambiguity, not a GB bug"
     operator_send(availability_draft)
 
+    # D-043 (2026-08-21) regression: a generic booking-intent phrase
+    # replying to the offers themselves — never picking a specific slot —
+    # must NOT let AA-10's booking_script hijack the flow ahead of GB's
+    # own slot-choice interpretation. This is the exact bug report this
+    # fix closes: "Quero agendar uma primeira consulta" produced an
+    # autonomous "Agendamento realizado" completely out of flow, before
+    # any slot had been chosen. It's still routed to GB's own drafting
+    # path (real embedding similarity may or may not read this generic
+    # reply as picking a specific offer — that ambiguity is GB's existing,
+    # pre-011 design tolerance, always paired with "Digite Voltar", not
+    # part of this fix) — only never to AA-10's own unconditional script.
+    hijack_probe_msg = send_customer("Quero agendar uma primeira consulta")
+    detail_after_probe = client.get(f"/api/v1/operator/conversations/{conversation_id}", headers=headers).json()
+    assert not any(m.get("autonomous_source") == "booking_script" for m in detail_after_probe["messages"]), detail_after_probe["messages"]
+    draft_on(hijack_probe_msg["id"])
+    # Never sent (like GB-3's own unrelated_draft below) — drafting it is
+    # enough to prove no booking_script side effect happened; sending it
+    # would pollute the offer set the ordinal-choice steps below rely on.
+
     # GB-3 first: an unrelated reply must NOT be misread as a slot choice.
     unrelated_msg = send_customer("Vocês têm estacionamento no local?")
     unrelated_draft = draft_on(unrelated_msg["id"])

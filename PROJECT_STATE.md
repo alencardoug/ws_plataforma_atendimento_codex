@@ -591,3 +591,60 @@ autonomy mechanisms are default-off at every level in production; no
 behavior changes for a real visitor until an operator explicitly enables
 a category/kill switch. `ROADMAP.md`'s priority ordering names Telegram as
 the next open item, unless a new cycle is authorized first.
+
+## D-043 correction — DONE (2026-08-21)
+
+Human-reported from a real conversation run against this session's own
+rebuilt local Docker stack (not production): N5 discarding an
+already-grounded answer for a fresh evidence-free one, AA-10's
+`booking_script` racing ahead of GB's own slot-choice step, the resulting
+booking summary missing date/time, and a genuine follow-up question left
+entirely unanswered. All four traced to root cause and fixed the same
+session — full detail in `DECISIONS.md` D-043. Three files changed:
+`ai/router.py` (`maybe_open_autonomous_window()`), `anonymous_access/router.py`
+(gates `advance_booking_script()` on GB's own pending-offer check),
+`scheduling/guided_booking.py` (`latest_unconfirmed_offer_generation_id()`
+now also recognizes a `booking_script`-completed booking; `_parse_ordinal_choice()`
+no longer misreads "primeira"/"segunda"/"terceira"/"quarta" embedded in an
+unrelated sentence as a slot choice). Verified: full backend `pytest`
+(238/238, excluding `test_appointment_seeding.py`'s own pre-existing,
+unrelated collision with a real conversation left in this shared dev DB
+by this session's own investigation — confirmed via `git diff` to predate
+and be independent of these fixes), ruff/mypy clean, and three
+credential-backed smoke scripts against the real rebuilt stack (real
+Postgres, real embeddings, real `gpt-5-mini`): `smoke_v5_guided_booking.py`
+(new regression: a generic booking phrase replying to GB's own offers no
+longer reaches `booking_script`), `smoke_v11_ungoverned_n5.py` (new
+regression: N5 delivers an existing grounded generation verbatim — same
+`ai_generations.id`, same `draft_text` — never a fresh LLM call),
+`smoke_v4_booking_script.py` (rewritten — see below).
+
+**Accepted, human-confirmed consequence:** the booking_script fix, combined
+with a pre-existing property of `has_recent_resolved_availability()`
+(shadowed by GB's own later generations once GB's flow starts), makes
+AA-10's `booking_script` standalone HTTP entry point structurally
+unreachable now, in every real scenario — confirmed by direct testing,
+including an attempt to reach it via a legitimate "second booking after
+an already-completed one" scenario, which still doesn't reach it. GB is
+now the only real path to a completed booking. `booking_script/service.py`
+itself is unmodified; Constitution Amendment 1.1.0's exception remains
+exactly as narrow as authorized, its scripted-message/redaction/audit
+logic still fully proven correct at the unit level
+(`test_booking_script_flow.py`, unaffected — calls it directly). Human
+explicitly chose to accept this rather than revisit AA-10's design.
+`smoke_v4_booking_script.py` was rewritten accordingly: it now proves
+non-reachability (the D-043 regression itself) and AA-10's still-empty
+dormant tables, rather than the no-longer-reachable full scripted flow via
+real HTTP.
+
+One session-specific incident during this correction, disclosed to the
+human as it happened: an over-broad SQL cleanup of orphaned test-fixture
+`ai_generations` rows (filtered by `provider IN ('test','ungoverned-n5')`)
+also deleted one real message/generation from the `74f84ad5` conversation
+under investigation, since that conversation's own N5 send happened to
+share the same `provider` value as the test fixtures being cleaned up.
+The diagnosis itself was unaffected (already fully recorded before the
+cleanup ran); no other real data was touched. Lesson recorded for future
+sessions: never scope a cleanup query by a column value alone when real
+and synthetic rows can share it — scope by conversation id / a dedicated
+fixture-only marker instead.

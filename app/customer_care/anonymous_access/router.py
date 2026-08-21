@@ -15,7 +15,7 @@ from customer_care.booking_script.service import advance_booking_script, persist
 from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.scheduling.availability import render_booking_summary_line
-from customer_care.scheduling.guided_booking import advance_guided_booking
+from customer_care.scheduling.guided_booking import advance_guided_booking, latest_unconfirmed_offer_generation_id
 from customer_care.scheduling.guided_booking import persisted_customer_body as guided_persisted_customer_body
 from customer_care.scheduling.models import AppointmentBooking
 from customer_care.shared.dependencies import DbSession, customer_bearer
@@ -137,7 +137,18 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
         correlation_id=request.state.request_id,
         payload={"message_id": str(message.id), "length": len(durable_body)},
     )
-    advance_booking_script(session, conversation, payload.body)  # AA-10 — raw input remains request-local; never calls an LLM
+    # D-043 (2026-08-21): AA-10's own booking_script matches on a generic
+    # keyword substring (detect_booking_intent) with no notion of "GB
+    # already showed specific offers and is waiting on a slot choice" —
+    # booking_script/service.py must never import guided_booking.py (005's
+    # containment boundary), so this gate lives here, at the one call site
+    # both already share. Without it, a generic reply to the offers
+    # themselves (e.g. "quero agendar uma consulta") raced ahead of GB's
+    # own slot-choice interpretation (which only runs later, during
+    # automatic-draft generation) and skipped it entirely.
+    gb_offer_pending = conversation.booking_script_step is None and latest_unconfirmed_offer_generation_id(session, conversation) is not None
+    if not gb_offer_pending:
+        advance_booking_script(session, conversation, payload.body)  # AA-10 — raw input remains request-local; never calls an LLM
     advance_guided_booking(session, conversation, payload.body)  # 005/D-033 — same principle, GB's own parallel N2-draft flow; no-op if AA-10 just took over
     session.commit()
     session.refresh(message)

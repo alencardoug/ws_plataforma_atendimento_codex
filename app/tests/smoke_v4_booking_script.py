@@ -1,14 +1,45 @@
 """T097: real end-to-end HTTP smoke for the AA-10 booking script —
-Constitution Amendment 1.1.0's one exception. Real availability
-resolution, a real customer booking-intent message, the script's
-messages appear with zero operator action, the full CPF/payment happy
-path (including both retry branches) via real customer message posts,
-confirms the exact final message, and confirms no
-identity.*/billing.*/scheduling.appointments row was ever created — those
-schemas/tables were never even created by this feature's own migrations
-(D-024, still dormant), so their absence is structural, not just
-behavioral. specs/004-dynamic-appointment-availability/tasks.md T097,
-acceptance.md §L/§N/§O."""
+Constitution Amendment 1.1.0's one exception.
+
+**Reachability change (D-043, 2026-08-21):** `resolve_appointment_availability()`
+has unconditionally returned its offered rows since 005/GB-1, and every
+caller that resolves it (`select_evidence()`, `generate_draft()`) has
+always persisted them (`persist_presented_offers()`) since then. D-043
+also fixed a real bug where AA-10's own generic booking-intent matcher
+(`detect_booking_intent()`) raced ahead of and pre-empted GB's own
+slot-choice interpretation — a customer replying with a generic "quero
+agendar" to the 4 offers GB had just shown got an immediate, unconfirmed
+"Agendamento realizado" instead of being asked which of the 4 they meant
+(`PROJECT_STATE.md`/`DECISIONS.md` D-043). The fix: AA-10's own trigger
+now defers whenever GB has a pending, unconfirmed offer set.
+
+Structurally, that means AA-10's `advance_booking_script()` initial branch
+(`booking_script_step is None`) is no longer reachable through any real
+HTTP path: a fresh availability resolution always leaves a pending GB
+offer set (blocking AA-10 directly), and once GB's own flow progresses at
+all, its own generations (dynamic_pattern_used=True, no
+AIGenerationSource — GB never attributes evidence) become the
+conversation's most recent dynamic-pattern generation, which independently
+makes `has_recent_resolved_availability()` false too (unrelated to D-043,
+a pre-existing property of that function once any GB generation exists).
+Both paths were checked directly against this rebuilt stack while fixing
+D-043 — neither reaches AA-10's script anymore. This is accepted as
+correct, intentional behavior (human decision, 2026-08-21): GB is the only
+real product path to a completed booking now; AA-10's fixed simulation
+remains exactly as Constitution Amendment 1.1.0 authorized it — untouched,
+structurally contained, its own scripted messages/redaction/audit logic
+still fully proven correct by `test_booking_script_flow.py` (which calls
+`advance_booking_script()` directly, independent of HTTP reachability) —
+it is simply never invoked by a real customer message anymore.
+
+This smoke test's remaining job: confirm real HTTP traffic through a real
+availability resolution never reaches AA-10's script (the D-043
+regression itself) and that AA-10's own dormant tables
+(`identity.*`/`billing.*`/`scheduling.appointments`/`scheduling.appointment_events`)
+stay empty/absent exactly as before — both still meaningful, both no
+longer provable by unit tests alone since they depend on the real router
+call chain. specs/004-dynamic-appointment-availability/tasks.md T097,
+acceptance.md §L/§N/§O; specs/011-.../DECISIONS.md D-043."""
 
 import os
 from uuid import UUID
@@ -18,9 +49,8 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import ProgrammingError
 
 from customer_care.bootstrap import create_app
-from customer_care.booking_script.service import CPF_INPUT_REDACTION, PAYMENT_INPUT_REDACTION
 from customer_care.infrastructure.database import get_session_factory
-from customer_care.infrastructure.models import AuditEvent, Message
+from customer_care.infrastructure.models import Message
 
 
 def _table_confirmed_empty_or_absent(schema: str, table: str) -> None:
@@ -58,63 +88,21 @@ def run() -> None:
     assert resolved.status_code == 201, resolved.text
     assert resolved.json()["dynamic_pattern_used"] is True, resolved.json()
 
-    def send_customer(body: str) -> dict:
-        response = client.post(f"/api/v1/public/conversations/{conversation_id}/messages", headers=customer_headers, json={"body": body})
-        assert response.status_code == 201, response.text
-        return response.json()
-
-    def latest_operator_bodies(count: int) -> list[str]:
-        detail = client.get(f"/api/v1/operator/conversations/{conversation_id}", headers=headers)
-        assert detail.status_code == 200, detail.text
-        autonomous = [m for m in detail.json()["messages"] if m.get("author_type") == "OPERATOR"]
-        return [m["body"] for m in autonomous[-count:]]
-
-    send_customer("Quero marcar essa consulta")
-    assert latest_operator_bodies(2) == [
-        "Agendamento realizado",
-        "Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos",
-    ]
-
-    send_customer("Ah 123456a8910")
-    assert latest_operator_bodies(1) == ["CPF inválido. Informe um número válido de 11 dígitos"]
-
-    send_customer("tabom 123.456..789.10")
-    cpf_confirmed_onward = latest_operator_bodies(3)
-    assert cpf_confirmed_onward[0] == "CPF 123.456.789-10 confirmado"
-    assert cpf_confirmed_onward[1].startswith("O valor da consulta é R$")
-    assert cpf_confirmed_onward[2] == "O valor foi pago? Responda sim ou não"
-
-    send_customer("Então, não paguei")
-    assert latest_operator_bodies(1) == ["O valor foi pago? Responda sim ou não"]
-
-    send_customer("tabom simm paguei")
-    assert latest_operator_bodies(3) == [
-        "Verificando pagamento",
-        "Pagamento verificado",
-        "Agendamento realizado com sucesso. Há algo mais que posso ajudar?",
-    ]
+    # D-043 regression: a generic booking-intent phrase right after a real
+    # availability resolution — exactly AA-10's own historical trigger —
+    # must never produce an autonomous booking_script message. GB's own
+    # pending offer set now always wins.
+    response = client.post(f"/api/v1/public/conversations/{conversation_id}/messages", headers=customer_headers, json={"body": "Quero marcar essa consulta"})
+    assert response.status_code == 201, response.text
 
     detail = client.get(f"/api/v1/operator/conversations/{conversation_id}", headers=headers)
-    autonomous_ids = {m["id"] for m in detail.json()["messages"] if m.get("author_type") == "OPERATOR"}
-    # 10 autonomous sends total across the whole script: 2 (start) + 1
-    # (invalid-CPF retry) + 3 (CPF confirmed/price/payment prompt) + 1
-    # (não retry) + 3 (verificando/verificado/final) — select_evidence
-    # above created no Message, only an AIGeneration.
-    assert len(autonomous_ids) == 10
+    assert detail.status_code == 200, detail.text
+    assert not any(m.get("autonomous_source") == "booking_script" for m in detail.json()["messages"]), detail.json()["messages"]
 
-    # Outcome 13: CPF/payment inputs remain request-local. The formatted CPF
-    # in the fixed confirmation output is deliberate; submitted strings are
-    # replaced with fixed disclosure markers before Message persistence.
     with get_session_factory()() as db:
         conversation_uuid = UUID(conversation_id)
         message_bodies = [row.body for row in db.scalars(select(Message).where(Message.conversation_id == conversation_uuid)).all()]
-        assert CPF_INPUT_REDACTION in message_bodies
-        assert PAYMENT_INPUT_REDACTION in message_bodies
-        for raw_input in ("Ah 123456a8910", "tabom 123.456..789.10", "Então, não paguei", "tabom simm paguei"):
-            assert raw_input not in message_bodies
-        payloads = [str(row.payload_json) for row in db.scalars(select(AuditEvent).where(AuditEvent.conversation_id == conversation_uuid)).all()]
-        for raw_fragment in ("123456a8910", "123.456..789.10", "não paguei", "simm paguei"):
-            assert all(raw_fragment not in payload for payload in payloads)
+        assert "Agendamento realizado" not in message_bodies
 
     for schema, table in (("identity", "patients"), ("billing", "payments"), ("scheduling", "appointments"), ("scheduling", "appointment_events")):
         _table_confirmed_empty_or_absent(schema, table)
@@ -122,7 +110,7 @@ def run() -> None:
     closed = client.post(f"/api/v1/operator/conversations/{conversation_id}/close", headers=headers)
     assert closed.status_code == 200, closed.text
 
-    print("smoke_v4_booking_script_ok: real availability resolution, full scripted flow (both retry branches), zero operator clicks, no identity/billing/appointments row created")
+    print("smoke_v4_booking_script_ok: AA-10's own trigger no longer reachable via real HTTP post-D-043 (GB always wins), no identity/billing/appointments row ever created — booking_script's own scripted-message/redaction/audit correctness remains proven by test_booking_script_flow.py")
 
 
 if __name__ == "__main__":

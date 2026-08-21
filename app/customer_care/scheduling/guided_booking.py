@@ -37,7 +37,7 @@ from customer_care.booking_script.parsing import extract_cpf, extract_payment_co
 from customer_care.infrastructure.models import AIGeneration, AppointmentOfferPresentation, Conversation, Message
 from customer_care.knowledge.embeddings import EmbeddingProvider
 from customer_care.scheduling.availability import record_appointment_booking
-from customer_care.scheduling.models import ScheduleSlot
+from customer_care.scheduling.models import AppointmentBooking, ScheduleSlot
 
 # cosine_distance (lower = more similar). Calibrated 2026-08-19 against
 # real text-embedding-3-small output, not a guessed constant: genuine
@@ -69,6 +69,23 @@ _ORDINAL_WORDS: dict[str, int] = {
 # transition exists between "3" and "º"). Found via real testing, 2026-08-19.
 _ORDINAL_DIGIT = re.compile(r"\b([1-4])[ºª°]?\b")
 
+# D-043 (2026-08-21): found while fixing the booking_script/GB interception
+# bug above — once a generic reply is correctly let through to this parser
+# instead of being intercepted earlier, "primeira"/"segunda"/"terceira"/
+# "quarta" turned out to be ordinary Portuguese words that show up in
+# plenty of unrelated sentences ("quero agendar uma **primeira**
+# consulta", "o que preciso levar para minha **primeira** consulta",
+# "**quarta**-feira de manhã") — not just slot choices. A bare word match
+# with no other signal produced exactly the two real false positives this
+# fix closes. Now only accepted when either an explicit "opção"/"opcao"
+# hint is present anywhere in the message, or the whole message is short
+# (a bare "primeira" / "a segunda" / "2" reply, the shape every real
+# example in this module and its tests actually uses) — a longer message
+# with no such hint falls through to ordinary RAG/LLM composition instead,
+# same as any other unmatched reply (GB-3).
+_OPTION_HINT = re.compile(r"\bop[çc][ãa]o\b", re.IGNORECASE)
+_MAX_WORDS_WITHOUT_OPTION_HINT = 4
+
 # D-033: raw CPF replies never reach durable storage for the GB flow
 # either — same non-retention rule AA-10 already applies to its own script
 # (spec.md §5 AA-10), extended here since GB now asks the same question
@@ -92,8 +109,13 @@ def _wants_to_step_back(text: str) -> bool:
 
 def _parse_ordinal_choice(text: str) -> int | None:
     lowered = text.lower()
+    if not _OPTION_HINT.search(lowered) and len(lowered.split()) > _MAX_WORDS_WITHOUT_OPTION_HINT:
+        return None
     for word, index in _ORDINAL_WORDS.items():
-        if re.search(rf"\b{word}\b", lowered):
+        # (?!-feira): "quarta"/"quarto" must not match inside a weekday
+        # name ("quarta-feira") — the one common short exception even the
+        # length gate above doesn't catch on its own.
+        if re.search(rf"\b{word}\b(?!-feira)", lowered):
             return index
     match = _ORDINAL_DIGIT.search(lowered)
     return int(match.group(1)) if match else None
@@ -191,7 +213,21 @@ def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conve
     since GB-4's own message-creation-time gating (`interpret_cpf_reply`/
     `interpret_payment_reply`) intercepts every reply during those states
     before this function's draft-time fallback path is ever reached, is
-    never actually mismatched by relaxing this."""
+    never actually mismatched by relaxing this.
+
+    **Second gap, found and fixed 2026-08-21 (D-043):** the GB-trigger
+    check above can only ever see a completion that happened *through GB
+    itself*. AA-10's own `booking_script` can independently complete a
+    booking for this same conversation without ever writing a GB
+    `ai_generations` row at all (`booking_script/service.py` writes plain
+    `Message` rows directly) — so a booking finished by AA-10 was
+    invisible here, and the offer set stayed "pending" forever, ready to
+    false-match a later, wholly unrelated customer question. Closed with a
+    second, independent signal: `record_appointment_booking()` is the one
+    write path both `guided_booking.py` and `booking_script/service.py`
+    share (`scheduling/availability.py`) — any completed booking recorded
+    for this conversation after the offer set was shown means it is done,
+    regardless of which subsystem finished it."""
     if conversation.booking_script_step is not None:
         return None
     row = _latest_offer_generation_id(session, conversation)
@@ -209,6 +245,13 @@ def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conve
         .limit(1)
     )
     if latest_flow_trigger == _GB_TERMINAL_TRIGGER:
+        return None
+    completed_via_booking_script = session.scalar(
+        select(AppointmentBooking.booking_id)
+        .where(AppointmentBooking.conversation_id == conversation.id, AppointmentBooking.recorded_at > resolved_at)
+        .limit(1)
+    )
+    if completed_via_booking_script is not None:
         return None
     return generation_id
 

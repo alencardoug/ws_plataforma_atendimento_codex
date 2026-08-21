@@ -74,6 +74,52 @@ def run() -> None:
         assert len(autonomous_messages) == 1, final["messages"]
         assert autonomous_messages[0]["body"], "ungoverned autonomous message must not be empty"
 
+        # --- D-043 (2026-08-21) regression: N5 delivers an already-grounded
+        # ANSWER verbatim instead of discarding it for a fresh, evidence-free
+        # LLM call. Governed kill switch is still off here (default state
+        # from this script's own setup above) — a real production bug found
+        # this exact combination (N5 on, governed off, a grounded ANSWER
+        # with a category the operator never separately enabled for governed
+        # autonomy) silently threw the grounded answer away every time.
+        conv3 = client.post("/api/v1/public/conversations").json()
+        conversation3_id = conv3["conversation"]["id"]
+        customer3_headers = {"Authorization": f"Bearer {conv3['access_token']}"}
+        sent3 = client.post(f"/api/v1/public/conversations/{conversation3_id}/messages", headers=customer3_headers, json={"body": COVERED_QUESTION})
+        assert sent3.status_code == 201, sent3.text
+        claimed3 = client.post(f"/api/v1/operator/conversations/{conversation3_id}/claim", headers=headers)
+        assert claimed3.status_code == 200, claimed3.text
+
+        def has_pending3() -> bool:
+            detail = client.get(f"/api/v1/operator/conversations/{conversation3_id}", headers=headers)
+            return detail.json().get("pending_autonomous_send") is not None
+
+        pending3_appeared = _wait_for(has_pending3, timeout_seconds=40)
+        assert pending3_appeared, "expected a pending_autonomous_send for a grounded, uncategorized-for-governed-autonomy question"
+        before = client.get(f"/api/v1/operator/conversations/{conversation3_id}", headers=headers).json()
+        pending3 = before["pending_autonomous_send"]
+        assert pending3["mechanism"] == "ungoverned_n5", pending3
+        original_generation = before["latest_generation"]
+        assert original_generation["status"] == "ANSWER", original_generation
+        assert pending3["draft_text"] == original_generation["draft_text"], "N5 must deliver the existing grounded draft verbatim, not a different one"
+
+        def message3_sent_autonomously() -> bool:
+            detail = client.get(f"/api/v1/operator/conversations/{conversation3_id}", headers=headers).json()
+            return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" for m in detail["messages"])
+
+        resolved3 = _wait_for(message3_sent_autonomously, timeout_seconds=10)
+        assert resolved3, "expected the pending window to resolve to an ungoverned_n5 autonomous send within 10s"
+        after = client.get(f"/api/v1/operator/conversations/{conversation3_id}", headers=headers).json()
+        # The decisive check: no *new* AIGeneration was manufactured — the
+        # conversation's latest generation is still the exact same row that
+        # existed before the window ever opened, never re-generated from
+        # scratch with no evidence.
+        assert after["latest_generation"]["id"] == original_generation["id"], (before, after)
+        sent_message = next(m for m in after["messages"] if m.get("autonomous_source") == "ungoverned_n5")
+        assert sent_message["source_generation_id"] == original_generation["id"], sent_message
+        assert sent_message["body"] == original_generation["draft_text"], sent_message
+        close3 = client.post(f"/api/v1/operator/conversations/{conversation3_id}/close", headers=headers)
+        assert close3.status_code == 200, close3.text
+
         # --- N5 does not duplicate an already-grounded governed answer ---
         governed_on = client.post("/api/v1/operator/autonomy-settings", headers=headers, json={"kill_switch_enabled": True})
         assert governed_on.status_code == 200, governed_on.text

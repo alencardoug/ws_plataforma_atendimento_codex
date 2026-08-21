@@ -191,6 +191,34 @@ class TestLatestUnconfirmedOfferGenerationId:
                 db.execute(delete(RetrievalRun).where(RetrievalRun.id == later_run_id))
                 db.commit()
 
+    def test_returns_none_once_booking_script_alone_completed_the_booking(self, conversation_with_generation) -> None:
+        """Second gap, found and fixed 2026-08-21 (D-043): AA-10's own
+        `booking_script` can independently complete a booking for this
+        conversation without ever writing a GB `ai_generations` row at all
+        (`booking_script/service.py` writes plain `Message` rows directly)
+        — so the `GUIDED_BOOKING_COMPLETE`-trigger check above can never
+        see it, and the offer set stayed "pending" forever, ready to
+        false-match a later, wholly unrelated customer question. Any
+        completed `AppointmentBooking` row for this conversation, whatever
+        its `source`, must also exclude the offer set."""
+        conversation_id, _generation_id, descriptions = conversation_with_generation
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            booking = AppointmentBooking(conversation_id=conversation_id, source="booking_script", specialty_id=_SPECIALTY_ID)
+            db.add(booking)
+            db.commit()
+            booking_id = booking.booking_id
+        try:
+            with session_factory() as db:
+                conversation = db.get(Conversation, conversation_id)
+                assert conversation is not None
+                assert latest_unconfirmed_offer_generation_id(db, conversation) is None
+                assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is None
+        finally:
+            with session_factory() as db:
+                db.execute(delete(AppointmentBooking).where(AppointmentBooking.booking_id == booking_id))
+                db.commit()
+
     @pytest.mark.parametrize("later_trigger", ["GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED"])
     def test_still_pending_for_every_non_terminal_gb_trigger(self, conversation_with_generation, operator_id, later_trigger: str) -> None:
         """D-035 (revised): every non-terminal GB state — picked, awaiting
@@ -288,6 +316,30 @@ class TestInterpretSlotChoice:
         assert offer is not None
         assert offer.display_order == expected_order
         assert offer.description == descriptions[expected_order - 1]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Quero agendar uma primeira consulta",
+            "Quero saber o que preciso levar para a minha primeira consulta",
+            "quarta-feira de manhã",
+        ],
+    )
+    def test_ordinal_words_embedded_in_an_unrelated_sentence_do_not_false_match(self, conversation_with_generation, text: str) -> None:
+        """D-043 (2026-08-21): "primeira"/"segunda"/"terceira"/"quarta" are
+        ordinary Portuguese words that show up in plenty of sentences with
+        nothing to do with picking a slot — a bare word match previously
+        misread all three of these as an ordinal choice (the second and
+        third are the two real production messages this fix closes; see
+        `PROJECT_STATE.md`/`DECISIONS.md` D-043). None of these share
+        semantic content with either fixture offer either, so this also
+        confirms embedding similarity doesn't accidentally rescue a false
+        match."""
+        conversation_id, _generation_id, _descriptions = conversation_with_generation
+        with get_session_factory()() as db:
+            conversation = db.get(Conversation, conversation_id)
+            assert conversation is not None
+            assert interpret_slot_choice(db, PROVIDER, conversation, text) is None
 
     def test_ordinal_out_of_range_falls_through_to_embedding_not_error(self, conversation_with_generation) -> None:
         conversation_id, _generation_id, _descriptions = conversation_with_generation

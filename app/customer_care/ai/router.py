@@ -611,7 +611,23 @@ def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, c
 
     Two independent branches, evaluated in order — N5 only ever fills a
     gap the governed branch leaves open, never duplicates or overrides an
-    already-grounded answer (plan.md §4, spec.md N5-2)."""
+    already-grounded answer (plan.md §4, spec.md N5-2).
+
+    **Correction (D-043, 2026-08-21):** the ungoverned branch used to call
+    `generate_ungoverned_reply()` unconditionally whenever the governed
+    branch above didn't itself open a window — which happens any time the
+    *global* governed kill switch is off, independent of whether
+    `generation` was already a real, evidence-grounded `ANSWER` (e.g. a
+    GB-1 slot-offer draft or a dynamic-pattern resolution). Since this
+    project's standing default configuration is governed-off/N5-on, that
+    meant N5 was discarding a correct, grounded answer and replacing it
+    with a fresh, evidence-free LLM reply on *every* such message — the
+    opposite of "purely additive, never overrides an already-grounded
+    answer." Fixed: N5 now only ever calls `generate_ungoverned_reply()`
+    (no evidence, free-form) when `generation.status != "ANSWER"` — i.e.
+    exactly the ABSTAIN-override case Amendment 1.3.0 clause (a) was
+    written for. When a grounded `ANSWER` already exists, N5 delivers that
+    same generation verbatim instead of manufacturing a new one."""
     if generation.trigger != "AUTOMATIC":
         return
     settings = session.get(SystemSettings, True)
@@ -628,5 +644,10 @@ def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, c
     # Ungoverned branch (011, Amendment 1.3.0) — only reached when the
     # governed branch above did not already open a window.
     if settings.n5_kill_switch_enabled:
-        ungoverned = generate_ungoverned_reply(session, conversation, generation)
-        _open_pending(session, ungoverned, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
+        if generation.status == "ANSWER":
+            # D-043: a grounded answer already exists — N5 delivers it
+            # as-is, never re-generating an evidence-free replacement.
+            _open_pending(session, generation, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
+        else:
+            ungoverned = generate_ungoverned_reply(session, conversation, generation)
+            _open_pending(session, ungoverned, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)

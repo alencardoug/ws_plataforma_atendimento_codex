@@ -147,7 +147,11 @@ class TestEligibilityGate:
             db.commit()
             _cleanup(db, conversation.id, [generation.id], operator_id)
 
-    def test_n5_on_no_category_falls_through_to_ungoverned(self, operator_id, category) -> None:
+    def test_n5_on_answer_with_no_category_delivers_existing_generation(self, operator_id, category) -> None:
+        """D-043 (2026-08-21): a grounded `ANSWER` must never be discarded
+        and re-generated from scratch by the ungoverned branch — N5 delivers
+        that same generation verbatim (no new AIGeneration row, no fresh
+        evidence-free LLM call)."""
         session_factory = get_session_factory()
         with session_factory() as db:
             settings = db.get(SystemSettings, True)
@@ -155,17 +159,41 @@ class TestEligibilityGate:
             db.commit()
             conversation, generation = _make_generation(db, operator_id=operator_id, category_slug=None)
             maybe_open_autonomous_window(db, generation, conversation)
-            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.generation_id != generation.id, PendingAutonomousSend.conversation_id == conversation.id))
+            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id))
             assert pending is not None
             assert pending.mechanism == "ungoverned_n5"
             assert pending.category is None
-            ungoverned = db.get(AIGeneration, pending.generation_id)
-            assert ungoverned.provider == "ungoverned-n5"
-            assert ungoverned.status == "ANSWER"
-            assert ungoverned.category_slug is None
-            assert ungoverned.prior_generation_id == generation.id
-            assert ungoverned.retrieval_run_id == generation.retrieval_run_id
-            _cleanup(db, conversation.id, [ungoverned.id, generation.id], operator_id)
+            assert pending.generation_id == generation.id
+            other_generations = db.scalars(select(AIGeneration).where(AIGeneration.conversation_id == conversation.id, AIGeneration.id != generation.id)).all()
+            assert other_generations == []
+            _cleanup(db, conversation.id, [generation.id], operator_id)
+
+    def test_n5_on_answer_with_governed_switch_off_delivers_existing_generation_not_a_fresh_llm_call(self, operator_id, category) -> None:
+        """D-043 (2026-08-21) regression for the exact bug found in
+        production: a category *is* present and autonomy-enabled for it,
+        but the *global* governed kill switch is off (this project's own
+        standing default demo configuration, N5-only) — the governed
+        branch above correctly declines to open a window, but the
+        ungoverned branch must still deliver the already-grounded answer
+        as-is, not manufacture an evidence-free replacement."""
+        session_factory = get_session_factory()
+        with session_factory() as db:
+            db.get(Category, category).autonomy_enabled = True
+            settings = db.get(SystemSettings, True)
+            settings.autonomy_kill_switch_enabled = False
+            settings.n5_kill_switch_enabled = True
+            db.commit()
+            conversation, generation = _make_generation(db, operator_id=operator_id)
+            maybe_open_autonomous_window(db, generation, conversation)
+            pending = db.scalar(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id == conversation.id))
+            assert pending is not None
+            assert pending.mechanism == "ungoverned_n5"
+            assert pending.generation_id == generation.id
+            other_generations = db.scalars(select(AIGeneration).where(AIGeneration.conversation_id == conversation.id, AIGeneration.id != generation.id)).all()
+            assert other_generations == []
+            db.get(Category, category).autonomy_enabled = False
+            db.commit()
+            _cleanup(db, conversation.id, [generation.id], operator_id)
 
     def test_n5_on_abstain_falls_through_to_ungoverned(self, operator_id, category) -> None:
         session_factory = get_session_factory()

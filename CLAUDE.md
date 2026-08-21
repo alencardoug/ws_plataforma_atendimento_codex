@@ -119,6 +119,22 @@ Read and obey `AGENTS.md` first.
   cycle's own addition caused (found and fixed the same session) and an
   update to `v7.spec.ts`'s already-known pre-existing intermittency
   (now also reproduces in isolation, not only full-suite context).
+- **D-043 correction is DONE (2026-08-21).** Human-reported from a real
+  conversation run against a rebuilt local Docker stack: N5 discarding an
+  already-grounded answer for a fresh evidence-free one whenever the
+  governed (010) kill switch was off; AA-10's `booking_script` racing
+  ahead of GB's (005) own slot-choice step on a generic booking phrase;
+  the resulting booking summary missing date/time (a direct consequence);
+  and a genuine follow-up question left with no reply at all (two
+  independent causes: a stale-offer-set detection gap once `booking_script`
+  completed a booking, plus GB's own ordinal parser misreading common
+  Portuguese words like "primeira" embedded in an unrelated sentence as a
+  slot choice). See `DECISIONS.md` D-043 and `PROJECT_STATE.md` for full
+  detail, including an accepted, human-confirmed consequence: AA-10's
+  `booking_script` standalone HTTP entry point is now structurally
+  unreachable in every real scenario (GB always wins) — `booking_script/
+  service.py` itself is unmodified and Amendment 1.1.0's exception remains
+  exactly as narrow as authorized.
 
 Read in this order:
 
