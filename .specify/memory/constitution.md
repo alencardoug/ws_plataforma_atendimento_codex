@@ -1,8 +1,9 @@
 # Customer Care AI Constitution
 
-Version: 1.1.0
+Version: 1.2.0
 Ratified: 2026-08-10
-Amended: 2026-08-18 (Amendment 1.1.0 — narrow exception to Article III)
+Amended: 2026-08-18 (Amendment 1.1.0 — narrow exception to Article III);
+2026-08-20 (Amendment 1.2.0 — governed autonomous send, N3/N4)
 
 ## I. Specification precedes implementation
 
@@ -10,13 +11,68 @@ No new product behavior is implemented before it is represented in the active fe
 
 ## II. V1 scope discipline
 
-The currently authorized V1 includes N1/N2 only. N3, N4, supervisor, manager, AI Ops, Telegram, persisted customer identity, dynamic ETA, and automatic autonomy downgrade are forbidden unless required only as low-cost extension points with no V1 behavior.
+The currently authorized V1 includes N1/N2 only. Supervisor, manager, AI Ops, Telegram, persisted customer identity, dynamic ETA, and automatic autonomy downgrade remain forbidden unless required only as low-cost extension points with no V1 behavior. **N3 and N4 are authorized as of Amendment 1.2.0 (human decision 2026-08-20), strictly bounded by Article III's governed-autonomy exception below** — no other N3/N4 behavior described in `ROADMAP.md`'s original bullets (e.g. immediate/non-veto-windowed autonomous send) is authorized by this amendment.
 
 ## III. Human authority over V1 outbound AI
 
 AI generations are internal artifacts. In V1, only an authenticated operator action may create a customer-visible operator message from an AI draft. No provider callback, background job, frontend shortcut, or API route may bypass this rule.
 
-**Narrow exception (Amendment 1.1.0, human decision 2026-08-18):** the
+**Governed-autonomy exception (Amendment 1.2.0, human decision
+2026-08-20):** an LLM-generated draft may be sent to the customer without
+a per-message operator click, strictly limited to:
+
+(a) the draft's generation must have `status=ANSWER` with real retrieved
+    evidence — an `ABSTAIN` (including `DYNAMIC_DATA_UNAVAILABLE`,
+    `INSUFFICIENT_EVIDENCE`, or any other reason code) may never be sent
+    autonomously; it always falls back to the ordinary N2 manual queue;
+(b) the draft must originate from the existing automatic-draft-trigger
+    debounce (V2-7/V3-9's `evaluate_automatic_trigger`) — a manually
+    requested draft ("Gerar rascunho") is never eligible for autonomous
+    send, regardless of category policy;
+(c) the draft's evidence category must be governed by an explicit,
+    per-category autonomy policy (ON/OFF) that a human operator set —
+    default OFF; no category is autonomous until explicitly turned on;
+(d) every eligible draft opens a veto window whose duration is a single
+    system-wide value (never per-category), operator-configurable through
+    the frontend, ranging from 0 seconds (immediate send, no wait) up to
+    an operator-chosen duration. While the window is open (duration > 0),
+    any operator may PAUSE (cancel this specific autonomous send; the
+    draft becomes an ordinary N2 draft awaiting manual send; the
+    category's policy is unaffected), EDIT (compose and send manually,
+    replacing the autonomous path for this message), or TAKE OVER
+    (existing V1 mechanism — switches the conversation to N1, disabling
+    AI for it entirely) — all three remain fully implemented server-side
+    at every duration setting, including 0; at 0 seconds there is no
+    window for an operator to act within, so in practice the frontend
+    need not surface them as live actions for that message, but the
+    mechanisms themselves are never removed or bypassed in the backend.
+    If the window elapses (immediately, at 0) with no operator action,
+    the draft sends automatically — the category's own ON policy is the
+    standing authorization for that silence or immediacy, not a separate
+    per-message approval;
+(e) a single global kill switch (independent of any per-category policy)
+    must exist; when off, the entire system behaves as pure N2 — no
+    message ever sends without an explicit operator click, regardless of
+    any category's own ON/OFF state;
+(f) every category policy change is an authenticated operator action,
+    recorded as an immutable audit event (Article IX) with operator
+    identity, timestamp, category, and the before/after policy value;
+(g) this exception does not authorize any new persisted customer
+    identity, real payment, or real booking behavior — those remain
+    governed by their own existing constraints (Article VI, the
+    dynamic-appointment-availability package's own scope limits) unchanged
+    by this amendment;
+(h) this exception does not extend to any other outbound message path in
+    the system beyond what (a)-(g) describe, and does not by itself
+    authorize a `supervisor`/`manager` role, Telegram, or any other item
+    Article II still forbids.
+
+This exception is independent of, and does not narrow or widen, Amendment
+1.1.0's own narrow exception for the dynamic-appointment-availability
+booking script — that script's fixed-template, non-LLM autonomous sends
+remain governed entirely by their own original terms.
+
+**Prior narrow exception (Amendment 1.1.0, human decision 2026-08-18):** the
 simulated identity/payment-confirmation script belonging to the
 dynamic-appointment-availability feature
 (`specs/004-dynamic-appointment-availability/`) may send its messages to

@@ -224,6 +224,15 @@ article.message.customer { margin-left: auto; background: var(--brand-100); }
 }
 .queue-item:hover:not(:disabled) { background: var(--surface-sunken); border-color: var(--border-strong); }
 
+/* 010: queue-row wraps a queue-item plus its own quick "Pausar" action,
+   which must work even for a WAITING (unclaimed) conversation, so it
+   can't live inside the queue-item button itself (its own onClick claims/
+   opens the conversation). */
+.queue-row { display: flex; align-items: center; gap: var(--space-2); }
+.queue-row .queue-item { flex: 1; }
+.badge-autonomy { background: var(--danger-100); color: var(--danger-600); border-color: #f0c8c6; }
+.pending-autonomy { border-color: var(--danger-600); }
+
 .message-select {
   display: flex;
   flex-direction: row;

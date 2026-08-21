@@ -151,7 +151,7 @@ def upsert_binding(session: DbSession, qa_id: str, binding_in: DynamicBindingIn 
 
 
 def category_dict(category: Category) -> dict:
-    return {"slug": category.slug, "label": category.label, "is_active": category.is_active}
+    return {"slug": category.slug, "label": category.label, "is_active": category.is_active, "autonomy_enabled": category.autonomy_enabled}
 
 
 @router.get("/categories")
@@ -171,6 +171,26 @@ def create_category(payload: CreateCategoryIn, operator: CurrentOperator, sessio
     category = Category(slug=payload.slug, label=payload.label, is_active=True)
     session.add(category)
     record_event(session, "knowledge.category_created", "OPERATOR", actor_id=operator.id, payload={"slug": payload.slug})
+    session.commit()
+    return category_dict(category)
+
+
+class SetCategoryAutonomyIn(BaseModel):
+    enabled: bool
+
+
+@router.post("/categories/{slug}/autonomy")
+def set_category_autonomy(slug: str, payload: SetCategoryAutonomyIn, operator: CurrentOperator, session: DbSession) -> dict:
+    """010/GA-1: any authenticated operator may toggle any category's
+    governed-autonomy policy — no separate supervisor role (Constitution
+    Amendment 1.2.0, human decision). Default false; every change is an
+    audit event."""
+    category = session.get(Category, slug)
+    if not category:
+        raise api_error(404, "NOT_FOUND", f"Category '{slug}' not found")
+    before = category.autonomy_enabled
+    category.autonomy_enabled = payload.enabled
+    record_event(session, "autonomy.category_policy_changed", "OPERATOR", actor_id=operator.id, payload={"category": slug, "before": before, "after": payload.enabled})
     session.commit()
     return category_dict(category)
 

@@ -79,6 +79,12 @@ class OperatorLoginOut(BaseModel):
     operator: OperatorOut
 
 
+class PendingAutonomousSendSummary(BaseModel):
+    id: UUID
+    category: str
+    resolves_at: datetime
+
+
 class ConversationSummaryOut(BaseModel):
     id: UUID
     status: str
@@ -86,6 +92,8 @@ class ConversationSummaryOut(BaseModel):
     created_at: datetime
     last_message_at: datetime | None
     unread_customer_messages: int = 0
+    # 010, T20: category + resolves_at only, not the full draft text.
+    pending_autonomous_send: PendingAutonomousSendSummary | None = None
 
 
 class OperatorSendIn(BaseModel):

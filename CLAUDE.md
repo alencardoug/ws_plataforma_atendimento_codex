@@ -66,19 +66,31 @@ Read and obey `AGENTS.md` first.
   `specs/006-specialty-scheduling-breadth/`,
   `specs/007-completed-booking-visibility/`,
   `specs/008-customer-facing-draft-status/`, and
-  `specs/009-two-phase-clinical-evidence/`. **All four are now
-  implementation-complete** — `spec.md`/`plan.md`/`data-model.md`/
-  `tasks.md`/`acceptance.md`/`analysis.md` are complete for all four
-  (implemented in order 009 → 008 → 007 → 006, smallest/lowest-risk
-  first), every gate runnable without a live Compose stack + operator/
-  OpenAI credentials has passed, and two real defects (content + a test
-  fact-check) were found and fixed along the way in 006. **Each package's
-  verdict is CONDITIONAL, not GO** — one credential-backed batch run
-  (backend `pytest` against a real seeded Postgres, the full `smoke_*.py`
-  suite including the new `smoke_v6_specialty_scheduling_breadth.py`, and
-  Playwright `v1`-`v3`+`v7`-`v9`) is still needed before any of the four
-  can be marked DONE. See `PROJECT_STATE.md`'s "Cycle status"/"Immediate
-  next action" sections for the full picture and exactly what's left.
+  `specs/009-two-phase-clinical-evidence/`. Implemented in order
+  009 → 008 → 007 → 006 (smallest/lowest-risk first), then closed with a
+  full credential-backed batch (real Postgres, real embeddings, real LLM
+  calls) the same day. **006/008/009 are DONE (verdict GO). 007 remains
+  CONDITIONAL** — its own new `frontend/e2e/v7.spec.ts` has one
+  unresolved intermittent failure (reproduces only in the full-suite
+  context, not in isolation) found during closure; see
+  `specs/007-completed-booking-visibility/acceptance.md`.
+- **The human authorized V4 (N3 governed autonomy) and V9 (N4 HOTL) as a
+  single cycle on 2026-08-20 (D-041)**, `specs/010-governed-autonomous-response/`,
+  after a grill session (`docs/sdd/GRILL_GATE.md`) resolved the
+  architecture the roadmap's own bullets had left undefined. **This is
+  the first time the system can send an LLM-generated draft to a customer
+  without a per-message operator click** — Constitution Amendment 1.2.0
+  ratifies one narrow, bounded exception to Article III for it (never
+  immediate by default, always evidence-gated, default-off at every
+  level, mandatory global kill switch). **Implementation is DONE
+  (2026-08-20)** — `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/
+  `acceptance.md`/`analysis.md` are complete, verdict **GO**, with
+  credential-backed closure run the same session (not deferred). See
+  `specs/010-governed-autonomous-response/acceptance.md` for the full
+  outcome-by-outcome record, including two real UI regressions this
+  cycle's own additions caused in pre-existing Playwright tests (found
+  and fixed the same session) and one found-but-unrelated pre-existing
+  `v3.spec.ts` fragility left undisturbed.
 
 Read in this order:
 

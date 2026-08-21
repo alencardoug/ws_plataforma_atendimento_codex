@@ -26,10 +26,10 @@ interface Message {
   // the draft that produced it (an "edit"), pre-filling the "transformar em
   // Q&A" flow.
   qa_transform?: { question: string; answer: string; category_slug: string | null } | null;
-  // AA-10: set only on the booking script's own autonomous sends —
-  // Constitution Amendment 1.1.0's one exception, surfaced here purely as
-  // an operator transparency cue, not required by any acceptance outcome.
-  autonomous_source?: "booking_script" | null;
+  // AA-10/010: set on either of the two autonomous-send exceptions
+  // (Constitution Amendments 1.1.0 and 1.2.0), surfaced here purely as an
+  // operator transparency cue.
+  autonomous_source?: "booking_script" | "governed_autonomy" | null;
 }
 
 interface CustomerConversation {
@@ -57,6 +57,21 @@ interface OperatorConversation extends CustomerConversation {
   // conversation — `has_slot_detail` distinguishes a full (GB) summary
   // from a specialty-only (AA-10) one, matching spec.md §6's honesty limit.
   booking_summary?: { source: string; line: string; has_slot_detail: boolean } | null;
+  // 010/GA-3: the open (PENDING) autonomous-send window for this
+  // conversation, if any — full draft text included (unlike the queue-item
+  // summary below), since PAUSE/EDIT act on it directly.
+  pending_autonomous_send?: PendingAutonomousSend | null;
+}
+
+interface PendingAutonomousSendSummary {
+  id: string;
+  category: string;
+  resolves_at: string;
+}
+
+interface PendingAutonomousSend extends PendingAutonomousSendSummary {
+  id: string;
+  draft_text: string;
 }
 
 interface ConversationSummary {
@@ -64,6 +79,8 @@ interface ConversationSummary {
   status: ConversationStatus;
   effective_mode: MaturityMode;
   unread_customer_messages: number;
+  // 010, T20: category + resolves_at only, not the full draft text.
+  pending_autonomous_send?: PendingAutonomousSendSummary | null;
 }
 
 export interface Evidence {
@@ -105,6 +122,15 @@ interface RuntimeConfig {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Erro inesperado";
+}
+
+// 010, T21/T22: computed fresh at render time from the server's own
+// resolves_at, not a separately-ticking client interval — the queue's
+// existing 2s poll already keeps this reasonably live, matching this
+// project's "good enough, no added complexity" bar for a value this
+// coarse (window_seconds defaults to 30+).
+function secondsUntil(isoTimestamp: string): number {
+  return Math.max(0, Math.round((new Date(isoTimestamp).getTime() - Date.now()) / 1000));
 }
 
 async function api<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
@@ -540,6 +566,15 @@ export function OperatorPage() {
     const data = await api<{ specialty_count: number; business_day_count: number; slots_created: number; message: string }>("/operator/scheduling/ensure-wide-availability", { method: "POST" }, token);
     setAvailabilityMessage(data.message);
   };
+  // 010/GA-4: available on any conversation regardless of claim status
+  // (plan.md §4 — PAUSE works even on a WAITING conversation, since GA-6
+  // allows autonomy there) — a direct queue-item action rather than
+  // requiring the operator to open/claim the conversation first.
+  const pauseAutonomousSend = async (conversationId: string, pendingId: string) => {
+    await api(`/operator/conversations/${conversationId}/pending-autonomous-send/${pendingId}/pause`, { method: "POST" }, token);
+    await load();
+    if (selectedId === conversationId) await refreshSelected();
+  };
   // Ops/testing convenience: `items` (scope=all) already scopes its ACTIVE
   // rows to this operator's own assignments server-side, so every close()
   // on an already-active conversation is authorized by construction. A
@@ -692,21 +727,34 @@ export function OperatorPage() {
     <aside className="card" aria-label="Fila de conversas">
       <h2>Fila</h2>
       {items.length === 0 && <p className="empty-state">Nenhuma conversa no momento.</p>}
-      {items.map((conversation) => <button
-        key={conversation.id}
-        type="button"
-        className="queue-item"
-        aria-current={conversation.id === selectedId ? "true" : undefined}
-        onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}
-      >
-        <StatusBadge status={conversation.status} />{" "}
-        <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>{" "}
-        {conversation.unread_customer_messages > 0 && <span className="badge badge-waiting" title="Mensagens do cliente ainda sem resposta do operador">{conversation.unread_customer_messages} sem resposta</span>}
-      </button>)}
+      {items.map((conversation) => <div key={conversation.id} className="queue-row">
+        <button
+          type="button"
+          className="queue-item"
+          aria-current={conversation.id === selectedId ? "true" : undefined}
+          onClick={() => void (conversation.status === "WAITING" ? claim(conversation.id) : open(conversation.id)).catch((caught) => setError(errorMessage(caught)))}
+        >
+          <StatusBadge status={conversation.status} />{" "}
+          <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>{" "}
+          {conversation.unread_customer_messages > 0 && <span className="badge badge-waiting" title="Mensagens do cliente ainda sem resposta do operador">{conversation.unread_customer_messages} sem resposta</span>}{" "}
+          {conversation.pending_autonomous_send && <span className="badge badge-autonomy" title={`Resposta autônoma pendente (categoria: ${conversation.pending_autonomous_send.category})`}>envio autônomo em {secondsUntil(conversation.pending_autonomous_send.resolves_at)}s</span>}
+        </button>
+        {/* 010/GA-4: works even for a WAITING conversation no operator has
+            claimed yet (GA-6) — a direct action here avoids forcing a
+            claim just to stop an autonomous send. */}
+        {conversation.pending_autonomous_send && <button type="button" className="btn-ghost" onClick={() => void pauseAutonomousSend(conversation.id, (conversation.pending_autonomous_send as PendingAutonomousSendSummary).id).catch((caught) => setError(errorMessage(caught)))} title="Pausar envio autônomo">Pausar</button>}
+      </div>)}
       <button type="button" className="btn-ghost" onClick={() => void closeAllConversations().catch((caught) => setError(errorMessage(caught)))}>Encerrar todas as conversas</button>
       <button type="button" className="btn-ghost" onClick={() => void ensureAvailability().catch((caught) => setError(errorMessage(caught)))}>Garantir disponibilidade (D+1/D+7)</button>
       <button type="button" className="btn-ghost" onClick={() => void ensureWideAvailability().catch((caught) => setError(errorMessage(caught)))}>Preencher agenda ampla (até 30/12/2026)</button>
       {availabilityMessage && <p role="status" aria-live="polite">{availabilityMessage}</p>}
+      {/* 010/GA-3, GA-5, T23: window_seconds and the kill switch live on
+          the knowledge-admin page instead (alongside category autonomy
+          management, consolidating all autonomy configuration in one
+          place) — found live that a checkbox/number input here, ahead of
+          the conversation section's own message-selection checkboxes in
+          DOM order, broke pre-existing tests' `getByRole("checkbox").first()`
+          assumptions elsewhere on this same page. */}
     </aside>
     <section className="card">
       {selected ? <>
@@ -717,6 +765,20 @@ export function OperatorPage() {
         {selected.booking_summary && <p className="booking-summary" aria-label="Agendamento realizado">{selected.booking_summary.line}</p>}
         {selected.is_customer_typing && <p aria-live="polite" className="typing-indicator">Cliente está digitando…</p>}
         {countdown !== null && <p aria-live="polite" className="typing-indicator">{countdown > 0 ? `Respondendo em ${countdown}s…` : "Gerando resposta…"}</p>}
+        {/* 010/GA-4, T22: read-only preview, not the editable reply
+            textarea — EDIT works by pre-filling that existing textarea
+            below (reusing "Usar sugestão"'s own copy-into-textarea
+            pattern) and sending normally, which resolves the pending row
+            as a side effect (plan.md §4) without a dedicated endpoint. */}
+        {selected.pending_autonomous_send && <div className="card pending-autonomy" aria-label="Envio autônomo pendente">
+          <p><strong>Envio autônomo pendente</strong> — categoria "{selected.pending_autonomous_send.category}", em {secondsUntil(selected.pending_autonomous_send.resolves_at)}s.</p>
+          <MessageBody body={selected.pending_autonomous_send.draft_text} />
+          <div className="stack" style={{ gap: "var(--space-2)" }}>
+            <button type="button" className="btn-ghost" onClick={() => void pauseAutonomousSend(selected.id, (selected.pending_autonomous_send as PendingAutonomousSend).id).catch((caught) => setError(errorMessage(caught)))}>Pausar</button>
+            <button type="button" className="btn-secondary" onClick={() => { setText((selected.pending_autonomous_send as PendingAutonomousSend).draft_text); document.getElementById("operator-reply")?.focus(); }}>Editar</button>
+            <button type="button" className="btn-secondary" onClick={() => void takeOver().catch((caught) => setError(errorMessage(caught)))}>Assumir controle</button>
+          </div>
+        </div>}
         <button type="button" className="btn-ghost" onClick={clearMessageSelection}>Desmarcar conversas</button>
         <div className="messages">
           {selected.messages.length === 0 && <p className="empty-state">Sem mensagens nesta conversa ainda.</p>}
@@ -724,7 +786,9 @@ export function OperatorPage() {
             <label className="message-select">
               <input type="checkbox" checked={selectedMessageIds.has(message.id)} onChange={() => toggleMessageSelection(message.id)} aria-label={`Incluir mensagem de ${message.author_type === "CUSTOMER" ? "cliente" : "operador"} no contexto`} />
               <span className="message-author">{message.author_type === "CUSTOMER" ? "Cliente" : "Operador"}</span>
-              {message.autonomous_source === "booking_script" && <span className="badge" title="Enviada automaticamente pelo fluxo de agendamento simulado, sem clique do operador">automático</span>}
+              {/* 010, T24: generalized from booking_script-only to either
+                  autonomous-send exception, one shared badge. */}
+              {message.autonomous_source && <span className="badge" title={message.autonomous_source === "booking_script" ? "Enviada automaticamente pelo fluxo de agendamento simulado, sem clique do operador" : "Enviada automaticamente por resposta autônoma governada, sem clique do operador"}>automático</span>}
             </label>
             <MessageBody body={message.body} />
             {message.source_generation_id && <div className="message-taxonomy-actions">
@@ -796,6 +860,9 @@ interface Category {
   slug: string;
   label: string;
   is_active: boolean;
+  // 010/GA-1: default false — no category is autonomous until an
+  // operator explicitly turns it on.
+  autonomy_enabled: boolean;
 }
 
 interface DynamicTableColumn {
@@ -841,6 +908,7 @@ export function KnowledgeAdminPage() {
   });
 
   const [categories, setCategories] = useState<Category[]>([]);
+  const [autonomySettings, setAutonomySettings] = useState<{ window_seconds: number; kill_switch_enabled: boolean } | null>(null);
   const [qaCategory, setQaCategory] = useState(prefill?.category_slug ?? "");
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [newCategorySlug, setNewCategorySlug] = useState("");
@@ -868,6 +936,12 @@ export function KnowledgeAdminPage() {
     // copy, so it can never drift from what other operators just created.
     setCategories(await api<Category[]>("/operator/knowledge/categories", {}, token));
     setDynamicTables(await api<string[]>("/operator/knowledge/dynamic-tables", {}, token));
+    // 010/GA-3, GA-5: global, not per-conversation — consolidated here
+    // alongside category autonomy management (plan.md §5's UI scope was
+    // left to implementation judgment; found live that placing this on
+    // OperatorPage's own queue sidebar collided with pre-existing tests'
+    // `getByRole("checkbox").first()` assumptions there).
+    setAutonomySettings(await api<{ window_seconds: number; kill_switch_enabled: boolean }>("/operator/autonomy-settings", {}, token));
     setLoaded(true);
   }, [token]);
 
@@ -909,6 +983,18 @@ export function KnowledgeAdminPage() {
     setNewCategorySlug("");
     setNewCategoryLabel("");
     setCreatingCategory(false);
+  };
+
+  // 010/GA-1: any authenticated operator, no separate supervisor role.
+  const toggleCategoryAutonomy = async (slug: string, enabled: boolean) => {
+    const updated = await api<Category>(`/operator/knowledge/categories/${slug}/autonomy`, { method: "POST", body: JSON.stringify({ enabled }) }, token);
+    setCategories((current) => current.map((category) => (category.slug === slug ? updated : category)));
+  };
+  const setAutonomyWindowSeconds = async (windowSeconds: number) => {
+    setAutonomySettings(await api("/operator/autonomy-settings", { method: "POST", body: JSON.stringify({ window_seconds: windowSeconds }) }, token));
+  };
+  const setAutonomyKillSwitch = async (enabled: boolean) => {
+    setAutonomySettings(await api("/operator/autonomy-settings", { method: "POST", body: JSON.stringify({ kill_switch_enabled: enabled }) }, token));
   };
 
   useEffect(() => {
@@ -965,6 +1051,38 @@ export function KnowledgeAdminPage() {
   return <main className="knowledge-admin stack">
     <h1>Registros de conhecimento</h1>
     {error && <p role="alert">{error}</p>}
+    <section className="card">
+      <h2>Autonomia por categoria</h2>
+      {/* 010/GA-1, T23: no category is autonomous until explicitly turned
+          on here — default false for every row. The checkbox's own
+          accessible name is deliberately NOT built from `category.label`
+          directly (an explicit aria-label instead of wrapping a <label>
+          around the raw category text) — found live that a category
+          whose own label happens to start with "Categoria" (as this
+          page's pre-existing "Criar categoria" flow's own fixture
+          categories do, e.g. v2.spec.ts's own test categories) collided
+          with existing `getByLabel("Categoria")` queries elsewhere on
+          this same page, a strict-mode violation neither side caused on
+          its own. */}
+      <ul className="stack" style={{ gap: "var(--space-2)" }}>
+        {categories.map((category) => <li key={category.slug}>
+          <input type="checkbox" id={`autonomy-${category.slug}`} aria-label={`Autonomia para ${category.slug}`} checked={category.autonomy_enabled} onChange={(event) => void toggleCategoryAutonomy(category.slug, event.target.checked).catch((caught) => setError(errorMessage(caught)))} />
+          {" "}<label htmlFor={`autonomy-${category.slug}`}>{category.label} ({category.slug})</label>
+        </li>)}
+      </ul>
+      {/* 010/GA-3, GA-5: global, not per-category — window_seconds down to
+          0 (immediate send, Constitution Amendment 1.2.0 (d)) and the
+          kill switch, consolidated here with category management. */}
+      {autonomySettings && <div className="stack" style={{ gap: "var(--space-2)" }}>
+        <label htmlFor="autonomy-window">Janela de veto (segundos, 0 = envio imediato)
+          <input id="autonomy-window" type="number" min={0} value={autonomySettings.window_seconds} onChange={(event) => void setAutonomyWindowSeconds(Number(event.target.value)).catch((caught) => setError(errorMessage(caught)))} />
+        </label>
+        <label htmlFor="autonomy-kill-switch">
+          <input id="autonomy-kill-switch" type="checkbox" checked={autonomySettings.kill_switch_enabled} onChange={(event) => void setAutonomyKillSwitch(event.target.checked).catch((caught) => setError(errorMessage(caught)))} />
+          {" "}Envio autônomo ativado (interruptor geral)
+        </label>
+      </div>}
+    </section>
     <section className="card">
       <h2>Perguntas e respostas</h2>
       <form onSubmit={(event) => void createQA(event).catch((caught) => setError(errorMessage(caught)))}>

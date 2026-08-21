@@ -95,6 +95,9 @@ class Category(Base):
     label: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    # 010/GA-1: governed-autonomy per-category policy. Default false —
+    # autonomy is opt-in at every level (Constitution Amendment 1.2.0).
+    autonomy_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class KnowledgeDocument(Base):
@@ -177,7 +180,8 @@ class RetrievalRun(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     conversation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.conversations.id"))
     triggering_message_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.messages.id"))
-    operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    # 010/GA-6: nullable — see AIGeneration.operator_id's own comment.
+    operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
     purpose: Mapped[str] = mapped_column(String)
     query_text: Mapped[str] = mapped_column(Text)
     embedding_model: Mapped[str] = mapped_column(Text)
@@ -211,7 +215,11 @@ class AIGeneration(Base):
     triggering_message_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.messages.id"))
     retrieval_run_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.retrieval_runs.id"))
     prior_generation_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
-    operator_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    # 010/GA-6: nullable — evaluate_unclaimed_autonomous_trigger() is the
+    # one call site that ever produces NULL (no operator is assigned to a
+    # WAITING conversation to attribute the generation to). Every other
+    # caller always passes a real operator id.
+    operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
     status: Mapped[str] = mapped_column(String)
     draft_text: Mapped[str] = mapped_column(Text)
     abstention_reason: Mapped[str | None] = mapped_column(Text)
@@ -231,6 +239,41 @@ class AIGeneration(Base):
     marked_incorrect_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
     escalated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     escalated_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+
+
+class SystemSettings(Base):
+    """010: single-row global settings for governed autonomy (Constitution
+    Amendment 1.2.0). `id` is always `True` — the `system_settings_singleton`
+    CHECK plus the primary key guarantee exactly one row can ever exist."""
+
+    __tablename__ = "system_settings"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[bool] = mapped_column(Boolean, primary_key=True, default=True)
+    autonomy_window_seconds: Mapped[int] = mapped_column(Integer, default=30)
+    autonomy_kill_switch_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    updated_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+
+
+class PendingAutonomousSend(Base):
+    """010/GA-3: one row per generation opened for governed autonomous
+    send. `window_seconds`/`resolves_at` are captured at insert time — a
+    later change to `SystemSettings` never retroactively changes an
+    already-open window."""
+
+    __tablename__ = "pending_autonomous_sends"
+    __table_args__ = {"schema": "customer_service"}
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    generation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
+    conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"))
+    category: Mapped[str] = mapped_column(ForeignKey("content.categories.slug"))
+    window_seconds: Mapped[int] = mapped_column(Integer)
+    opens_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
+    resolves_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String, default="PENDING")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
 
 
 class MessageSelection(Base):

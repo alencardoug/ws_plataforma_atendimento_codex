@@ -32,7 +32,7 @@ def configured_embedding_provider() -> EmbeddingProvider:
 def retrieve(
     session: Session,
     *,
-    operator_id: UUID,
+    operator_id: UUID | None,
     query: str,
     purpose: str,
     top_k: int,

@@ -12,7 +12,7 @@ from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT, GenerationResul
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
-from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Conversation, KnowledgeDocument, Message, MessageSelection, QAEntry, RetrievalHit, RetrievalRun
+from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Category, Conversation, KnowledgeDocument, Message, MessageSelection, PendingAutonomousSend, QAEntry, RetrievalHit, RetrievalRun, SystemSettings
 from customer_care.knowledge.dynamic_binding import DynamicResolution, DynamicResolutionError, resolve_dynamic_pattern
 from customer_care.rag.service import Evidence, configured_embedding_provider, evidence_dict, load_evidence, retrieve
 from customer_care.scheduling.availability import resolve_appointment_availability, resolve_price_lookup
@@ -258,15 +258,22 @@ def guided_booking_result(session: DbSession, provider: Any, conversation: Conve
 
 def generate_draft(
     session: DbSession,
-    operator_id: UUID,
+    operator_id: UUID | None,
     conversation: Conversation,
     selected_messages: list[Message],
     manual_search_text: str,
     trigger: str = "MANUAL_DRAFT",
     prior_generation_id: UUID | None = None,
     instruction_text: str = "",
+    *,
+    allow_unclaimed: bool = False,
 ) -> tuple[AIGeneration, list[dict], list[dict[str, str]] | None]:
-    if conversation.status != "ACTIVE" or conversation.effective_mode != "N2":
+    # 010/GA-6: every existing caller keeps allow_unclaimed's default
+    # (False), so this guard's behavior is unchanged for them — only
+    # evaluate_unclaimed_autonomous_trigger() passes True, and only for a
+    # WAITING conversation with no assigned operator.
+    expected_status = "WAITING" if allow_unclaimed else "ACTIVE"
+    if conversation.status != expected_status or conversation.effective_mode != "N2":
         raise api_error(409, "MODE_NOT_ALLOWED", "Draft generation requires an active effective-N2 conversation")
     history = [{"role": row.author_type.lower(), "content": row.body} for row in selected_messages]
     query = "\n".join([*(row.body for row in selected_messages), *([manual_search_text] if manual_search_text else [])])
@@ -487,6 +494,28 @@ def automatic_draft_status(session: DbSession, conversation: Conversation) -> tu
     return True, remaining
 
 
+def _uncovered_customer_run(session: DbSession, conversation: Conversation) -> tuple[Message, list[Message]] | None:
+    """Shared by evaluate_automatic_trigger() and
+    evaluate_unclaimed_autonomous_trigger() (010): the idle-timeout +
+    uncovered-trailing-customer-messages check both need, independent of
+    assignment status. Returns None if there is nothing new to draft on."""
+    if not conversation.last_customer_activity_at:
+        return None
+    if datetime.now(UTC) - conversation.last_customer_activity_at < timedelta(seconds=AUTOMATIC_TRIGGER_IDLE_SECONDS):
+        return None
+    newest_customer = session.scalar(select(Message).where(Message.conversation_id == conversation.id, Message.author_type == "CUSTOMER").order_by(Message.created_at.desc()))
+    if not newest_customer or newest_customer.id == conversation.auto_draft_covers_through_message_id:
+        return None
+    history_rows = session.scalars(select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at.desc())).all()
+    selected_messages: list[Message] = []
+    for row in history_rows:
+        if row.author_type != "CUSTOMER":
+            break
+        selected_messages.append(row)
+    selected_messages.reverse()
+    return newest_customer, selected_messages
+
+
 def evaluate_automatic_trigger(session: DbSession, conversation: Conversation) -> None:
     """V2-7 automatic/instant trigger: lazily evaluated as a side effect of the
     operator's conversation-detail poll and of the customer's typing heartbeat
@@ -495,28 +524,68 @@ def evaluate_automatic_trigger(session: DbSession, conversation: Conversation) -
     generate_draft) so it never breaks the caller's own request."""
     if conversation.status != "ACTIVE" or conversation.effective_mode != "N2":
         return
-    if not conversation.last_customer_activity_at:
-        return
-    if datetime.now(UTC) - conversation.last_customer_activity_at < timedelta(seconds=AUTOMATIC_TRIGGER_IDLE_SECONDS):
-        return
-    newest_customer = session.scalar(select(Message).where(Message.conversation_id == conversation.id, Message.author_type == "CUSTOMER").order_by(Message.created_at.desc()))
-    if not newest_customer or newest_customer.id == conversation.auto_draft_covers_through_message_id:
-        return
     operator_id = assigned_operator_id(session, conversation.id)
     if not operator_id:
         return
-    history_rows = session.scalars(select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at.desc())).all()
-    selected_messages: list[Message] = []
-    for row in history_rows:
-        if row.author_type != "CUSTOMER":
-            break
-        selected_messages.append(row)
-    selected_messages.reverse()
+    run = _uncovered_customer_run(session, conversation)
+    if not run:
+        return
+    newest_customer, selected_messages = run
     # Mark this activity run covered before attempting generation, win or
     # lose — an unrecoverable provider failure must not retry on every poll.
     conversation.auto_draft_covers_through_message_id = newest_customer.id
     session.commit()
     try:
-        generate_draft(session, operator_id, conversation, selected_messages, "", trigger="AUTOMATIC")
+        generation, _evidence, _messages = generate_draft(session, operator_id, conversation, selected_messages, "", trigger="AUTOMATIC")
+        maybe_open_autonomous_window(session, generation, conversation)
     except Exception:
         pass
+
+
+def evaluate_unclaimed_autonomous_trigger(session: DbSession, conversation: Conversation) -> None:
+    """010/GA-6: governed-autonomy's counterpart to evaluate_automatic_trigger()
+    for a WAITING conversation with no assigned operator. Deliberately a
+    separate function, not a modified evaluate_automatic_trigger() —
+    keeps that function's own behavior (and every test that exercises it)
+    completely unchanged for the already-claimed-conversation path.
+    Lazily evaluated as a side effect of list_conversations() (every
+    logged-in operator's own queue poll), same no-scheduler discipline as
+    V2-7 itself."""
+    if conversation.status != "WAITING" or conversation.effective_mode != "N2":
+        return
+    run = _uncovered_customer_run(session, conversation)
+    if not run:
+        return
+    newest_customer, selected_messages = run
+    conversation.auto_draft_covers_through_message_id = newest_customer.id
+    session.commit()
+    try:
+        generation, _evidence, _messages = generate_draft(session, None, conversation, selected_messages, "", trigger="AUTOMATIC", allow_unclaimed=True)
+        maybe_open_autonomous_window(session, generation, conversation)
+    except Exception:
+        pass
+
+
+def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, conversation: Conversation) -> None:
+    """010/GA-2, GA-3: the single point where category policy, the kill
+    switch, and the ANSWER/evidence gate all compose. Called from both
+    trigger-evaluation functions above — neither duplicates this logic.
+    A no-op (no PendingAutonomousSend row) for any generation this
+    doesn't apply to; the generation itself is otherwise unaffected,
+    exactly like today's automatic-draft behavior for a category with no
+    autonomy policy."""
+    if generation.trigger != "AUTOMATIC":
+        return
+    if generation.status != "ANSWER" or not generation.category_slug:
+        return
+    settings = session.get(SystemSettings, True)
+    if not settings or not settings.autonomy_kill_switch_enabled:
+        return
+    category = session.get(Category, generation.category_slug)
+    if not category or not category.autonomy_enabled:
+        return
+    window_seconds = settings.autonomy_window_seconds
+    opens_at = datetime.now(UTC)
+    pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category.slug, window_seconds=window_seconds, opens_at=opens_at, resolves_at=opens_at + timedelta(seconds=window_seconds), status="PENDING")
+    session.add(pending)
+    session.commit()

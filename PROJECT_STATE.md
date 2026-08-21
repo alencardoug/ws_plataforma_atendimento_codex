@@ -28,6 +28,23 @@ Last updated: 2026-08-20
   CONDITIONAL** — its own new `v7.spec.ts` has one unresolved intermittent
   failure; see "Immediate next action" below for the closure evidence
   summary.
+- **Governed autonomous response (`specs/010-governed-autonomous-response`)
+  is DONE (2026-08-20, D-041).** Merges V4 (N3 governed autonomy) and V9
+  (N4 HOTL) as roadmapped into one package, ratifying Constitution
+  Amendment 1.2.0 — the first-ever narrow, bounded exception letting an
+  LLM-generated draft reach the customer without a per-message operator
+  click, beyond AA-10's own pre-existing fixed-template exception
+  (Amendment 1.1.0). Never immediate by default (a real, operator-
+  configurable veto window — which may be set to 0 seconds), always
+  gated to real `ANSWER` evidence from the existing automatic-draft
+  trigger only, default-off at every level (per-category policy, global
+  kill switch), fully audited. Implemented and closed with
+  credential-backed evidence in one session, not deferred — see
+  `specs/010-governed-autonomous-response/acceptance.md` for the full
+  record, including two real Playwright regressions this cycle's own UI
+  additions caused (found and fixed the same session) and one
+  found-but-unrelated pre-existing `v3.spec.ts` fragility left
+  undisturbed.
 
 ## V1 baseline
 

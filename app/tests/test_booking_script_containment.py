@@ -4,7 +4,15 @@ booking_script/send_scripted_message(). Source-level (AST) introspection,
 not behavioral — proves the *shape* of the codebase, not just that a
 particular test scenario happens not to trigger a leak.
 specs/004-dynamic-appointment-availability/plan.md §9/§13,
-acceptance.md §O."""
+acceptance.md §O.
+
+Updated 2026-08-20 (010, Constitution Amendment 1.2.0): a second,
+separately authorized autonomous-send exception now exists —
+autonomy/service.py's resolve_elapsed_autonomous_sends(). This file's own
+allowlist (GOVERNED_AUTONOMY_SITE below) is the one place both exceptions
+are reconciled; anywhere else, this file's original claim ("has not
+spread beyond booking_script") still holds for every other function in
+the codebase."""
 
 import ast
 from pathlib import Path
@@ -47,12 +55,20 @@ def _find_operator_message_construction_sites() -> list[tuple[Path, ast.Function
     return sites
 
 
+# 010 (Constitution Amendment 1.2.0): the one other authorized
+# non-operator-authenticated OPERATOR-Message construction site,
+# separately containment-tested by test_010_governed_autonomy_containment.py.
+GOVERNED_AUTONOMY_SITE = ("autonomy", "service.py", "resolve_elapsed_autonomous_sends")
+
+
 def test_every_operator_message_construction_site_outside_booking_script_requires_current_operator() -> None:
     sites = _find_operator_message_construction_sites()
     outside_booking_script = [(path, func) for path, func in sites if BOOKING_SCRIPT_DIR not in path.parents]
     assert outside_booking_script, "expected at least one OPERATOR Message construction site outside booking_script/ (operator_workspace/router.py's send_operator_message) — if this list is empty, this test itself may have broken, not the containment"
     for path, func in outside_booking_script:
-        assert _function_has_current_operator_param(func), f"{path}:{func.name} constructs an OPERATOR Message without a CurrentOperator-annotated parameter — a potential second autonomous-send path"
+        if path.parent.name == GOVERNED_AUTONOMY_SITE[0] and path.name == GOVERNED_AUTONOMY_SITE[1] and func.name == GOVERNED_AUTONOMY_SITE[2]:
+            continue
+        assert _function_has_current_operator_param(func), f"{path}:{func.name} constructs an OPERATOR Message without a CurrentOperator-annotated parameter — a potential third autonomous-send path (only booking_script/service.py's send_scripted_message and autonomy/service.py's resolve_elapsed_autonomous_sends are authorized, under Amendment 1.1.0 and 1.2.0 respectively)"
 
 
 def test_booking_script_has_exactly_one_operator_message_construction_site() -> None:

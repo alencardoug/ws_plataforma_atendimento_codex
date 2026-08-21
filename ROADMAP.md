@@ -16,12 +16,14 @@ currently-specified-but-not-yet-implemented cycles together —
 `006-specialty-scheduling-breadth`, `007-completed-booking-visibility`,
 `008-customer-facing-draft-status`, and `009-two-phase-clinical-evidence`
 (D-039) — ahead of V4/V9, with Telegram still deferred until after this
-refinement/these four cycles land. **006/008/009 are now DONE** (implemented
+refinement/these four cycles land. **006/008/009 are DONE** (implemented
 plus credential-backed closure, both same-day 2026-08-20). **007 remains
 CONDITIONAL** — its own new `v7.spec.ts` has one unresolved intermittent
-failure found during closure — see `PROJECT_STATE.md`. The ordering below
-is otherwise unchanged for what comes after these four: V4/V9 with real
-frontend support, then Telegram.
+failure found during closure — see `PROJECT_STATE.md`. **V4/V9 (merged as
+one package, `specs/010-governed-autonomous-response/`, D-041) are also
+now DONE** (2026-08-20, same day, human-authorized ahead of finishing 007
+— see that package's own `acceptance.md`). Telegram is the live next
+decision point.
 
 Not a scope change — a sequencing decision for what gets authorized next,
 once the items already registered under "Era A — Existence" below
@@ -415,13 +417,28 @@ See `specs/003-v3-measured-n2/` for the full spec/plan/tasks/acceptance
 package and `PROJECT_STATE.md`'s "V3 implementation — DONE" section for
 the closure summary.
 
-### V4 — N3 governed autonomy / Supervisor
+### V4 — N3 governed autonomy / Supervisor — DONE (2026-08-20, merged with V9)
 
-- supervisor interface;
-- category-level ON/OFF/REVIEW/ESCALATE policies;
-- policy audit/justification;
-- HITL for categories not authorized for autonomous sending;
-- operator may reduce autonomy, never increase above policy.
+**Implemented together with V9/N4 HOTL below as one package,
+`specs/010-governed-autonomous-response/`, D-041, Constitution Amendment
+1.2.0** — see that section for the actual delivered scope, which
+deliberately narrowed several of this entry's own original bullets after
+a grill session found them underspecified: no separate `supervisor` role
+(ordinary operators manage policy); no separate "immediate send" path
+distinct from N4's veto window (every autonomous send goes through a
+window, possibly 0-length); REVIEW/ESCALATE as named policy states were
+not built (ON/OFF only — ESCALATE-style specialist handoff remains V5's
+own separate future scope). The bullets below preserve the original
+registration note.
+
+- ~~supervisor interface~~ — not built, human decision;
+- category-level ON/OFF policy (not REVIEW/ESCALATE — delivered scope);
+- policy audit — delivered (`autonomy.category_policy_changed` et al.);
+- HITL for categories not authorized for autonomous sending — the
+  existing N2 flow itself, unchanged, is what "not authorized" falls back
+  to;
+- operator may reduce autonomy (PAUSE, or turning a category back off),
+  never increase it beyond what an authenticated operator explicitly set.
 
 ### V5 — Mature human handoff and queue operations
 
@@ -459,7 +476,16 @@ Policy controls adjacent to evidence: acceptance, edit, rejection, error, absten
 
 `AUTO -> REVIEW` can happen automatically when operational/evaluation evidence degrades. Autonomy never increases automatically.
 
-### V9 — N4 HOTL
+### V9 — N4 HOTL — DONE (2026-08-20, merged with V4)
+
+**Implemented together with V4/N3 above as one package,
+`specs/010-governed-autonomous-response/`, D-041, Constitution Amendment
+1.2.0** — see `specs/010-governed-autonomous-response/spec.md`/`acceptance.md`
+for the full outcome-by-outcome record. This entry's own description
+turned out to already describe N3+N4 as one mechanism once actually
+specified (a veto window is what "governed" means here — there is no
+separate immediate-send N3 distinct from windowed N4), which is why both
+roadmap entries closed together rather than sequentially.
 
 Eligible categories operate autonomously. Operator sees pending answer and has a policy-driven veto window with PAUSE / EDIT / TAKE OVER. N4 remains bounded by policy.
 
