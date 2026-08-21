@@ -22,8 +22,17 @@ CONDITIONAL** — its own new `v7.spec.ts` has one unresolved intermittent
 failure found during closure — see `PROJECT_STATE.md`. **V4/V9 (merged as
 one package, `specs/010-governed-autonomous-response/`, D-041) are also
 now DONE** (2026-08-20, same day, human-authorized ahead of finishing 007
-— see that package's own `acceptance.md`). Telegram is the live next
-decision point.
+— see that package's own `acceptance.md`).
+
+**2026-08-21 update:** the human requested a second, independent autonomy
+exception mid-session — N5, ungoverned fictional-demo autonomy
+(`specs/011-ungoverned-fictional-demo-autonomy-n5/`, D-042, Constitution
+Amendment 1.3.0). Not part of the original roadmap; resolved through its
+own grill session after an initial ask (bypass evidence-gating entirely)
+was declined and reframed with the actual context (this project is a
+technical-portfolio demonstration, not a real clinical service). **DONE**
+(2026-08-21) — see that package's own `acceptance.md`. Telegram is the
+live next decision point.
 
 Not a scope change — a sequencing decision for what gets authorized next,
 once the items already registered under "Era A — Existence" below
@@ -488,6 +497,22 @@ separate immediate-send N3 distinct from windowed N4), which is why both
 roadmap entries closed together rather than sequentially.
 
 Eligible categories operate autonomously. Operator sees pending answer and has a policy-driven veto window with PAUSE / EDIT / TAKE OVER. N4 remains bounded by policy.
+
+### N5 — Ungoverned fictional-demo autonomy — DONE (2026-08-21, D-042)
+
+Not part of the original roadmap — a human-requested addition mid-session,
+resolved through its own grill session. A second, independent autonomy
+exception (Constitution Amendment 1.3.0): when its own kill switch is on
+(default off), every AUTOMATIC-eligible customer message gets an
+autonomous reply with no evidence/category requirement — additive only,
+never overriding an already-grounded N3/N4 answer. Justified solely by
+this project's nature as a technical-portfolio/demonstration system, not
+a real clinical service; void without the customer-facing "fictional
+technical demonstration" disclaimer this cycle added as a prerequisite.
+See `specs/011-ungoverned-fictional-demo-autonomy-n5/spec.md`/`acceptance.md`.
+Not to be confused with the pre-existing "V11 — Technical Admin / AI Ops"
+placeholder entry below — a coincidental numbering overlap between this
+spec package's sequence number and that unrelated future roadmap item.
 
 ## Era D — Platform
 

@@ -181,7 +181,7 @@ class TestResolution:
         with session_factory() as db:
             conversation, generation = _make_generation(db, operator_id=operator_id)
             past = datetime.now(UTC) - timedelta(seconds=1)
-            pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category, window_seconds=0, opens_at=past, resolves_at=past, status="PENDING")
+            pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category, mechanism="governed_autonomy", window_seconds=0, opens_at=past, resolves_at=past, status="PENDING")
             db.add(pending)
             db.commit()
             resolve_elapsed_autonomous_sends(db)
@@ -201,7 +201,7 @@ class TestResolution:
         with session_factory() as db:
             conversation, generation = _make_generation(db, operator_id=operator_id)
             future = datetime.now(UTC) + timedelta(minutes=5)
-            pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category, window_seconds=300, opens_at=datetime.now(UTC), resolves_at=future, status="PENDING")
+            pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category, mechanism="governed_autonomy", window_seconds=300, opens_at=datetime.now(UTC), resolves_at=future, status="PENDING")
             db.add(pending)
             db.commit()
             resolve_elapsed_autonomous_sends(db)

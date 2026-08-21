@@ -9,17 +9,24 @@ from customer_care.ai import router as ai_router
 from customer_care.ai.router import automatic_draft_status
 
 
+FAKE_IDLE_SECONDS = 8
+
+
 class _FakeSession:
     """automatic_draft_status makes one `.scalar()` call (newest customer
-    message id) — matching this suite's established fake-session pattern.
-    `assigned_operator_id` is a free function, not a session method, so it
-    is monkeypatched per-test instead."""
+    message id) and one `.get()` call (011: system_settings, for
+    automatic_trigger_idle_seconds) — matching this suite's established
+    fake-session pattern. `assigned_operator_id` is a free function, not a
+    session method, so it is monkeypatched per-test instead."""
 
     def __init__(self, newest_customer_id: object | None = None) -> None:
         self._newest_customer_id = newest_customer_id
 
     def scalar(self, _statement: object) -> object | None:
         return self._newest_customer_id
+
+    def get(self, _model: object, _pk: object) -> object:
+        return SimpleNamespace(automatic_trigger_idle_seconds=FAKE_IDLE_SECONDS)
 
 
 def _conversation(**overrides: object) -> Any:
@@ -76,7 +83,7 @@ def test_eligible_with_time_remaining() -> None:
     conversation = _conversation(last_customer_activity_at=datetime.now(UTC) - timedelta(seconds=3))
     eligible, remaining = automatic_draft_status(session, conversation)  # type: ignore[arg-type]
     assert eligible is True
-    assert remaining == ai_router.AUTOMATIC_TRIGGER_IDLE_SECONDS - 3
+    assert remaining == FAKE_IDLE_SECONDS - 3
 
 
 def test_eligible_past_threshold_never_goes_negative() -> None:

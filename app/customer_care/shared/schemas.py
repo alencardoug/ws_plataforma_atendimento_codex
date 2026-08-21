@@ -81,7 +81,9 @@ class OperatorLoginOut(BaseModel):
 
 class PendingAutonomousSendSummary(BaseModel):
     id: UUID
-    category: str
+    # 011: nullable — an N5 (ungoverned) row has no matched category.
+    category: str | None
+    mechanism: Literal["governed_autonomy", "ungoverned_n5"]
     resolves_at: datetime
 
 

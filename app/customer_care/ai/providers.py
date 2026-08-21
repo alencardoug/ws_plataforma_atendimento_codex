@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import date
@@ -47,9 +48,43 @@ class GenerationProvider(Protocol):
     def generate(self, history: list[dict[str, str]], evidence: list[Evidence], system_prompt: str) -> GenerationResult: ...
     def rerank_clinical(self, customer_text: str, candidate_text: str) -> bool: ...
     def extract_date_intent(self, customer_text: str, reference_date: date) -> StructuredDateIntent | None: ...
+    def generate_ungoverned(self, history: list[dict[str, str]], system_prompt: str) -> str: ...
 
 
 CLINICAL_DEFLECTION_TEXT = "Essa é uma pergunta de natureza clínica — recomendo conversar sobre isso com o profissional de saúde responsável durante a consulta. Posso ajudar com outra dúvida?"
+
+# 011 (Constitution Amendment 1.3.0, N5): deliberately its own small
+# prompt, not rag_answer.md — that file's contract is built entirely
+# around evidence grounding and an ABSTAIN option, both of which N5
+# explicitly has neither of. Reusing it verbatim would instruct the model
+# to abstain and to only claim evidence-backed facts, directly
+# contradicting generate_ungoverned's own purpose (plan.md §2 is corrected
+# by this comment — see analysis.md for this implementation-time
+# refinement). Keeps the same warm, concise, Brazilian Portuguese
+# customer-service voice; explicitly forbids revealing that this is an AI/
+# a demo (the frontend disclaimer banner already discloses that) and
+# forbids inventing hyper-specific identifying details (doctor names,
+# exact prices) it has no basis for, while still always answering.
+UNGOVERNED_N5_SYSTEM_PROMPT = (
+    "Você é um atendente cordial de uma clínica oncológica fictícia, "
+    "respondendo em português brasileiro, de forma breve e natural (uma a "
+    "três frases, salvo necessidade real de mais).\n\n"
+    "Sempre dê ao cliente uma resposta útil e no personagem — nunca recuse, "
+    "nunca diga que falta informação, nunca abstenha-se. Se não tiver um "
+    "fato específico (nome de profissional, preço exato, horário exato), "
+    "responda de forma geral e ofereça encaminhar a dúvida, em vez de "
+    "inventar um dado específico como se fosse real.\n\n"
+    "Nunca revele que você é uma IA, um modelo de linguagem, ou que esta é "
+    "uma simulação/demonstração — mantenha o personagem do atendente. Nunca "
+    "inclua explicações de processo, instruções para um operador, "
+    "citações, ou qualquer texto além da resposta que seria enviada "
+    "diretamente ao cliente."
+)
+# Article V (traceability): a real, content-derived version marker, same
+# technique load_prompt() uses for the file-backed evidence-gated prompt —
+# this one is source-controlled as a Python constant instead of a file, but
+# still deserves a version that changes if the text ever does.
+UNGOVERNED_N5_PROMPT_VERSION = f"ungoverned_n5_prompt:{hashlib.sha256(UNGOVERNED_N5_SYSTEM_PROMPT.encode()).hexdigest()[:12]}"
 
 _RERANK_SYSTEM_PROMPT_TEMPLATE = (
     "Você compara duas respostas candidatas para a mensagem mais recente de um "
@@ -114,6 +149,12 @@ class DeterministicTestGenerationProvider:
         # smoke-tested against the real provider only.
         return None
 
+    def generate_ungoverned(self, history: list[dict[str, str]], system_prompt: str) -> str:
+        # 011: fixed deterministic text, same stand-in precedent as the
+        # methods above — real-quality ungoverned output is smoke-tested
+        # against the real provider only.
+        return "Posso ajudar com isso — pode me contar um pouco mais sobre o que você precisa?"
+
 
 class OpenAIGenerationProvider:
     name = "openai"
@@ -167,6 +208,16 @@ class OpenAIGenerationProvider:
         )
         payload = json.loads(response.choices[0].message.content or "{}")
         return payload.get("chosen") == "B"
+
+    def generate_ungoverned(self, history: list[dict[str, str]], system_prompt: str) -> str:
+        """011 (Constitution Amendment 1.3.0, N5): a plain chat completion —
+        no evidence payload, no JSON response_format, no ABSTAIN option.
+        The model always returns free text, which the caller sends to the
+        customer as-is (plan.md §2)."""
+        messages = [{"role": "system", "content": system_prompt}, *[{"role": "user" if item["role"] == "customer" else "assistant", "content": item["content"]} for item in history]]
+        response = self.client.chat.completions.create(model=self.model, messages=messages)  # type: ignore[arg-type]
+        text = (response.choices[0].message.content or "").strip()
+        return text or "Posso ajudar com isso — pode me contar um pouco mais sobre o que você precisa?"
 
     def extract_date_intent(self, customer_text: str, reference_date: date) -> StructuredDateIntent | None:
         """006/ND-1: classifies only the 8 structured fields — never

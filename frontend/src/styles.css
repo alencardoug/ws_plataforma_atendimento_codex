@@ -130,6 +130,16 @@ button.btn-danger:hover:not(:disabled) { background: #8f1f19; }
 .badge-active { background: var(--success-100); color: var(--success-600); border-color: #bfe3cb; }
 .badge-closed { background: var(--surface-sunken); color: var(--text-muted); border-color: var(--border-subtle); }
 
+.disclaimer-banner {
+  background: var(--warning-100);
+  color: var(--warning-600);
+  border: 1px solid #f0dca8;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-size-small);
+}
+.disclaimer-banner strong { display: block; margin-bottom: var(--space-1); }
+
 [role="alert"], .field-error {
   background: var(--danger-100);
   color: var(--danger-600);

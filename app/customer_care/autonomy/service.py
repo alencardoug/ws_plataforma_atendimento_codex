@@ -38,7 +38,10 @@ def resolve_elapsed_autonomous_sends(session: Session) -> None:
         generation = session.get(AIGeneration, pending.generation_id)
         if not generation:
             continue
-        message = Message(conversation_id=pending.conversation_id, author_type="OPERATOR", body=generation.draft_text, source_generation_id=generation.id, autonomous_source="governed_autonomy", created_at=datetime.now(UTC))
+        # 011: mechanism carries the value stamped at window-open time
+        # (maybe_open_autonomous_window(), plan.md §4) — 'governed_autonomy'
+        # (Amendment 1.2.0) or 'ungoverned_n5' (Amendment 1.3.0).
+        message = Message(conversation_id=pending.conversation_id, author_type="OPERATOR", body=generation.draft_text, source_generation_id=generation.id, autonomous_source=pending.mechanism, created_at=datetime.now(UTC))
         session.add(message)
         session.flush()
         conversation = session.get(Conversation, pending.conversation_id)
@@ -46,5 +49,5 @@ def resolve_elapsed_autonomous_sends(session: Session) -> None:
             conversation.last_message_at = message.created_at
         pending.status = "SENT"
         pending.resolved_at = message.created_at
-        record_event(session, "autonomy.message_sent", "SYSTEM", conversation_id=pending.conversation_id, payload={"conversation_id": str(pending.conversation_id), "message_id": str(message.id), "pending_autonomous_send_id": str(pending.id), "generation_id": str(generation.id), "category": pending.category})
+        record_event(session, "autonomy.message_sent", "SYSTEM", conversation_id=pending.conversation_id, payload={"conversation_id": str(pending.conversation_id), "message_id": str(message.id), "pending_autonomous_send_id": str(pending.id), "generation_id": str(generation.id), "category": pending.category, "mechanism": pending.mechanism})
         session.commit()

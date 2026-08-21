@@ -91,6 +91,34 @@ Read and obey `AGENTS.md` first.
   cycle's own additions caused in pre-existing Playwright tests (found
   and fixed the same session) and one found-but-unrelated pre-existing
   `v3.spec.ts` fragility left undisturbed.
+- **The human requested a second, independent autonomy exception on
+  2026-08-21 (D-042)**, `specs/011-ungoverned-fictional-demo-autonomy-n5/`
+  — "N5". The initial ask (a checkbox bypassing evidence-gating entirely
+  for every message) was declined as first framed; the human then
+  supplied the context that changes the calculus — this project is a
+  technical-portfolio/interview-demonstration system, not a real clinical
+  service — and the request was resolved through its own grill session
+  into a formal, bounded exception rather than an ad hoc toggle.
+  Constitution Amendment 1.3.0 ratifies it: N5 has its own independent
+  kill switch (never implied by Amendment 1.2.0's), applies to every
+  AUTOMATIC-eligible message when on (including overriding the
+  never-autonomous-on-`ABSTAIN` rule, but only while N5's own switch is
+  on), is purely additive (never overrides an already-grounded N3/N4
+  answer), and is void without the customer-facing "fictional technical
+  demonstration" disclaimer added as a prerequisite
+  (`frontend/src/main.tsx`'s `.disclaimer-banner`). Also made the
+  automatic-trigger idle debounce operator-configurable
+  (`system_settings.automatic_trigger_idle_seconds`, shared by both
+  mechanisms). **Implementation is DONE (2026-08-21)** —
+  `spec.md`/`plan.md`/`data-model.md`/`tasks.md`/`acceptance.md`/
+  `analysis.md` are complete, verdict **GO**, with credential-backed
+  closure (real Postgres, real LLM generation, and a live manual browser
+  verification) run the same session. See
+  `specs/011-ungoverned-fictional-demo-autonomy-n5/acceptance.md` for the
+  full outcome-by-outcome record, including one real UI regression this
+  cycle's own addition caused (found and fixed the same session) and an
+  update to `v7.spec.ts`'s already-known pre-existing intermittency
+  (now also reproduces in isolation, not only full-suite context).
 
 Read in this order:
 

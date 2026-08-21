@@ -26,10 +26,10 @@ interface Message {
   // the draft that produced it (an "edit"), pre-filling the "transformar em
   // Q&A" flow.
   qa_transform?: { question: string; answer: string; category_slug: string | null } | null;
-  // AA-10/010: set on either of the two autonomous-send exceptions
-  // (Constitution Amendments 1.1.0 and 1.2.0), surfaced here purely as an
-  // operator transparency cue.
-  autonomous_source?: "booking_script" | "governed_autonomy" | null;
+  // AA-10/010/011: set on any of the three autonomous-send exceptions
+  // (Constitution Amendments 1.1.0, 1.2.0, 1.3.0), surfaced here purely as
+  // an operator transparency cue.
+  autonomous_source?: "booking_script" | "governed_autonomy" | "ungoverned_n5" | null;
 }
 
 interface CustomerConversation {
@@ -65,7 +65,9 @@ interface OperatorConversation extends CustomerConversation {
 
 interface PendingAutonomousSendSummary {
   id: string;
-  category: string;
+  // 011: nullable — an N5 (ungoverned) pending send has no matched category.
+  category: string | null;
+  mechanism: "governed_autonomy" | "ungoverned_n5";
   resolves_at: string;
 }
 
@@ -365,7 +367,13 @@ export function CustomerPage() {
     return <main>
       <div className="card stack">
         <h1>Canal de agendamento e informações</h1>
-        <p>Converse anonimamente com nossos atendentes e agentes. Agende consultas e consulte informações clínicas — por exemplo, como se preparar para procedimentos cirúrgicos e de tratamento, além dos cuidados após os procedimentos —, informações administrativas, diretrizes em casos de emergência e detalhes de acompanhamentos pós-tratamento, como atendimento psico-oncológico, nutricional, endocrinológico e fisioterapêutico.</p>
+        <p className="disclaimer-banner">
+          <strong>Projeto de demonstração técnica (portfólio)</strong>
+          Esta instituição, seus profissionais, procedimentos e todo o conteúdo clínico exibido aqui são fictícios. Não é um serviço de saúde real — não envie dados pessoais ou de saúde verídicos.
+        </p>
+        <p>Converse anonimamente com nossos atendentes e agentes.</p>
+        <p>Agende consultas e consulte informações clínicas — por exemplo, como se preparar para procedimentos cirúrgicos e de tratamento, além dos cuidados após os procedimentos.</p>
+        <p>Também há informações administrativas, diretrizes em casos de emergência e detalhes de acompanhamentos pós-tratamento, como atendimento psico-oncológico, nutricional, endocrinológico e fisioterapêutico.</p>
         <button onClick={handleStart} disabled={startCountdown !== null}>Iniciar conversa</button>
         {startCountdown !== null && (
           <p aria-live="polite" className="typing-indicator">
@@ -710,6 +718,10 @@ export function OperatorPage() {
     return <main>
       <div className="card stack">
         <h1>Espaço do operador</h1>
+        <p className="disclaimer-banner">
+          <strong>Projeto de demonstração técnica (portfólio)</strong>
+          Ambiente fictício de estudo de caso — nenhum dado ou atendimento aqui é real.
+        </p>
         <form onSubmit={(event) => void login(event).catch((caught) => setError(errorMessage(caught)))}>
           <label htmlFor="operator-email">E-mail<input id="operator-email" type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label>
           <label htmlFor="operator-password">Senha<input id="operator-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
@@ -737,7 +749,7 @@ export function OperatorPage() {
           <StatusBadge status={conversation.status} />{" "}
           <span>{conversation.effective_mode} · {conversation.id.slice(0, 8)}</span>{" "}
           {conversation.unread_customer_messages > 0 && <span className="badge badge-waiting" title="Mensagens do cliente ainda sem resposta do operador">{conversation.unread_customer_messages} sem resposta</span>}{" "}
-          {conversation.pending_autonomous_send && <span className="badge badge-autonomy" title={`Resposta autônoma pendente (categoria: ${conversation.pending_autonomous_send.category})`}>envio autônomo em {secondsUntil(conversation.pending_autonomous_send.resolves_at)}s</span>}
+          {conversation.pending_autonomous_send && <span className="badge badge-autonomy" title={conversation.pending_autonomous_send.mechanism === "ungoverned_n5" ? "Resposta autônoma pendente — modo N5, sem evidência" : `Resposta autônoma pendente (categoria: ${conversation.pending_autonomous_send.category})`}>envio autônomo em {secondsUntil(conversation.pending_autonomous_send.resolves_at)}s</span>}
         </button>
         {/* 010/GA-4: works even for a WAITING conversation no operator has
             claimed yet (GA-6) — a direct action here avoids forcing a
@@ -771,7 +783,7 @@ export function OperatorPage() {
             pattern) and sending normally, which resolves the pending row
             as a side effect (plan.md §4) without a dedicated endpoint. */}
         {selected.pending_autonomous_send && <div className="card pending-autonomy" aria-label="Envio autônomo pendente">
-          <p><strong>Envio autônomo pendente</strong> — categoria "{selected.pending_autonomous_send.category}", em {secondsUntil(selected.pending_autonomous_send.resolves_at)}s.</p>
+          <p><strong>Envio autônomo pendente</strong> — {selected.pending_autonomous_send.mechanism === "ungoverned_n5" ? "modo N5, sem evidência" : `categoria "${selected.pending_autonomous_send.category}"`}, em {secondsUntil(selected.pending_autonomous_send.resolves_at)}s.</p>
           <MessageBody body={selected.pending_autonomous_send.draft_text} />
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <button type="button" className="btn-ghost" onClick={() => void pauseAutonomousSend(selected.id, (selected.pending_autonomous_send as PendingAutonomousSend).id).catch((caught) => setError(errorMessage(caught)))}>Pausar</button>
@@ -788,7 +800,7 @@ export function OperatorPage() {
               <span className="message-author">{message.author_type === "CUSTOMER" ? "Cliente" : "Operador"}</span>
               {/* 010, T24: generalized from booking_script-only to either
                   autonomous-send exception, one shared badge. */}
-              {message.autonomous_source && <span className="badge" title={message.autonomous_source === "booking_script" ? "Enviada automaticamente pelo fluxo de agendamento simulado, sem clique do operador" : "Enviada automaticamente por resposta autônoma governada, sem clique do operador"}>automático</span>}
+              {message.autonomous_source && <span className="badge" title={message.autonomous_source === "booking_script" ? "Enviada automaticamente pelo fluxo de agendamento simulado, sem clique do operador" : message.autonomous_source === "ungoverned_n5" ? "Enviada automaticamente sem evidência — modo N5, demonstração" : "Enviada automaticamente por resposta autônoma governada, sem clique do operador"}>automático</span>}
             </label>
             <MessageBody body={message.body} />
             {message.source_generation_id && <div className="message-taxonomy-actions">
@@ -908,7 +920,7 @@ export function KnowledgeAdminPage() {
   });
 
   const [categories, setCategories] = useState<Category[]>([]);
-  const [autonomySettings, setAutonomySettings] = useState<{ window_seconds: number; kill_switch_enabled: boolean } | null>(null);
+  const [autonomySettings, setAutonomySettings] = useState<{ window_seconds: number; kill_switch_enabled: boolean; n5_kill_switch_enabled: boolean; automatic_trigger_idle_seconds: number } | null>(null);
   const [qaCategory, setQaCategory] = useState(prefill?.category_slug ?? "");
   const [creatingCategory, setCreatingCategory] = useState(false);
   const [newCategorySlug, setNewCategorySlug] = useState("");
@@ -941,7 +953,7 @@ export function KnowledgeAdminPage() {
     // left to implementation judgment; found live that placing this on
     // OperatorPage's own queue sidebar collided with pre-existing tests'
     // `getByRole("checkbox").first()` assumptions there).
-    setAutonomySettings(await api<{ window_seconds: number; kill_switch_enabled: boolean }>("/operator/autonomy-settings", {}, token));
+    setAutonomySettings(await api<{ window_seconds: number; kill_switch_enabled: boolean; n5_kill_switch_enabled: boolean; automatic_trigger_idle_seconds: number }>("/operator/autonomy-settings", {}, token));
     setLoaded(true);
   }, [token]);
 
@@ -995,6 +1007,12 @@ export function KnowledgeAdminPage() {
   };
   const setAutonomyKillSwitch = async (enabled: boolean) => {
     setAutonomySettings(await api("/operator/autonomy-settings", { method: "POST", body: JSON.stringify({ kill_switch_enabled: enabled }) }, token));
+  };
+  const setN5KillSwitch = async (enabled: boolean) => {
+    setAutonomySettings(await api("/operator/autonomy-settings", { method: "POST", body: JSON.stringify({ n5_kill_switch_enabled: enabled }) }, token));
+  };
+  const setAutomaticTriggerIdleSeconds = async (seconds: number) => {
+    setAutonomySettings(await api("/operator/autonomy-settings", { method: "POST", body: JSON.stringify({ automatic_trigger_idle_seconds: seconds }) }, token));
   };
 
   useEffect(() => {
@@ -1080,6 +1098,22 @@ export function KnowledgeAdminPage() {
         <label htmlFor="autonomy-kill-switch">
           <input id="autonomy-kill-switch" type="checkbox" checked={autonomySettings.kill_switch_enabled} onChange={(event) => void setAutonomyKillSwitch(event.target.checked).catch((caught) => setError(errorMessage(caught)))} />
           {" "}Envio autônomo ativado (interruptor geral)
+        </label>
+        <label htmlFor="autonomy-idle-seconds">Tempo de espera antes do rascunho automático (segundos)
+          <input id="autonomy-idle-seconds" type="number" min={0} value={autonomySettings.automatic_trigger_idle_seconds} onChange={(event) => void setAutomaticTriggerIdleSeconds(Number(event.target.value)).catch((caught) => setError(errorMessage(caught)))} />
+        </label>
+        {/* 011 (Constitution Amendment 1.3.0): independent of the kill
+            switch above — neither implies the other. Label makes the
+            demo-only scope explicit, matching the disclaimer banner.
+            Explicit aria-label (not the visible label text, which
+            contains the lowercase word "categoria") — found live that the
+            visible text collided case-insensitively with v2.spec.ts's own
+            pre-existing `getByLabel("Categoria")` queries elsewhere on
+            this page, the same collision class feature 010 hit and fixed
+            for the per-category checkboxes below. */}
+        <label htmlFor="n5-kill-switch">
+          <input id="n5-kill-switch" type="checkbox" aria-label="Autonomia sem filtro de evidência (N5)" checked={autonomySettings.n5_kill_switch_enabled} onChange={(event) => void setN5KillSwitch(event.target.checked).catch((caught) => setError(errorMessage(caught)))} />
+          {" "}Autonomia sem filtro de evidência — N5 (demonstração fictícia, sem categoria/evidência necessária)
         </label>
       </div>}
     </section>

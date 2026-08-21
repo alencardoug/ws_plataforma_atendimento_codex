@@ -251,6 +251,12 @@ class SystemSettings(Base):
     id: Mapped[bool] = mapped_column(Boolean, primary_key=True, default=True)
     autonomy_window_seconds: Mapped[int] = mapped_column(Integer, default=30)
     autonomy_kill_switch_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 011 (Constitution Amendment 1.3.0): independent of
+    # autonomy_kill_switch_enabled above — neither implies the other.
+    n5_kill_switch_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 011: replaces the fixed AUTOMATIC_TRIGGER_IDLE_SECONDS constant;
+    # shared by both N3/N4 and N5's trigger-evaluation entry point.
+    automatic_trigger_idle_seconds: Mapped[int] = mapped_column(Integer, default=8)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     updated_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
 
@@ -266,7 +272,12 @@ class PendingAutonomousSend(Base):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     generation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.ai_generations.id"))
     conversation_id: Mapped[UUID] = mapped_column(ForeignKey("customer_service.conversations.id"))
-    category: Mapped[str] = mapped_column(ForeignKey("content.categories.slug"))
+    # 011: nullable — an N5 (ungoverned) row has no matched category by
+    # construction. A governed_autonomy row always sets this.
+    category: Mapped[str | None] = mapped_column(ForeignKey("content.categories.slug"))
+    # 011: which autonomy exception opened this row — 'governed_autonomy'
+    # (Amendment 1.2.0) or 'ungoverned_n5' (Amendment 1.3.0).
+    mechanism: Mapped[str] = mapped_column(String)
     window_seconds: Mapped[int] = mapped_column(Integer)
     opens_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     resolves_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

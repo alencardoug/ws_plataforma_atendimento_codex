@@ -1,9 +1,11 @@
 # Customer Care AI Constitution
 
-Version: 1.2.0
+Version: 1.3.0
 Ratified: 2026-08-10
 Amended: 2026-08-18 (Amendment 1.1.0 — narrow exception to Article III);
-2026-08-20 (Amendment 1.2.0 — governed autonomous send, N3/N4)
+2026-08-20 (Amendment 1.2.0 — governed autonomous send, N3/N4);
+2026-08-21 (Amendment 1.3.0 — ungoverned fictional-demo autonomous
+exception, N5)
 
 ## I. Specification precedes implementation
 
@@ -11,7 +13,7 @@ No new product behavior is implemented before it is represented in the active fe
 
 ## II. V1 scope discipline
 
-The currently authorized V1 includes N1/N2 only. Supervisor, manager, AI Ops, Telegram, persisted customer identity, dynamic ETA, and automatic autonomy downgrade remain forbidden unless required only as low-cost extension points with no V1 behavior. **N3 and N4 are authorized as of Amendment 1.2.0 (human decision 2026-08-20), strictly bounded by Article III's governed-autonomy exception below** — no other N3/N4 behavior described in `ROADMAP.md`'s original bullets (e.g. immediate/non-veto-windowed autonomous send) is authorized by this amendment.
+The currently authorized V1 includes N1/N2 only. Supervisor, manager, AI Ops, Telegram, persisted customer identity, dynamic ETA, and automatic autonomy downgrade remain forbidden unless required only as low-cost extension points with no V1 behavior. **N3 and N4 are authorized as of Amendment 1.2.0 (human decision 2026-08-20), strictly bounded by Article III's governed-autonomy exception below** — no other N3/N4 behavior described in `ROADMAP.md`'s original bullets (e.g. immediate/non-veto-windowed autonomous send) is authorized by this amendment. **N5 is authorized as of Amendment 1.3.0 (human decision 2026-08-21), strictly bounded by Article III's ungoverned fictional-demo exception below** — an explicit, separately-switched, narrower-purpose relaxation of the evidence-gating requirement, justified solely by this project's nature as a portfolio/technical-demonstration system with no real institution, patients, or service behind it.
 
 ## III. Human authority over V1 outbound AI
 
@@ -71,6 +73,51 @@ This exception is independent of, and does not narrow or widen, Amendment
 1.1.0's own narrow exception for the dynamic-appointment-availability
 booking script — that script's fixed-template, non-LLM autonomous sends
 remain governed entirely by their own original terms.
+
+**Ungoverned fictional-demo exception (Amendment 1.3.0, human decision
+2026-08-21, "N5"):** an LLM-generated reply may be sent to the customer
+without a per-message operator click and without the evidence-gating
+requirement of Amendment 1.2.0 clauses (a) and (c), strictly limited to:
+
+(a) N5 has its own independent kill switch, entirely separate from
+    Amendment 1.2.0's kill switch and from any per-category
+    `autonomy_enabled` policy. N5 may be active while 1.2.0's kill switch
+    is off, and 1.2.0 may be active while N5 is off — the two switches
+    never imply one another;
+(b) when N5's kill switch is on, every AUTOMATIC-trigger-eligible customer
+    message (the same debounce/eligibility entry point Amendment 1.2.0
+    already uses) receives an autonomous reply regardless of retrieval
+    outcome — including a generation that would otherwise be `ABSTAIN` or
+    have no evidence category. Amendment 1.2.0 clause (a)'s
+    never-autonomous-on-`ABSTAIN` rule, and clause (c)'s per-category
+    policy gate, both continue to govern exactly as before whenever N5's
+    own kill switch is off — this clause narrows neither, it only adds a
+    separate path that applies when N5 is explicitly on;
+(c) N5 reuses Amendment 1.2.0's veto-window mechanism unchanged — the same
+    system-wide `autonomy_window_seconds` value, and the same PAUSE/EDIT/
+    TAKE OVER resolution paths, apply to an N5-eligible message exactly as
+    they apply to a 1.2.0-eligible one;
+(d) every N5 send is recorded with its own distinct `autonomous_source`
+    value, distinguishable in the operator UI and the audit trail from
+    both Amendment 1.2.0 and Amendment 1.1.0 sends. This exception does
+    not weaken Article V's traceability requirement: prompt version,
+    generation model/configuration, timestamps, and (when retrieval was
+    attempted) the retrieval run remain captured even though no qualifying
+    evidence is required to authorize the send itself;
+(e) this exception is reachable only while a clear, human-visible
+    disclaimer already informs any customer-facing user that the
+    conversation is a fictional technical demonstration, not a real
+    institution or service — the exception is void the moment that
+    disclaimer is absent from the customer-facing entry point;
+(f) this exception does not authorize any new persisted customer identity,
+    real payment, or real booking behavior — those remain governed by
+    their own existing constraints (Article VI, the
+    dynamic-appointment-availability package's own scope limits) unchanged
+    by this amendment;
+(g) this exception is independent of, and does not narrow or widen,
+    Amendment 1.2.0's or 1.1.0's own exceptions — each remains governed
+    entirely by its own original terms outside of N5's own kill switch
+    being on.
 
 **Prior narrow exception (Amendment 1.1.0, human decision 2026-08-18):** the
 simulated identity/payment-confirmation script belonging to the

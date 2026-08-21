@@ -26,6 +26,7 @@ from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
 from customer_care.shared.schemas import ConversationSummaryOut, OperatorMessageOut, OperatorSendIn
 from customer_care.shared.settings import get_settings
+from customer_care.shared.settings_service import get_system_settings
 
 router = APIRouter(prefix="/operator", tags=["Operator"])
 
@@ -55,7 +56,7 @@ def pending_autonomous_send_summaries(session: DbSession, conversation_ids: list
     if not conversation_ids:
         return {}
     rows = session.scalars(select(PendingAutonomousSend).where(PendingAutonomousSend.conversation_id.in_(conversation_ids), PendingAutonomousSend.status == "PENDING")).all()
-    return {row.conversation_id: {"id": row.id, "category": row.category, "resolves_at": row.resolves_at} for row in rows}
+    return {row.conversation_id: {"id": row.id, "category": row.category, "mechanism": row.mechanism, "resolves_at": row.resolves_at} for row in rows}
 
 
 def unread_customer_message_counts(session: DbSession, conversation_ids: list[UUID]) -> dict[UUID, int]:
@@ -109,7 +110,7 @@ def pending_autonomous_send_fields(session: DbSession, conversation: Conversatio
     if not pending:
         return {"pending_autonomous_send": None}
     generation = session.get(AIGeneration, pending.generation_id)
-    return {"pending_autonomous_send": {"id": pending.id, "category": pending.category, "resolves_at": pending.resolves_at, "draft_text": generation.draft_text if generation else ""}}
+    return {"pending_autonomous_send": {"id": pending.id, "category": pending.category, "mechanism": pending.mechanism, "resolves_at": pending.resolves_at, "draft_text": generation.draft_text if generation else ""}}
 
 
 @router.get("/runtime-config")
@@ -119,35 +120,34 @@ def runtime_config(operator: CurrentOperator) -> dict:
 
 
 def autonomy_settings_dict(settings: SystemSettings) -> dict:
-    return {"window_seconds": settings.autonomy_window_seconds, "kill_switch_enabled": settings.autonomy_kill_switch_enabled, "updated_at": settings.updated_at}
-
-
-def get_system_settings(session: DbSession) -> SystemSettings:
-    """The migration that creates `system_settings` also seeds its one
-    singleton row — a missing row here means that migration never ran,
-    not a legitimate empty-settings state."""
-    settings = session.get(SystemSettings, True)
-    if not settings:
-        raise api_error(500, "SETTINGS_MISSING", "system_settings singleton row is missing")
-    return settings
+    return {
+        "window_seconds": settings.autonomy_window_seconds,
+        "kill_switch_enabled": settings.autonomy_kill_switch_enabled,
+        # 011 (Amendment 1.3.0, N5): independent of kill_switch_enabled above.
+        "n5_kill_switch_enabled": settings.n5_kill_switch_enabled,
+        "automatic_trigger_idle_seconds": settings.automatic_trigger_idle_seconds,
+        "updated_at": settings.updated_at,
+    }
 
 
 @router.get("/autonomy-settings")
 def get_autonomy_settings(operator: CurrentOperator, session: DbSession) -> dict:
-    """010/GA-3, GA-5, T17."""
+    """010/GA-3, GA-5, T17; 011 adds n5_kill_switch_enabled/automatic_trigger_idle_seconds."""
     return autonomy_settings_dict(get_system_settings(session))
 
 
 class SetAutonomySettingsIn(BaseModel):
     window_seconds: int | None = None
     kill_switch_enabled: bool | None = None
+    n5_kill_switch_enabled: bool | None = None
+    automatic_trigger_idle_seconds: int | None = None
 
 
 @router.post("/autonomy-settings")
 def set_autonomy_settings(payload: SetAutonomySettingsIn, operator: CurrentOperator, session: DbSession) -> dict:
-    """010/GA-3, GA-5, T17. Either field may be omitted to change only the
-    other. `window_seconds=0` is explicitly allowed (Constitution
-    Amendment 1.2.0 clause (d) — immediate send)."""
+    """010/GA-3, GA-5, T17. 011 adds two more independently-omittable
+    fields, same pattern. `window_seconds=0` is explicitly allowed
+    (Constitution Amendment 1.2.0 clause (d) — immediate send)."""
     settings = get_system_settings(session)
     if payload.window_seconds is not None:
         if payload.window_seconds < 0:
@@ -159,6 +159,16 @@ def set_autonomy_settings(payload: SetAutonomySettingsIn, operator: CurrentOpera
         before_switch = settings.autonomy_kill_switch_enabled
         settings.autonomy_kill_switch_enabled = payload.kill_switch_enabled
         record_event(session, "autonomy.kill_switch_toggled", "OPERATOR", actor_id=operator.id, payload={"before": before_switch, "after": payload.kill_switch_enabled})
+    if payload.n5_kill_switch_enabled is not None:
+        before_n5 = settings.n5_kill_switch_enabled
+        settings.n5_kill_switch_enabled = payload.n5_kill_switch_enabled
+        record_event(session, "autonomy.n5_kill_switch_toggled", "OPERATOR", actor_id=operator.id, payload={"before": before_n5, "after": payload.n5_kill_switch_enabled})
+    if payload.automatic_trigger_idle_seconds is not None:
+        if payload.automatic_trigger_idle_seconds < 0:
+            raise api_error(422, "INVALID_IDLE_SECONDS", "automatic_trigger_idle_seconds must be >= 0")
+        before_idle = settings.automatic_trigger_idle_seconds
+        settings.automatic_trigger_idle_seconds = payload.automatic_trigger_idle_seconds
+        record_event(session, "autonomy.idle_seconds_changed", "OPERATOR", actor_id=operator.id, payload={"before_seconds": before_idle, "after_seconds": payload.automatic_trigger_idle_seconds})
     settings.updated_at = datetime.now(UTC)
     settings.updated_by_operator_id = operator.id
     session.commit()

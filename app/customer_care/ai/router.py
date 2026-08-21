@@ -8,7 +8,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT, GenerationResult, configured_generation_provider
+from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT, UNGOVERNED_N5_PROMPT_VERSION, UNGOVERNED_N5_SYSTEM_PROMPT, GenerationResult, configured_generation_provider
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
@@ -23,6 +23,7 @@ from customer_care.scheduling.guided_booking import (
 )
 from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
+from customer_care.shared.settings_service import get_system_settings
 
 router = APIRouter(tags=["Operator AI"])
 
@@ -39,10 +40,6 @@ NAMED_RESOLVERS: dict[str, Callable[[DbSession, str], DynamicResolution | tuple[
     "appointment_availability": resolve_appointment_availability,
     "price_lookup": resolve_price_lookup,
 }
-
-# V2-7: fixed product behavior (spec.md), not an operator-tunable setting.
-AUTOMATIC_TRIGGER_IDLE_SECONDS = 8
-
 
 class DraftIn(BaseModel):
     selected_message_ids: list[UUID] = []
@@ -489,8 +486,9 @@ def automatic_draft_status(session: DbSession, conversation: Conversation) -> tu
         return False, None
     if not assigned_operator_id(session, conversation.id):
         return False, None
+    idle_seconds = get_system_settings(session).automatic_trigger_idle_seconds
     elapsed = (datetime.now(UTC) - conversation.last_customer_activity_at).total_seconds()
-    remaining = max(0, round(AUTOMATIC_TRIGGER_IDLE_SECONDS - elapsed))
+    remaining = max(0, round(idle_seconds - elapsed))
     return True, remaining
 
 
@@ -501,7 +499,8 @@ def _uncovered_customer_run(session: DbSession, conversation: Conversation) -> t
     assignment status. Returns None if there is nothing new to draft on."""
     if not conversation.last_customer_activity_at:
         return None
-    if datetime.now(UTC) - conversation.last_customer_activity_at < timedelta(seconds=AUTOMATIC_TRIGGER_IDLE_SECONDS):
+    idle_seconds = get_system_settings(session).automatic_trigger_idle_seconds
+    if datetime.now(UTC) - conversation.last_customer_activity_at < timedelta(seconds=idle_seconds):
         return None
     newest_customer = session.scalar(select(Message).where(Message.conversation_id == conversation.id, Message.author_type == "CUSTOMER").order_by(Message.created_at.desc()))
     if not newest_customer or newest_customer.id == conversation.auto_draft_covers_through_message_id:
@@ -566,26 +565,68 @@ def evaluate_unclaimed_autonomous_trigger(session: DbSession, conversation: Conv
         pass
 
 
-def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, conversation: Conversation) -> None:
-    """010/GA-2, GA-3: the single point where category policy, the kill
-    switch, and the ANSWER/evidence gate all compose. Called from both
-    trigger-evaluation functions above — neither duplicates this logic.
-    A no-op (no PendingAutonomousSend row) for any generation this
-    doesn't apply to; the generation itself is otherwise unaffected,
-    exactly like today's automatic-draft behavior for a category with no
-    autonomy policy."""
-    if generation.trigger != "AUTOMATIC":
-        return
-    if generation.status != "ANSWER" or not generation.category_slug:
-        return
-    settings = session.get(SystemSettings, True)
-    if not settings or not settings.autonomy_kill_switch_enabled:
-        return
-    category = session.get(Category, generation.category_slug)
-    if not category or not category.autonomy_enabled:
-        return
-    window_seconds = settings.autonomy_window_seconds
+def generate_ungoverned_reply(session: DbSession, conversation: Conversation, prior_generation: AIGeneration) -> AIGeneration:
+    """011 (Constitution Amendment 1.3.0, N5): produces a customer-facing
+    reply with no retrieval-evidence requirement and no ABSTAIN option —
+    the model always returns some text. A separate, new AIGeneration row
+    (not a mutation of prior_generation), chained via prior_generation_id
+    to the evidence-gated attempt that preceded it, reusing its own
+    retrieval_run_id for Article V traceability without a second retrieval
+    call (plan.md §3). Never attaches AIGenerationSource rows — there is no
+    evidence to attribute."""
+    started = perf_counter()
+    selected_message_ids = session.scalars(select(MessageSelection.message_id).where(MessageSelection.ai_generation_id == prior_generation.id)).all()
+    selected_messages = sorted(session.scalars(select(Message).where(Message.id.in_(selected_message_ids))).all(), key=lambda row: row.created_at) if selected_message_ids else []
+    history = [{"role": row.author_type.lower(), "content": row.body} for row in selected_messages]
+    provider = configured_generation_provider()
+    text = provider.generate_ungoverned(history, UNGOVERNED_N5_SYSTEM_PROMPT)
+    generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=prior_generation.triggering_message_id, retrieval_run_id=prior_generation.retrieval_run_id, prior_generation_id=prior_generation.id, operator_id=prior_generation.operator_id, status="ANSWER", draft_text=text, abstention_reason=None, provider="ungoverned-n5", model=provider.model, prompt_version=UNGOVERNED_N5_PROMPT_VERSION, duration_ms=round((perf_counter() - started) * 1000), trigger="AUTOMATIC")
+    session.add(generation)
+    session.flush()
+    record_event(session, "ai.draft_generated", "SYSTEM", conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "provider": "ungoverned-n5", "prior_generation_id": str(prior_generation.id)})
+    record_event(session, "autonomy.n5_ungoverned_reply_generated", "SYSTEM", conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "prior_generation_id": str(prior_generation.id)})
+    session.commit()
+    return generation
+
+
+def _open_pending(session: DbSession, generation: AIGeneration, conversation: Conversation, *, category: str | None, mechanism: str, window_seconds: int) -> None:
+    """010/011: row-construction logic shared by both the governed
+    (category-matched) and ungoverned (N5) branches of
+    maybe_open_autonomous_window() below — same fields either way, only
+    category/mechanism differ."""
     opens_at = datetime.now(UTC)
-    pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category.slug, window_seconds=window_seconds, opens_at=opens_at, resolves_at=opens_at + timedelta(seconds=window_seconds), status="PENDING")
+    pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category, mechanism=mechanism, window_seconds=window_seconds, opens_at=opens_at, resolves_at=opens_at + timedelta(seconds=window_seconds), status="PENDING")
     session.add(pending)
     session.commit()
+
+
+def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, conversation: Conversation) -> None:
+    """010/GA-2, GA-3 + 011 (Amendment 1.3.0, N5): the single point where
+    category policy, both kill switches, and the ANSWER/evidence gate all
+    compose. Called from both trigger-evaluation functions above — neither
+    duplicates this logic. A no-op (no PendingAutonomousSend row) for any
+    generation neither branch applies to; the generation itself is
+    otherwise unaffected, exactly like today's automatic-draft behavior
+    for a category with no autonomy policy.
+
+    Two independent branches, evaluated in order — N5 only ever fills a
+    gap the governed branch leaves open, never duplicates or overrides an
+    already-grounded answer (plan.md §4, spec.md N5-2)."""
+    if generation.trigger != "AUTOMATIC":
+        return
+    settings = session.get(SystemSettings, True)
+    if not settings:
+        return
+
+    # Governed branch (010, Amendment 1.2.0) — unchanged conditions.
+    if generation.status == "ANSWER" and generation.category_slug and settings.autonomy_kill_switch_enabled:
+        category = session.get(Category, generation.category_slug)
+        if category and category.autonomy_enabled:
+            _open_pending(session, generation, conversation, category=category.slug, mechanism="governed_autonomy", window_seconds=settings.autonomy_window_seconds)
+            return  # a real grounded answer already exists — N5 adds no value here
+
+    # Ungoverned branch (011, Amendment 1.3.0) — only reached when the
+    # governed branch above did not already open a window.
+    if settings.n5_kill_switch_enabled:
+        ungoverned = generate_ungoverned_reply(session, conversation, generation)
+        _open_pending(session, ungoverned, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)

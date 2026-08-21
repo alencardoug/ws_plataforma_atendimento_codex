@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-08-20
+Last updated: 2026-08-21
 
 ## Lifecycle and authority
 
@@ -45,6 +45,29 @@ Last updated: 2026-08-20
   additions caused (found and fixed the same session) and one
   found-but-unrelated pre-existing `v3.spec.ts` fragility left
   undisturbed.
+- **Ungoverned fictional-demo autonomy (`specs/011-ungoverned-fictional-demo-autonomy-n5`)
+  is DONE (2026-08-21, D-042).** A second, independent autonomy
+  exception, ratifying Constitution Amendment 1.3.0: when N5's own kill
+  switch is on (default off, entirely separate from Amendment 1.2.0's
+  switch), every AUTOMATIC-eligible customer message gets an autonomous
+  reply with no evidence/category requirement — additive only, never
+  overriding an already-grounded governed (010) answer. Justified solely
+  by this project's nature as a technical-portfolio/interview-
+  demonstration system, not a real clinical service; Amendment 1.3.0
+  clause (e) makes the exception void without the customer-facing
+  "fictional technical demonstration" disclaimer this cycle added as a
+  prerequisite (`frontend/src/main.tsx`'s `.disclaimer-banner`, on both
+  the customer landing page and the operator login screen). Also made
+  the automatic-trigger idle debounce (`AUTOMATIC_TRIGGER_IDLE_SECONDS`,
+  previously a fixed constant) operator-configurable
+  (`system_settings.automatic_trigger_idle_seconds`), shared by both
+  autonomy mechanisms. Implemented and closed with credential-backed
+  evidence in one session, including a real live browser verification —
+  see `specs/011-ungoverned-fictional-demo-autonomy-n5/acceptance.md` for
+  the full record, including one real Playwright regression this cycle's
+  own UI addition caused (found and fixed the same session) and one
+  update to `v7.spec.ts`'s already-known pre-existing intermittency
+  (found to also reproduce in isolation, not only full-suite context).
 
 ## V1 baseline
 
@@ -551,14 +574,20 @@ authorization discipline):**
    to fix without separate authorization.
 
 Real appointment booking/holds/payment/identity, `insurance_lookup`/
-`convenio`, any extension of Constitution Amendment 1.1.0, and a
-scheduling CRUD remain separate future work, unchanged by this cycle.
-005/006/007/008/009 are all implemented but **not yet committed** as of
-this writing (this session's work, pending the human's explicit commit
-request). Batch the commit and the deploy together per this project's
-standing deploy-cadence practice once requested — but 007 should not be
-presented as DONE/deployable until its remaining `v7.spec.ts`
-intermittency is resolved or explicitly accepted by the human.
-`ROADMAP.md`'s priority ordering names V4 (N3 governed autonomy)/V9 (N4
-HOTL) with real frontend support as the next decision point, then
-Telegram.
+`convenio`, and a scheduling CRUD remain separate future work.
+
+**Everything through package 011 is committed, pushed, and deployed to
+production** as of 2026-08-21 (005-011, D-040/D-041/D-042, migrations
+through `20260821_0005`) — see "Production deployment" further below in
+this file for the deploy record. 007 remains presented as **CONDITIONAL**,
+not DONE, in every doc that references it — its `v7.spec.ts` intermittency
+is still unresolved (see `analysis.md` update in package 011: it now also
+reproduces in isolation, not only full-suite context).
+
+Constitution Amendment 1.2.0 (010, N3/N4 governed autonomous response) and
+Amendment 1.3.0 (011, N5 ungoverned fictional-demo autonomy) are both
+implemented and closed — see their own packages' `acceptance.md`. Both
+autonomy mechanisms are default-off at every level in production; no
+behavior changes for a real visitor until an operator explicitly enables
+a category/kill switch. `ROADMAP.md`'s priority ordering names Telegram as
+the next open item, unless a new cycle is authorized first.
