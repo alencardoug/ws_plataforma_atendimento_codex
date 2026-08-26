@@ -15,3 +15,6 @@ frontend/vite.config.d.ts
 .firebase/
 firebase-debug.log
 app/.venv312/
+
+# Backups locais do Postgres (nao versionar)
+backups/
