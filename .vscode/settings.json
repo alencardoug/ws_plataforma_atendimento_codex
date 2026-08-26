@@ -1,0 +1,4 @@
+{
+    // avisa e oferece criar uma branch nova se você tentar commitar na main
+    "git.branchProtection": ["main"]
+}
