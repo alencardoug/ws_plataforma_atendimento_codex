@@ -22,16 +22,20 @@ def resolve_elapsed_autonomous_sends(session: Session) -> None:
     Lazily evaluated as a side effect of the operator's queue poll and
     conversation-detail poll (same no-scheduler discipline as V2-7's own
     evaluate_automatic_trigger()) — never a background worker. The
-    `WHERE status='PENDING'` guard on the resolving UPDATE (via the ORM's
-    own optimistic re-check below) is the actual double-send guard, not a
-    separate lock — a second concurrent call finds nothing left to
-    resolve for a row this call already claimed."""
-    elapsed = session.scalars(select(PendingAutonomousSend).where(PendingAutonomousSend.status == "PENDING", PendingAutonomousSend.resolves_at <= datetime.now(UTC))).all()
+    double-send guard is a `SELECT ... FOR UPDATE SKIP LOCKED` row lock:
+    a second concurrent caller cannot even see a row this call has
+    claimed, so it never re-sends it. (An earlier version relied only on
+    an optimistic `session.refresh()` re-check — under READ COMMITTED that
+    does not serialize N callers who all read `status='PENDING'` in the
+    same instant, and a burst of piled-up polls then sent the same draft
+    several times. Found on prod, 2026-08-27 — see DECISIONS.md D-044.)"""
+    elapsed = session.scalars(
+        select(PendingAutonomousSend)
+        .where(PendingAutonomousSend.status == "PENDING", PendingAutonomousSend.resolves_at <= datetime.now(UTC))
+        .with_for_update(skip_locked=True)
+    ).all()
     for pending in elapsed:
-        # Re-check status under the same transaction immediately before
-        # acting — closes the window between the SELECT above and this
-        # UPDATE for two callers racing on the same row (queue poll and
-        # detail poll, potentially from different operators).
+        # Belt-and-braces re-check (the row lock above is the real guard).
         session.refresh(pending)
         if pending.status != "PENDING":
             continue

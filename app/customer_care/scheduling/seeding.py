@@ -295,27 +295,50 @@ def _floor_recently_checked(checked_at: datetime | None, now: datetime) -> bool:
 
 
 def ensure_generalist_floor(session: Session) -> None:
-    """AC-2. Idempotent. Never raises into the caller — any failure is
-    swallowed exactly like `evaluate_automatic_trigger()`'s own
-    `except Exception: pass`, so a seeding hiccup never breaks the
-    operator's queue load. Manages its own commit/rollback (it holds a
-    transaction-scoped advisory lock that must be released promptly).
+    """AC-2. Idempotent. **Must never be able to stall the operator queue
+    poll it rides on** — so it (a) uses a *non-blocking*
+    `pg_try_advisory_xact_lock` (if another request is already doing this,
+    skip this cycle), (b) advances the debounce checkpoint and commits
+    *before* doing any slot work (a failed/slow cycle never causes a retry
+    storm), (c) hard-caps its own `lock_timeout`/`statement_timeout` so a
+    contended INSERT or lock can never hang the request, and (d) swallows
+    every failure. Regression note: an earlier version took a *blocking*
+    advisory lock and did INSERTs inline — a stray long-running seed
+    transaction against the shared DB then made every concurrent poll
+    queue on that lock, holding a connection each, until the SQLAlchemy
+    pool was exhausted and the whole backend 500'd (`QueuePool ... timed
+    out`). See DEPLOYMENT.md / DECISIONS.md D-044.
 
     Tops the generalist specialty's available *future* inventory for the
     AA-9 D+1 and D+7 target business days back up to `AC_FLOOR_TARGET`
-    whenever either has fallen to `AC_FLOOR_MIN` or below. A cheap
-    timestamp gate (`system_settings.availability_floor_checked_at`) keeps
-    it from running a COUNT on every single poll."""
+    whenever either has fallen to `AC_FLOOR_MIN` or below."""
     try:
         settings = get_system_settings(session)
         now = datetime.now(UTC)
         if _floor_recently_checked(settings.availability_floor_checked_at, now):
             return
-        session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _FLOOR_LOCK_KEY})
-        session.refresh(settings)  # re-read under the lock — a concurrent poll may have just done this
+        got_lock = session.execute(text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": _FLOOR_LOCK_KEY}).scalar()
+        if not got_lock:
+            return  # another request already owns this cycle
+        session.refresh(settings)
         if _floor_recently_checked(settings.availability_floor_checked_at, now):
-            session.commit()  # release the lock; nothing to do
+            session.commit()  # release the advisory lock; nothing to do
             return
+        # Advance the debounce checkpoint and release the lock FIRST, so a
+        # slow/failed top-up below never turns every subsequent poll into a
+        # retry (each of which would take a connection).
+        settings.availability_floor_checked_at = now
+        session.commit()
+    except Exception:
+        session.rollback()
+        return
+
+    try:
+        # Hard caps: nothing on the operator-poll path may wait more than
+        # this on a lock or a statement, regardless of contention with the
+        # AA-9 button, a bootstrap run, or a slow remote DB.
+        session.execute(text("SET LOCAL lock_timeout = '750ms'"))
+        session.execute(text("SET LOCAL statement_timeout = '3s'"))
         specialty_id = _generalist_specialty_id(session)
         today = _today_sao_paulo()
         d1 = next_business_day_sql(session, today + timedelta(days=1))
@@ -327,7 +350,6 @@ def ensure_generalist_floor(session: Session) -> None:
             before[day.isoformat()] = have
             if have <= AC_FLOOR_MIN:
                 created += create_slots_on(session, day, AC_FLOOR_TARGET - have, specialty_id)
-        settings.availability_floor_checked_at = now
         if created:
             record_event(
                 session,
