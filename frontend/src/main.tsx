@@ -339,9 +339,15 @@ export function CustomerPage() {
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    await api<Message>(`/public/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ body: text }) }, token);
+    const sent = await api<Message>(`/public/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ body: text }) }, token);
     setText("");
-    await refresh();
+    // Show the sent message immediately — do NOT block on refresh(): the
+    // customer's GET poll may now run an autonomous-reply generation
+    // (~seconds) inline, and awaiting it here delayed the compose box
+    // clearing and the message appearing (regression, 2026-08-27). The
+    // 2 s interval poll picks up the server state (incl. the reply).
+    setConversation((prev) => (prev ? { ...prev, messages: [...prev.messages, sent] } : prev));
+    void refresh().catch(() => undefined);
   };
 
   const close = async () => {

@@ -183,10 +183,13 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
     advance_guided_booking(session, conversation, payload.body)  # 005/D-033 — same principle, GB's own parallel N2-draft flow; no-op if AA-10 just took over
     session.commit()
     session.refresh(message)
-    # D-044 follow-on: with idle_seconds=0 / window_seconds=0 this
-    # generates and delivers the autonomous reply within this same
-    # request; otherwise the customer's subsequent polls/heartbeats do.
-    _drive_unclaimed_autonomy(session, conversation)
+    # D-044 follow-on: the autonomous reply is driven by the customer's
+    # subsequent GET polls / typing heartbeats — deliberately NOT here.
+    # `evaluate_unclaimed_autonomous_trigger()` runs a full RAG+LLM
+    # generation (~seconds); doing it inline in this POST made the
+    # customer's own "send" wait on it before the compose box cleared
+    # (visible regression, reported 2026-08-27). The ~2 s GET poll picks it
+    # up immediately after.
     return message
 
 
