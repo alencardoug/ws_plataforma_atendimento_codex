@@ -131,7 +131,7 @@ git config --global pull.ff only                 # 'git pull' nunca cria merge-c
 git config --global fetch.prune true             # 'git fetch' remove refs de branches remotas apagadas
 git config --global rebase.autoStash true        # 'git rebase' guarda/repõe mudanças não commitadas sozinho
 ```
-- [ ] Execução dos códigos
+- [x] Execução dos códigos
 
 **Só este projeto** — troque `--global` por `--local` rodando **dentro da pasta
 do repo**:
@@ -238,7 +238,7 @@ JSON
 
 Use **A ou B**, não as duas. A é mais simples de entender; B é o caminho que o
 GitHub está priorizando.
-- [ ] Configurar github na opção B.
+- [x] Configurar github na opção B.
 
 ### 2.4 Ajustar as opções de merge do repositório
 
@@ -253,7 +253,7 @@ gh api -X PATCH repos/alencardoug/ws_plataforma_atendimento_codex \
 **Por quê:** `allow_merge_commit=false` casa com `required_linear_history`;
 `delete_branch_on_merge=true` apaga a branch automaticamente após o merge (menos
 lixo).
-- [ ] Ajustar repositório atual.
+- [x] Ajustar repositório atual.
 
 ### 2.5 Conferir
 
@@ -263,7 +263,7 @@ gh api repos/alencardoug/ws_plataforma_atendimento_codex/branches/main/protectio
 #   git switch main && git commit --allow-empty -m "teste" && git push origin main   → "protected branch"
 #   git reset --hard origin/main   (desfaz o commit de teste local)
 ```
-- [ ] Testar repositório atual
+- [x] Testar repositório atual
 
 ### 2.6 Como afrouxar temporariamente (emergência)
 
@@ -336,7 +336,7 @@ git rebase origin/main                              # reaplica seus commits por 
 # resolva conflitos se houver: edite, 'git add <arquivo>', 'git rebase --continue'
 git push --force-with-lease --force-if-includes     # a branch foi reescrita pelo rebase; publica por cima
 ```
-- [ ] fetch, rebase, push force with lease
+- [x] fetch, rebase, push force with lease
 
 - `--force-with-lease` (e **não** `--force`): só sobrescreve se ninguém empurrou
   algo que você ainda não viu — protege contra apagar trabalho.
@@ -384,6 +384,7 @@ seu histórico local. Ligue por config para não depender de lembrar:
 ```bash
 git config --global push.useForceIfIncludes true    # todo --force-with-lease já vem com a checagem extra
 ```
+- [x] Configurar ForceIfIncludes
 
 Opcional — um atalho só para o caso "reescrevi de propósito":
 
@@ -392,7 +393,7 @@ git config --global alias.pushf 'push --force-with-lease --force-if-includes'
 #   reescreveu histórico (rebase/amend/squash) → git pushf
 #   só acrescentou commits                     → git push  (não precisa de força)
 ```
-- [ ] (opcional) push.useForceIfIncludes / alias pushf
+- [] (opcional) push.useForceIfIncludes / alias pushf
 
 ### Fase 3 — Abrir a Pull Request
 
