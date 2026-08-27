@@ -257,6 +257,10 @@ class SystemSettings(Base):
     # 011: replaces the fixed AUTOMATIC_TRIGGER_IDLE_SECONDS constant;
     # shared by both N3/N4 and N5's trigger-evaluation entry point.
     automatic_trigger_idle_seconds: Mapped[int] = mapped_column(Integer, default=8)
+    # 012 (AC-2): debounce bookkeeping for ensure_generalist_floor(), the
+    # low-water-mark agenda top-up evaluated lazily from list_conversations().
+    # NULL = never checked. Written only by that function, never operator-set.
+    availability_floor_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=text("now()"))
     updated_by_operator_id: Mapped[UUID | None] = mapped_column(ForeignKey("customer_service.operator_users.id"))
 

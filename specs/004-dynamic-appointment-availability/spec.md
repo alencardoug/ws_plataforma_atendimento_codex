@@ -276,6 +276,18 @@ action:
    button is not about any one customer), audited like every other
    operator action (AA-7).
 
+   > **Superseded in part, 2026-08-27 (`DECISIONS.md` D-044,
+   > `specs/012-appointment-availability-continuity-and-booking-action/`
+   > spec.md §4):** this button is no longer the *only* `schedule_slots`
+   > write path. Two additional **query-independent** entry points now
+   > exist — a startup/admin bootstrap fill (`run_bootstrap_seed()`) and a
+   > low-water-mark top-up (`ensure_generalist_floor()`) evaluated lazily
+   > from the operator queue poll. Clarification item 6 (second round,
+   > below) is **preserved intact**: no customer/operator *query* — no RAG
+   > retrieval, resolver, draft call, or anonymous endpoint — ever creates
+   > a slot; a negative test re-proves it. AA-10's containment is
+   > untouched.
+
 ### AA-10 — Simulated identity/payment-confirmation script (added 2026-08-18, Constitution Amendment 1.1.0)
 
 A fixed, deterministic, scripted conversation flow that plays out after a

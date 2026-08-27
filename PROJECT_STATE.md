@@ -702,3 +702,69 @@ running either file's full suite, check/temporarily clear
 `n5_kill_switch_enabled` and restore it afterward, matching the exact
 value found (`autonomy_kill_switch_enabled=false`, `n5_kill_switch_enabled=true`
 as of 2026-08-21).
+
+## Appointment-availability continuity + operator booking-offer action (`specs/012-…`) — implemented 2026-08-27 (D-044), closure CONDITIONAL
+
+Human-reported from a real conversation ("Olá" → "Quero agendar uma
+consulta") against a freshly rebuilt local Docker stack: the customer got
+an autonomous free-form "Claro, me informe nome/telefone/convênio…" reply
+that never books. Root cause confirmed by direct inspection: retrieval
+correctly ranks `QA-011` (`dynamic_resolver=appointment_availability`)
+rank-1, but `resolve_appointment_availability()` raised
+`DynamicResolutionError` → `ABSTAIN`/`DYNAMIC_DATA_UNAVAILABLE` because a
+fresh stack has **zero** seeded `schedule_slots` (AA-9 seeding is an
+operator button that was never clicked), and N5 — correctly, per
+Amendment 1.3.0 clause (b) — masked the abstention with
+`generate_ungoverned_reply()`. **N5 is left unchanged.**
+
+Two changes:
+
+- **AC (Availability Continuity):** keep the simulated agenda populated
+  via a **query-independent** reseed only. A bootstrap fill
+  (`run_bootstrap_seed()` = `ensure_wide_availability()` +
+  `ensure_seed_availability()`, both unchanged) runs from an env-gated
+  (`RUN_BOOTSTRAP_SEED`) FastAPI startup hook and a `python -m
+  customer_care.scheduling.bootstrap_seed` admin command. A low-water-mark
+  top-up (`ensure_generalist_floor()`) is evaluated lazily from
+  `list_conversations()` — the operator queue poll, the same non-query
+  lazy hook feature 010 already uses — topping generalist D+1/D+7 back to
+  8 available future slots when at/below 2 (advisory lock + 60 s
+  timestamp debounce, never raises into the caller). No resolver / draft /
+  anonymous-endpoint path gains a write; `specs/004` clarification item 6
+  is preserved and re-proven by a negative test.
+- **OB (Operator Booking-Offer action):** `POST
+  /operator/conversations/{id}/booking-offer-draft` + a "Gerar oferta de
+  agendamento" button between "Enviar" and "Encerrar conversa" in the
+  operator conversation panel. Runs the `appointment_availability`
+  resolver directly (bypassing RAG rank order) into an ordinary N2 draft
+  (`trigger='MANUAL_BOOKING_OFFER'` — never in
+  `maybe_open_autonomous_window()`'s eligible set, so it can never be
+  autonomously sent, Amendment 1.2.0 clause (b)); offered rows are
+  persisted so the customer's next slot-choice reply resolves through the
+  existing guided-booking path.
+
+**Authority-order note:** narrowly supersedes one clause of `specs/004`
+AA-9 ("the only place `schedule_slots` is written to … never
+automatically") — two additional write entry points now exist, both
+query-independent; a forward pointer was added at `specs/004/spec.md`
+AA-9 item 5. No Constitution Article or Amendment is affected;
+`booking_script/` is byte-unchanged.
+
+Verdict **GO for the code; closure CONDITIONAL** on a credential-backed
+Playwright (`frontend/e2e/v12.spec.ts` authored, not run) + smoke run +
+live browser check. This session: backend `pytest` 290 pass / 0 fail (21
+new tests; the 26 first-pass ERRORs were pre-existing 2026-08-21
+shared-DB fixture residue — orphan `ai_generations`/autonomous `messages`
+rows referencing `t010-*`/`t011-*` fixture categories — root-caused,
+cleared, both `test_governed_autonomy.py` and `test_ungoverned_n5.py`
+then 27/27), `ruff`/`mypy` clean; frontend `eslint`/`tsc`/`vitest`
+(25)/`build` clean; app boots with the new route live and the startup
+hook a safe no-op without the env flag. Full record in
+`specs/012-appointment-availability-continuity-and-booking-action/acceptance.md`
+and `analysis.md` §7.
+
+**Operational note:** in addition to the `n5_kill_switch_enabled` trap
+above, prior interrupted runs can leave `t010-*`/`t011-*` fixture
+categories with dangling `ai_generations`/autonomously-sent `messages`
+rows, which makes those two files' fixture teardown FK-fail (reported as
+`ERROR`, not `FAIL`). Clear that residue before a full-suite run.

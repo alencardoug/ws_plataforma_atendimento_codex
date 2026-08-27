@@ -12,7 +12,7 @@ never the generalist specialty most customer queries actually fall back
 to (AA-3a's default)."""
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -20,8 +20,10 @@ from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from customer_care.audit.service import record_event
 from customer_care.scheduling.availability import GENERALIST_SLUG
 from customer_care.scheduling.models import Professional, ProfessionalSpecialty, ScheduleSlot, Specialty
+from customer_care.shared.settings_service import get_system_settings
 
 SAO_PAULO = ZoneInfo("America/Sao_Paulo")
 DEFAULT_UNIT_ID = "10000000-0000-0000-0000-000000000001"
@@ -243,3 +245,122 @@ def ensure_seed_availability(session: Session) -> SeedResult:
     created_d1 = create_slots_on(session, d1, TARGET_D1 - count_d1, specialty_id) if count_d1 < TARGET_D1 else 0
     created_d7 = create_slots_on(session, d7, TARGET_D7 - count_d7, specialty_id) if count_d7 < TARGET_D7 else 0
     return SeedResult(created_d1=created_d1, created_d7=created_d7, already_sufficient=False)
+
+
+# ---------------------------------------------------------------------------
+# 012 / AC-2 — low-water-mark generalist-agenda top-up.
+#
+# Query-independent by construction: called only from list_conversations()
+# (the operator queue poll), never from a resolver, a draft-generation
+# call, or any anonymous-customer endpoint. This is the same lazy,
+# no-scheduler evaluation point feature 010 already established
+# (evaluate_unclaimed_autonomous_trigger). specs/004 clarification item 6
+# ("no on-demand slot generation as a side effect of a customer/operator
+# query") is preserved — this creates slots in response to inventory
+# decay, never in response to a question. See
+# specs/012-appointment-availability-continuity-and-booking-action/
+# spec.md §5 AC-2, plan.md §3, DECISIONS.md D-044.
+# ---------------------------------------------------------------------------
+
+AC_FLOOR_MIN = 2  # "sempre que sobrar 2 ou 1 agenda somente" (human, 2026-08-27)
+AC_FLOOR_TARGET = 8  # headroom so the top-up is not re-triggered every poll
+AC_FLOOR_CHECK_INTERVAL_SECONDS = 60  # soft debounce; the advisory lock is the hard guarantee
+_FLOOR_LOCK_KEY = 725017003  # distinct from _SEED_LOCK_KEY / _WIDE_SEED_LOCK_KEY
+
+
+def _count_available_future_on(session: Session, target_date: date, specialty_id: UUID, now: datetime) -> int:
+    """Like `count_available_on()` but also excludes slots already in the
+    past — the AA-9 button wants whole-day counts, AC-2 wants only what a
+    customer could still actually book right now."""
+    day_start = datetime(target_date.year, target_date.month, target_date.day, tzinfo=SAO_PAULO)
+    day_end = day_start + timedelta(days=1)
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(ScheduleSlot)
+            .where(
+                ScheduleSlot.status == "available",
+                ScheduleSlot.specialty_id == specialty_id,
+                ScheduleSlot.starts_at >= day_start,
+                ScheduleSlot.starts_at < day_end,
+                ScheduleSlot.starts_at >= now,
+            )
+        )
+        or 0
+    )
+
+
+def _floor_recently_checked(checked_at: datetime | None, now: datetime) -> bool:
+    return checked_at is not None and (now - checked_at).total_seconds() < AC_FLOOR_CHECK_INTERVAL_SECONDS
+
+
+def ensure_generalist_floor(session: Session) -> None:
+    """AC-2. Idempotent. Never raises into the caller — any failure is
+    swallowed exactly like `evaluate_automatic_trigger()`'s own
+    `except Exception: pass`, so a seeding hiccup never breaks the
+    operator's queue load. Manages its own commit/rollback (it holds a
+    transaction-scoped advisory lock that must be released promptly).
+
+    Tops the generalist specialty's available *future* inventory for the
+    AA-9 D+1 and D+7 target business days back up to `AC_FLOOR_TARGET`
+    whenever either has fallen to `AC_FLOOR_MIN` or below. A cheap
+    timestamp gate (`system_settings.availability_floor_checked_at`) keeps
+    it from running a COUNT on every single poll."""
+    try:
+        settings = get_system_settings(session)
+        now = datetime.now(UTC)
+        if _floor_recently_checked(settings.availability_floor_checked_at, now):
+            return
+        session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _FLOOR_LOCK_KEY})
+        session.refresh(settings)  # re-read under the lock — a concurrent poll may have just done this
+        if _floor_recently_checked(settings.availability_floor_checked_at, now):
+            session.commit()  # release the lock; nothing to do
+            return
+        specialty_id = _generalist_specialty_id(session)
+        today = _today_sao_paulo()
+        d1 = next_business_day_sql(session, today + timedelta(days=1))
+        d7 = next_business_day_sql(session, today + timedelta(days=7))
+        before: dict[str, int] = {}
+        created = 0
+        for day in (d1, d7):
+            have = _count_available_future_on(session, day, specialty_id, now)
+            before[day.isoformat()] = have
+            if have <= AC_FLOOR_MIN:
+                created += create_slots_on(session, day, AC_FLOOR_TARGET - have, specialty_id)
+        settings.availability_floor_checked_at = now
+        if created:
+            record_event(
+                session,
+                "scheduling.availability_floor_topped_up",
+                "SYSTEM",
+                payload={"before": before, "created": created, "target": AC_FLOOR_TARGET, "min": AC_FLOOR_MIN},
+            )
+        session.commit()
+    except Exception:
+        session.rollback()
+
+
+def run_bootstrap_seed(session: Session) -> None:
+    """012 / AC-1. Idempotent stack-startup / admin fill: breadth
+    (`ensure_wide_availability`) plus the exact AA-9 generalist D+1/D+7
+    minimum (`ensure_seed_availability`). Safe to run on every container
+    start — every insert underneath is `ON CONFLICT DO NOTHING`, so a
+    re-run against an already-seeded database creates nothing. Not a
+    request/query side effect: invoked only from the env-gated FastAPI
+    startup hook or `python -m customer_care.scheduling.bootstrap_seed`.
+    See spec.md §5 AC-1, plan.md §2."""
+    wide = ensure_wide_availability(session)
+    floor = ensure_seed_availability(session)
+    record_event(
+        session,
+        "scheduling.availability_bootstrap_seeded",
+        "SYSTEM",
+        payload={
+            "wide_slots_created": wide.slots_created,
+            "specialty_count": wide.specialty_count,
+            "business_day_count": wide.business_day_count,
+            "generalist_d1_created": floor.created_d1,
+            "generalist_d7_created": floor.created_d7,
+        },
+    )
+    session.commit()

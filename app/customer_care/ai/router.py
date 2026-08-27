@@ -51,6 +51,13 @@ class SelectEvidenceIn(BaseModel):
     conversation_id: UUID
 
 
+class BookingOfferDraftIn(BaseModel):
+    # 012 / OB-1: optional free-text hint fed straight into the resolver's
+    # own extract_parameters() (specialty / date / period keywords). Empty
+    # -> resolve on the conversation's trailing customer-message run.
+    manual_search_text: str = ""
+
+
 def evidence_for_generation(session: DbSession, generation: AIGeneration) -> list[dict]:
     hit_ids = session.scalars(select(AIGenerationSource.retrieval_hit_id).where(AIGenerationSource.ai_generation_id == generation.id).order_by(AIGenerationSource.use_order)).all()
     items = [load_evidence(session, hit_id) for hit_id in hit_ids]
@@ -461,6 +468,100 @@ def select_evidence(retrieval_hit_id: UUID, payload: SelectEvidenceIn, operator:
         raise api_error(503, "AI_PROVIDER_UNAVAILABLE", "Evidence selection failed; manual service remains available") from exc
 
 
+def _appointment_availability_hit_id(session: DbSession, evidence: list[Evidence]) -> UUID | None:
+    """The retrieval-hit id of the first evidence item whose matched Q&A is
+    bound to the `appointment_availability` resolver, if any is present in
+    this run — used for best-effort AIGenerationSource attribution on an
+    OB draft (the resolution is valid regardless of rank; attribution
+    mirrors how a dynamic resolution behaves today when its Q&A is not
+    rank-1)."""
+    for item in evidence:
+        if item.knowledge_type != "ADMIN_QA":
+            continue
+        hit = session.get(RetrievalHit, item.retrieval_hit_id)
+        if not hit or not hit.matched_qa_id:
+            continue
+        qa = session.get(QAEntry, hit.matched_qa_id)
+        if qa and qa.dynamic_resolver == "appointment_availability":
+            return item.retrieval_hit_id
+    return None
+
+
+def generate_booking_offer_draft(session: DbSession, operator_id: UUID, conversation: Conversation, manual_search_text: str) -> tuple[AIGeneration, list[dict]]:
+    """012 / OB-2: run the `appointment_availability` resolver directly for
+    this conversation — bypassing RAG rank order — and persist the result
+    as an ordinary operator-reviewed draft. Deterministic, read-only,
+    never LLM-composed. `trigger='MANUAL_BOOKING_OFFER'` is never
+    autonomous-eligible (Constitution Amendment 1.2.0 clause (b)), so this
+    can never send a customer-visible message on its own. See
+    specs/012-…/plan.md §4."""
+    if conversation.status != "ACTIVE" or conversation.effective_mode != "N2":
+        raise api_error(409, "MODE_NOT_ALLOWED", "Draft generation requires an active effective-N2 conversation")
+    trailing = _trailing_customer_messages(session, conversation)
+    query_text = "\n".join([*(row.body for row in trailing), *([manual_search_text] if manual_search_text else [])])
+    triggering_message_id = trailing[-1].id if trailing else None
+    run, evidence = retrieve(session, operator_id=operator_id, query=query_text, purpose="N2_DRAFT", top_k=8, conversation_id=conversation.id, triggering_message_id=triggering_message_id)
+    started = perf_counter()
+    try:
+        offered_rows: Sequence[Any] | None = None
+        dynamic_extra: dict[str, object] | None = None
+        dynamic_cause: str | None = None
+        try:
+            resolution, offered_rows = resolve_appointment_availability(session, query_text)
+            status, draft_text, reason_code = "ANSWER", resolution.pattern_text, None
+            dynamic_extra = {"specialty_slug": resolution.specialty_slug, "slot_count": resolution.slot_count}
+        except DynamicResolutionError as exc:
+            status, draft_text, reason_code = "ABSTAIN", "", "DYNAMIC_DATA_UNAVAILABLE"
+            dynamic_cause = exc.cause
+        generation = AIGeneration(
+            conversation_id=conversation.id,
+            triggering_message_id=triggering_message_id,
+            retrieval_run_id=run.id,
+            operator_id=operator_id,
+            status=status,
+            draft_text=draft_text,
+            abstention_reason=reason_code,
+            provider="dynamic-pattern-resolver",
+            model="not-applicable",
+            prompt_version="not-applicable",
+            duration_ms=round((perf_counter() - started) * 1000),
+            trigger="MANUAL_BOOKING_OFFER",
+            dynamic_pattern_used=status == "ANSWER",
+        )
+        session.add(generation)
+        session.flush()
+        if offered_rows:
+            persist_presented_offers(session, configured_embedding_provider(), generation.id, offered_rows)
+        if status == "ANSWER":
+            hit_id = _appointment_availability_hit_id(session, evidence)
+            if hit_id is not None:
+                session.add(AIGenerationSource(ai_generation_id=generation.id, retrieval_hit_id=hit_id, use_order=1))
+        session.flush()
+        generation.category_slug = derive_category_slug(session, generation)
+        event_type = "ai.draft_abstained" if status == "ABSTAIN" else "ai.draft_generated"
+        record_event(session, event_type, "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "retrieval_run_id": str(run.id), "model": "not-applicable", "duration_ms": generation.duration_ms, "reason_code": reason_code, "trigger": "MANUAL_BOOKING_OFFER"})
+        if dynamic_cause is not None:
+            record_event(session, "ai.dynamic_pattern_fallback", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), "cause": dynamic_cause})
+        else:
+            record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), **(dynamic_extra or {})})
+        session.commit()
+        return generation, [evidence_dict(item) for item in evidence]
+    except Exception as exc:
+        generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=triggering_message_id, retrieval_run_id=run.id, operator_id=operator_id, status="FAILED", draft_text="", abstention_reason="PROVIDER_FAILURE", provider="unavailable", model="unavailable", prompt_version="not-applicable", duration_ms=round((perf_counter() - started) * 1000), trigger="MANUAL_BOOKING_OFFER")
+        session.add(generation)
+        session.commit()
+        raise api_error(503, "AI_PROVIDER_UNAVAILABLE", "Booking-offer generation failed; manual service remains available") from exc
+
+
+@router.post("/operator/conversations/{conversation_id}/booking-offer-draft", status_code=201)
+def booking_offer_draft(conversation_id: UUID, payload: BookingOfferDraftIn, operator: CurrentOperator, session: DbSession) -> dict:
+    conversation = session.get(Conversation, conversation_id)
+    if not conversation or assigned_operator_id(session, conversation_id) != operator.id:
+        raise api_error(403, "FORBIDDEN", "Conversation is not assigned to this operator")
+    generation, evidence = generate_booking_offer_draft(session, operator.id, conversation, payload.manual_search_text.strip())
+    return generation_dict(session, generation, evidence)
+
+
 TYPING_GRACE_SECONDS = 5
 
 
@@ -492,6 +593,22 @@ def automatic_draft_status(session: DbSession, conversation: Conversation) -> tu
     return True, remaining
 
 
+def _trailing_customer_messages(session: DbSession, conversation: Conversation) -> list[Message]:
+    """The run of consecutive CUSTOMER messages at the end of the
+    conversation, oldest-first — walking back from the newest message
+    until a non-customer message. Shared by _uncovered_customer_run()
+    (automatic trigger) and generate_booking_offer_draft() (012/OB) so
+    both build the resolver/LLM query from the exact same selection."""
+    history_rows = session.scalars(select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at.desc())).all()
+    selected: list[Message] = []
+    for row in history_rows:
+        if row.author_type != "CUSTOMER":
+            break
+        selected.append(row)
+    selected.reverse()
+    return selected
+
+
 def _uncovered_customer_run(session: DbSession, conversation: Conversation) -> tuple[Message, list[Message]] | None:
     """Shared by evaluate_automatic_trigger() and
     evaluate_unclaimed_autonomous_trigger() (010): the idle-timeout +
@@ -505,14 +622,7 @@ def _uncovered_customer_run(session: DbSession, conversation: Conversation) -> t
     newest_customer = session.scalar(select(Message).where(Message.conversation_id == conversation.id, Message.author_type == "CUSTOMER").order_by(Message.created_at.desc()))
     if not newest_customer or newest_customer.id == conversation.auto_draft_covers_through_message_id:
         return None
-    history_rows = session.scalars(select(Message).where(Message.conversation_id == conversation.id).order_by(Message.created_at.desc())).all()
-    selected_messages: list[Message] = []
-    for row in history_rows:
-        if row.author_type != "CUSTOMER":
-            break
-        selected_messages.append(row)
-    selected_messages.reverse()
-    return newest_customer, selected_messages
+    return newest_customer, _trailing_customer_messages(session, conversation)
 
 
 def evaluate_automatic_trigger(session: DbSession, conversation: Conversation) -> None:

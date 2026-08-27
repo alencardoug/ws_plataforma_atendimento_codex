@@ -43,7 +43,15 @@ docker compose run --rm backend python -m customer_care.auth.seed_operator \
   --password 'escolha-uma-senha-local' \
   --display-name 'Operador Demo'
 docker compose run --rm backend python -m customer_care.knowledge.ingest
+docker compose run --rm backend python -m customer_care.scheduling.bootstrap_seed
 ```
+
+O último comando (`scheduling.bootstrap_seed`) popula a agenda simulada de
+disponibilidade de consultas (todas as especialidades no horizonte amplo, mais
+o mínimo D+1/D+7 da oncologia geral). É idempotente — rodar de novo não cria
+nada. Sem ele, todo pedido de agendamento cai em abstenção por falta de vagas
+semeadas. Alternativa: definir `RUN_BOOTSTRAP_SEED=true` no ambiente do
+`backend` para o mesmo seed rodar automaticamente no startup da aplicação.
 
 A criação/atualização de operadores ocorre **somente** pelo comando explícito
 `customer_care.auth.seed_operator` acima. O startup do Compose/backend não cria

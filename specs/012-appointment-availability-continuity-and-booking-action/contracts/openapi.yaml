@@ -1,0 +1,142 @@
+openapi: 3.1.0
+info:
+  title: Customer Care AI — Availability Continuity + Operator Booking-Offer Action (delta)
+  version: 12.0.0-delta
+  description: >-
+    DELTA over specs/004-dynamic-appointment-availability/contracts/openapi.yaml
+    and everything canonical before it. Every path and schema not listed
+    here is unchanged.
+
+    AC (Availability Continuity) adds NO path or schema — it is an
+    internal seeding/scheduling change (a startup hook, a
+    `python -m customer_care.scheduling.bootstrap_seed` admin command, and
+    a lazy `ensure_generalist_floor()` call inside the existing
+    GET /operator/conversations poll). No request or response shape
+    changes for that endpoint.
+
+    OB (Operator Booking-Offer action) adds ONE path, below. It returns
+    the same generation object shape draft() / select_evidence() already
+    return (see V2/V3 contracts) — repeated here only for the fields a
+    caller must rely on.
+
+    Every V1/V2/V3 safety invariant is unchanged. OB never sends a
+    customer-visible message and never opens a pending_autonomous_sends
+    row — its generation.trigger ('MANUAL_BOOKING_OFFER') is not
+    autonomous-eligible (Constitution Amendment 1.2.0 clause (b)).
+servers:
+  - url: http://localhost:8000/api/v1
+
+paths:
+  /operator/conversations/{conversation_id}/booking-offer-draft:
+    post:
+      tags: [Operator AI]
+      summary: Generate an appointment-availability offer as an operator-reviewed draft (OB) — new
+      description: >-
+        Runs the `appointment_availability` named resolver directly for
+        this conversation, bypassing RAG rank order, and persists the
+        result as an ordinary AIGeneration draft (status ANSWER with the
+        rendered offer block, or status ABSTAIN /
+        DYNAMIC_DATA_UNAVAILABLE when the simulated agenda has nothing to
+        offer). Deterministic, read-only, never LLM-composed, never
+        autonomously sent. The offered slots are persisted
+        (appointment_offer_presentations) so the customer's next
+        slot-choice reply resolves through the existing guided-booking
+        path. The operator sends the draft with the existing explicit
+        send / quick-approve; nothing is customer-visible until then.
+      security:
+        - operatorBearer: []
+      parameters:
+        - name: conversation_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                manual_search_text:
+                  type: string
+                  default: ""
+                  description: >-
+                    Optional free-text hint passed to the resolver's own
+                    parameter extraction (specialty / date / period
+                    keywords, e.g. "mastologia amanhã de manhã"). Empty =
+                    resolve on the conversation's trailing customer-message
+                    text.
+      responses:
+        '201':
+          description: >-
+            The generation was created. status is ANSWER (offer block in
+            draft_text) or ABSTAIN (draft_text empty, reason_code
+            DYNAMIC_DATA_UNAVAILABLE). In BOTH cases no customer message
+            exists yet.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id, conversation_id, trigger, status, draft_text, dynamic_pattern_used, evidence]
+                properties:
+                  id: { type: string, format: uuid }
+                  conversation_id: { type: string, format: uuid }
+                  trigger:
+                    type: string
+                    const: MANUAL_BOOKING_OFFER
+                  status:
+                    type: string
+                    enum: [ANSWER, ABSTAIN]
+                  draft_text:
+                    type: string
+                    description: The rendered offer block on ANSWER; "" on ABSTAIN.
+                  reason_code:
+                    type: [string, "null"]
+                    description: DYNAMIC_DATA_UNAVAILABLE on ABSTAIN, null on ANSWER.
+                  dynamic_pattern_used:
+                    type: boolean
+                  category_slug:
+                    type: [string, "null"]
+                  evidence:
+                    type: array
+                    items: { type: object }
+                    description: Retrieval evidence for the run (Article V traceability).
+        '403':
+          description: Not authenticated, or the conversation is not assigned to this operator.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: >-
+            MODE_NOT_ALLOWED — the conversation is not an active
+            effective-N2 conversation (CLOSED, WAITING, or taken over to
+            N1).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '503':
+          description: >-
+            AI_PROVIDER_UNAVAILABLE — an unexpected failure during
+            resolution (e.g. the embedding provider for
+            persist_presented_offers). Manual service is unaffected; a
+            FAILED generation is recorded.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+components:
+  securitySchemes:
+    operatorBearer:
+      type: http
+      scheme: bearer
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: string }
+            message: { type: string }
