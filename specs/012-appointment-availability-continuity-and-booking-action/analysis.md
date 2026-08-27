@@ -170,6 +170,35 @@ Amendment is affected. Implementation may begin at `tasks.md` T1.
   credential-backed closure steps, exactly as prior packages' closures
   were structured.
 
+### 7.5 Follow-on (2026-08-27, post-deploy): autonomous delivery without an operator
+
+The prod incident above surfaced a pre-existing architectural limitation
+the human then required fixed: N4/N5 autonomous replies were only ever
+*delivered* as a side effect of an **operator** queue poll
+(`list_conversations()` → `evaluate_unclaimed_autonomous_trigger()` +
+`resolve_elapsed_autonomous_sends()`). With no operator logged in, an
+unclaimed conversation's reply was generated but never sent.
+
+Fix (`anonymous_access/router.py`, `_drive_unclaimed_autonomy()`): the
+**same** debounce/eligibility path and the **same** send step are now
+also driven from the customer's own `POST /messages`, `POST /typing`
+heartbeat, and `GET /{id}` poll (the browser already polls the GET every
+~2 s). No new send mechanism, no scheduler, no new infrastructure —
+`resolve_elapsed_autonomous_sends()` remains the single `Message`-with-
+`autonomous_source` construction site; both kill switches, the
+per-category policy gate, the idle debounce, and
+`auto_draft_covers_through_message_id` coverage all still apply
+unchanged. `read_conversation` (GET) becomes mildly side-effecting — a
+deliberate reversal of the 008/CS-1 "plain read" note, recorded in that
+function's docstring and here; the work is self-gated to run at most once
+per customer message.
+
+Tests: `test_customer_driven_autonomy.py` (2, real HTTP via TestClient,
+zero operator) — an unclaimed "quero agendar uma consulta" gets exactly
+one `ungoverned_n5` reply and stays `WAITING`; 6 polls + 6 heartbeats
+never duplicate it. Full autonomy + 012 + `smoke_core` re-run: 47 pass.
+`DECISIONS.md` D-044 carries the record.
+
 ### 7.4 Final verdict
 
 **GO for the code; closure CONDITIONAL on the credential-backed e2e/smoke
