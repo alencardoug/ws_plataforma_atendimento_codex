@@ -12,8 +12,10 @@ docs/
 db/
 adr/
 scripts/
+backups/
 teste_humano.md
 /*.md
+DOCS_PESSOAIS/
 app/.venv312/
 app/__pycache__/
 app/**/__pycache__/
