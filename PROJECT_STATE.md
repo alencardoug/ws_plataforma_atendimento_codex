@@ -768,3 +768,36 @@ above, prior interrupted runs can leave `t010-*`/`t011-*` fixture
 categories with dangling `ai_generations`/autonomously-sent `messages`
 rows, which makes those two files' fixture teardown FK-fail (reported as
 `ERROR`, not `FAIL`). Clear that residue before a full-suite run.
+
+### 012 post-deploy corrections (2026-08-27, same session)
+
+Deployed to prod (Cloud Run `-00011-zvc`, Neon migrated, Firebase
+frontend). Two corrections shipped after deploy — see `DECISIONS.md`
+D-044 for full detail:
+
+1. **Prod pool-exhaustion incident (fixed, commit `ef64d23`).** A stray
+   ~50-min-open `bootstrap_seed` transaction against Neon made every
+   concurrent `list_conversations()` poll block on AC-2's *blocking*
+   advisory lock, one held DB connection each, until the SQLAlchemy pool
+   was exhausted and the whole backend 500'd for ~20 min. A real
+   customer's N5 reply sat `PENDING` throughout, then delivered **6×**
+   when the pileup released. `ensure_generalist_floor()` hardened
+   (non-blocking `pg_try_advisory_xact_lock`, debounce-checkpoint commit
+   before any write, `lock_timeout`/`statement_timeout` caps);
+   `resolve_elapsed_autonomous_sends()` given `FOR UPDATE SKIP LOCKED`.
+   Also in `DEPLOYMENT.md`'s incident log.
+2. **Autonomous delivery no longer needs an operator (commit `197f985`).**
+   Human requirement: N4/N5 replies must deliver with no operator
+   watching the queue. `_drive_unclaimed_autonomy()` runs the same
+   `evaluate_unclaimed_autonomous_trigger()` + `resolve_elapsed_autonomous_sends()`
+   from the customer's own `POST /messages`, `POST /typing`, and
+   `GET /{id}` poll. No scheduler, no new infra, no new send site.
+   Verified end-to-end on prod: an unclaimed "quero agendar uma consulta"
+   gets its real-slot-offer reply on the first 2 s poll, exactly once.
+
+**Residual (needs a prod DB write, blocked in the implementation
+session):** conversation `d92869e0` has 5 duplicate N5 messages from the
+incident; test residue conversations (`cc419438`, `9274f9c3`, `55f8682b`,
+`e658eece`, …) and operator `verify012-*@example.invalid`; Neon agenda is
+shallow (AC-2 tops up generalist D+1/D+7 on demand). `TRUNCATE` the
+conversation tables per `DEPLOYMENT.md` step 5 when convenient.
