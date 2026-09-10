@@ -1,6 +1,15 @@
 # Contratos e roteiro de execução — Langfuse local / N5
 
-Data: 2026-09-09. Complementa o [plano principal](plano_implementacao_local.md).
+Data: 2026-09-09. Complementa o [plano principal](plano_implementacao.md).
+
+> **Parcialmente vigente (revisto em 2026-09-10).** Os **contratos de
+> observação do §3** (identidade, nomes, payloads, scores, dedup,
+> fronteiras de transação) continuam a referência para a instrumentação —
+> ajustar só os endpoints para Langfuse **Cloud**. O **§5** (DB de teste
+> isolada `oncology_langfuse_test`) continua obrigatório. O **§6**
+> (avaliação) e o **§7** (prompts), mais o split do dataset, são
+> reavaliados **após a Fase 0** de `plano_implementacao.md` — não
+> implementar como estão. "Três fases" virou "Fase 0 → reavaliar".
 
 Este documento fecha decisões necessárias para iniciar o desenvolvimento das três fases. Valores de timeout, lotes e critérios de avaliação abaixo são padrões propostos para este projeto, não limites oficiais do Langfuse nem resultados de benchmark. Mudanças justificadas devem ser registradas no pacote SDD da fase correspondente.
 

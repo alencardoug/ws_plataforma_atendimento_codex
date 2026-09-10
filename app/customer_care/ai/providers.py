@@ -51,6 +51,23 @@ class GenerationProvider(Protocol):
     def generate_ungoverned(self, history: list[dict[str, str]], system_prompt: str) -> str: ...
 
 
+def create_langfuse_probe_client() -> OpenAI:
+    """LF-1 CLI only: importing this wrapper patches OpenAI process-wide.
+
+    Never call from the application provider constructor. Production hook
+    containment and fail-open behavior are the subsequent LF-2 checkpoint.
+    """
+    settings = get_settings()
+    if not settings.langfuse_tracing_enabled or settings.ai_provider == "deterministic-test":
+        raise RuntimeError("Langfuse probe disabled")
+    if not settings.openai_api_key or not settings.openai_api_key.get_secret_value():
+        raise RuntimeError("OpenAI credentials missing")
+
+    from langfuse.openai import OpenAI as TracedOpenAI
+
+    return TracedOpenAI(api_key=settings.openai_api_key.get_secret_value(), timeout=30.0, max_retries=0)
+
+
 CLINICAL_DEFLECTION_TEXT = "Essa é uma pergunta de natureza clínica — recomendo conversar sobre isso com o profissional de saúde responsável durante a consulta. Posso ajudar com outra dúvida?"
 
 # 011 (Constitution Amendment 1.3.0, N5): deliberately its own small
