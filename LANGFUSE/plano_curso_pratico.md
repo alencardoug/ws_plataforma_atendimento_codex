@@ -2,6 +2,18 @@
 
 Data: 2026-09-09. Estado: plano de ensino, conectado às três fases de implementação; aulas e medições pendentes.
 
+> **Substituído em 2026-09-10 — não seguir este plano como está.** O
+> humano decidiu: (1) Langfuse **Cloud**, não self-hosted; (2) a trilha
+> de aprendizado deixa de ser um calendário de 6 aulas e passa a ser
+> *apprenticeship de diagnóstico* — sessões pareadas sobre conversas
+> ruins reais, com o conteúdo conceitual extraído para
+> `playbook_diagnostico.md` (a ser escrito). Este documento permanece na
+> pasta como registro do desenho original e como fonte do conteúdo do
+> playbook (a taxonomia de falha, "o que cada view serve", as
+> armadilhas). A autoridade atual é
+> [`revisao_claude_code.md`](revisao_claude_code.md); o roteiro técnico
+> vigente é a **Fase 0** descrita lá.
+
 ## 1. O resultado que vamos construir juntos
 
 Ao terminar, você deverá conseguir abrir uma conversa problemática, localizar a etapa responsável, explicar a evidência que sustenta o diagnóstico, escolher uma mudança e conferir se ela melhorou o atendimento sem criar uma regressão relevante. Eu preparo a parte técnica e guio a investigação; você aprende a interpretar os resultados e decidir o que considera bom para a plataforma.

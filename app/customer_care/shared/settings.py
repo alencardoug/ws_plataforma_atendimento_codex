@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,12 +25,23 @@ class Settings(BaseSettings):
     ai_generation_model: str = "gpt-5-mini"
     ai_embedding_model: str = "text-embedding-3-small"
     ai_embedding_dimension: int = Field(default=1536, ge=1)
+    langfuse_tracing_enabled: bool = False
+    langfuse_public_key: SecretStr | None = None
+    langfuse_secret_key: SecretStr | None = None
+    langfuse_base_url: str | None = None
+    langfuse_host: str | None = None
     api_root_path: str = "/api/v1"
     log_level: str = "INFO"
     anonymous_token_rate_limit_max_failures: int = Field(default=30, ge=1)
     anonymous_token_rate_limit_window_seconds: float = Field(default=60.0, gt=0)
     anonymous_token_rate_limit_base_lockout_seconds: float = Field(default=60.0, gt=0)
     anonymous_token_rate_limit_max_lockout_seconds: float = Field(default=900.0, gt=0)
+
+    @field_validator("langfuse_tracing_enabled", mode="before")
+    @classmethod
+    def tracing_flag_fail_open(cls, value: object) -> bool:
+        # A typo in optional telemetry configuration must not stop startup.
+        return str(value).strip().lower() in {"true", "1", "yes", "on"}
 
 
 @lru_cache

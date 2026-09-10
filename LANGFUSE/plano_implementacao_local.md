@@ -2,6 +2,15 @@
 
 Criado em 2026-09-08. Revisado em 2026-09-09.
 
+> **Substituído em 2026-09-10 por
+> [`plano_implementacao.md`](plano_implementacao.md).** O humano decidiu
+> Langfuse **Cloud** em vez de self-hosted (motivo em
+> `revisao_claude_code.md` §1), e a sequência passou a começar por uma
+> **Fase 0** de diagnóstico mínimo. Este documento permanece como
+> registro do desenho self-hosted / 3-fases. A análise do fluxo N5 do §2
+> foi transportada para o novo plano; os contratos de observação
+> continuam em `detalhamento_execucao.md` §3.
+
 Estado: planejamento pronto para iniciar o desenvolvimento por P1-01, que formaliza e analisa a especificação antes do código. A infraestrutura e a instrumentação ainda não foram implementadas.
 
 Ler em conjunto com [Contratos e roteiro de execução](detalhamento_execucao.md): o complemento define configuração, observações/scores, testes, dataset, rubrica, execução de experimentos, gestão de prompts e tarefas das fases 2 e 3. Os valores operacionais são alvos de implementação a validar, não resultados já medidos.
