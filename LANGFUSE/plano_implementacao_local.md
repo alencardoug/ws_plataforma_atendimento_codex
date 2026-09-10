@@ -6,6 +6,8 @@ Estado: planejamento pronto para iniciar o desenvolvimento por P1-01, que formal
 
 Ler em conjunto com [Contratos e roteiro de execução](detalhamento_execucao.md): o complemento define configuração, observações/scores, testes, dataset, rubrica, execução de experimentos, gestão de prompts e tarefas das fases 2 e 3. Os valores operacionais são alvos de implementação a validar, não resultados já medidos.
 
+O [curso prático conectado à implementação](plano_curso_pratico.md) acompanha essas três fases em seis aulas, com diagnóstico inicial, leitura de traces, investigação do RAG/contexto, avaliação, experimento e gestão de versões. O [caderno de evolução](caderno_de_evolucao.md) registra aprendizado e resultados. A prática opcional com RAGFlow + Elasticsearch compara recuperação após o baseline, com preparação própria; não é dependência de conclusão das três fases.
+
 ## 1. Decisão e premissas
 
 Implementar Langfuse Open Source self-hosted no checkout atual, junto ao ambiente Docker Compose já utilizado. O regime N5 é o fluxo principal a acompanhar. A fase 1 entrega o acompanhamento de uma resposta automática desde o gatilho até o envio confirmado, com conteúdo, decisões, tokens, custos e tempos no painel.
@@ -351,7 +353,7 @@ As [tarefas das fases 2 e 3](detalhamento_execucao.md#8-tarefas-das-fases-2-e-3)
 | Área | Arquivos existentes ou propostos |
 |---|---|
 | SDD | Novo pacote da fase 1 e atualização coerente dos documentos de autoridade/observabilidade impactados |
-| Ambiente | `docker-compose.yml` com profile, `.env.example`, variáveis no `.env` local e runbook em `langfuse/` |
+| Ambiente | `docker-compose.yml` com profile, `.env.example`, variáveis no `.env` local e runbook em `LANGFUSE/` |
 | Dependências | `app/requirements.txt` com SDK validado e versão fixada |
 | Integração | Adaptador em `shared`/`infrastructure`, settings e `bootstrap.py` |
 | IA e RAG | `ai/providers.py`, `ai/router.py`, `knowledge/embeddings.py`, `rag/service.py` |
@@ -361,6 +363,7 @@ As [tarefas das fases 2 e 3](detalhamento_execucao.md#8-tarefas-das-fases-2-e-3)
 | Validação | Testes da integração, smoke N5 sem operador, regressões e helpers para banco de testes |
 | Avaliação — fase 2 | Dataset JSONL e fixtures versionadas, executor de cenários/snapshots, manifestos e relatório comparativo |
 | Prompts — fases 2/3 | Fronteira de resolução local para experimentos; catálogo, adaptador Langfuse, snapshots e comandos de ativação/reversão na fase 3 |
+| Aprendizado | Curso de seis aulas, caderno de evolução e roteiros guiados preparados conforme a entrega de cada fase |
 
 Não se prevê migração de schema para observabilidade. Qualquer necessidade demonstrada deve passar por spec → plan → tasks → analysis; migrations já aplicadas não serão editadas.
 

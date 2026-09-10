@@ -229,6 +229,10 @@ Anonymous customer session credentials are per-tab, not account credentials. A p
         └── checklists/
 ```
 
+## Langfuse: plano de integração e curso prático
+
+O [material em LANGFUSE](LANGFUSE/README.md) conecta a integração local planejada a um curso de seis aulas para diagnosticar o atendimento N5, avaliar o RAG e testar melhorias. Inclui um caderno de evolução e um laboratório opcional com RAGFlow + Elasticsearch. A integração e as aulas ainda estão pendentes de execução.
+
 ## Agent instruction
 
 Treat `specs/001-v1-assisted-customer-service/` as the completed executable

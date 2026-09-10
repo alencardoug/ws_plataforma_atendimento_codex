@@ -76,4 +76,4 @@ No seu uso em N5, avaliação de qualidade e gestão de prompts são partes impo
   execuções sob demanda e respostas já capturadas. A economia futura viria de escolhas melhores de prompt e modelo,
   comprovadas pelos experimentos.
 
-  Aprofundei essas entregas no plano de implementação local (langfuse/plano_implementacao_local.md:211).
+  Aprofundei essas entregas no [plano de implementação local](plano_implementacao_local.md#5-fase-2--qualidade-das-respostas-no-n5).

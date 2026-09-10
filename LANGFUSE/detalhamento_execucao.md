@@ -4,6 +4,8 @@ Data: 2026-09-09. Complementa o [plano principal](plano_implementacao_local.md).
 
 Este documento fecha decisões necessárias para iniciar o desenvolvimento das três fases. Valores de timeout, lotes e critérios de avaliação abaixo são padrões propostos para este projeto, não limites oficiais do Langfuse nem resultados de benchmark. Mudanças justificadas devem ser registradas no pacote SDD da fase correspondente.
 
+O [plano do curso prático](plano_curso_pratico.md) liga estas entregas ao aprendizado do usuário. A preparação de cada aula produz um roteiro de cliques/comandos validado na versão instalada e usa o [caderno de evolução](caderno_de_evolucao.md); o curso não substitui os gates técnicos.
+
 ## 1. Entrada no desenvolvimento e limites de escopo
 
 - Começar por P1-01 do plano: especificação, plano técnico, tarefas, aceitação e análise de consistência. As fases 2 e 3 também terão seus artefatos antes de código; usar os próximos números disponíveis, sem abrir uma feature apenas por existir uma numeração sugerida.
@@ -184,6 +186,8 @@ Manter os casos em JSONL versionado e sincronizá-los idempotentemente com um da
 Para agenda, definir ofertas por aliases de fixture e verificar IDs/dados correspondentes. Os dois candidatos usam o mesmo estado inicial e a mesma referência de data. Quando funções SQL dependentes do relógio real impedirem replay de uma data passada, reconstruir as ofertas relativas à nova referência e registrar uma nova execução/fixture; não apresentar cenários diferentes como comparação idêntica.
 
 Usar restauração de fixtures entre casos/candidatos. Uma opção escolhida no candidato A não pode desaparecer do cenário B como efeito da execução anterior. Para snapshots, avaliar a mensagem efetivamente enviada e suas referências capturadas, distinguindo-a das saídas intermediárias.
+
+Para os exercícios de diagnóstico de recuperação, incluir em `expected_facts` os IDs estáveis de Q&A/documentos pais relevantes e aplicar `Hit@k` somente aos casos com referência revisada, usando o mesmo `k` entre variantes (inicialmente 8). P2-01/P2-05 formalizam essas verificações. `expected_path` registra o caminho de referência do caso; exigir esse caminho como regra objetiva somente quando listado em `critical_checks`. Uma melhoria de recuperação pode mudar o caminho efetivo: manter a comparação pelos mesmos casos e registrar a transição, sem ocultá-la nem classificá-la automaticamente como erro.
 
 ### 6.2 Rubrica inicial
 
