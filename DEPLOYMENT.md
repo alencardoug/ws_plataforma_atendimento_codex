@@ -89,6 +89,27 @@ production after the fix, not just re-checking `/health`/`/ready`.
 draft-generation call after any change to what the Cloud Run build
 includes.**
 
+**Incident (2026-08-27, fixed same session — feature 012 / D-044): a
+long-running `bootstrap_seed` transaction against Neon took the whole
+backend down.** The wide agenda seed (`python -m
+customer_care.scheduling.bootstrap_seed`) run locally against the remote
+Neon DB is *slow* — thousands of individual `INSERT ... ON CONFLICT`
+round-trips in one transaction that only commits at the end. While it was
+open (~50 min), feature 012's `ensure_generalist_floor()` — called on
+every `GET /operator/conversations` poll — blocked on a `pg_advisory_xact_lock`
+behind it, one held DB connection per stuck poll, until the SQLAlchemy
+`QueuePool` (size 5 + overflow 10) was exhausted and *every* endpoint
+started returning `sqlalchemy.exc.TimeoutError: QueuePool ... timed out`
+500s. `ensure_generalist_floor()` was hardened (non-blocking
+`pg_try_advisory_xact_lock`, debounce-checkpoint-commit before any write,
+`lock_timeout`/`statement_timeout` caps) so it can no longer stall the
+poll path. **Lessons:** (1) do not run the wide seed from a machine far
+from the DB in one giant transaction — run it from close to Neon, or seed
+via the operator "Garantir disponibilidade" button and let AC-2 top up;
+(2) any code added to the `list_conversations()` / conversation-detail
+poll path must be non-blocking and time-bounded — those polls run
+constantly and hold a pooled connection for their whole duration.
+
 Supabase is intentionally not used: its free tier fully pauses the project
 after a period of inactivity (manual unpause required), which is incompatible
 with a `min-instances=0` backend that itself scales to zero.

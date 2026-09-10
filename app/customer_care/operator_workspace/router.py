@@ -22,6 +22,7 @@ from customer_care.infrastructure.models import (
 )
 from customer_care.scheduling.availability import booking_summary_dict
 from customer_care.scheduling.models import AppointmentBooking
+from customer_care.scheduling.seeding import ensure_generalist_floor
 from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
 from customer_care.shared.schemas import ConversationSummaryOut, OperatorMessageOut, OperatorSendIn
@@ -196,6 +197,10 @@ def list_conversations(
     for row in rows:
         if row.status == "WAITING":
             evaluate_unclaimed_autonomous_trigger(session, row)
+    # 012 / AC-2: keep the simulated generalist agenda topped up so a
+    # booking request never ABSTAINs for lack of seeded slots. Once per
+    # poll (not per row), query-independent, self-debounced, never raises.
+    ensure_generalist_floor(session)
     resolve_elapsed_autonomous_sends(session)
     unread_by_conversation = unread_customer_message_counts(session, [row.id for row in rows])
     pending_by_conversation = pending_autonomous_send_summaries(session, [row.id for row in rows])

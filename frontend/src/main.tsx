@@ -339,9 +339,15 @@ export function CustomerPage() {
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
-    await api<Message>(`/public/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ body: text }) }, token);
+    const sent = await api<Message>(`/public/conversations/${id}/messages`, { method: "POST", body: JSON.stringify({ body: text }) }, token);
     setText("");
-    await refresh();
+    // Show the sent message immediately — do NOT block on refresh(): the
+    // customer's GET poll may now run an autonomous-reply generation
+    // (~seconds) inline, and awaiting it here delayed the compose box
+    // clearing and the message appearing (regression, 2026-08-27). The
+    // 2 s interval poll picks up the server state (incl. the reply).
+    setConversation((prev) => (prev ? { ...prev, messages: [...prev.messages, sent] } : prev));
+    void refresh().catch(() => undefined);
   };
 
   const close = async () => {
@@ -661,6 +667,18 @@ export function OperatorPage() {
       body: JSON.stringify({ selected_message_ids: [...selectedMessageIds], manual_search_text: searchQuery, instruction_text: instructionText }),
     }, token));
   };
+  // 012 / OB-4: run the appointment_availability resolver directly for
+  // this conversation into an ordinary N2 draft (never an autonomous
+  // send). Reuses the manual-search input's value as an optional
+  // specialty/date hint. Populates the same draft panel as "Gerar
+  // rascunho".
+  const generateBookingOffer = async () => {
+    if (!selected || !aiEligible) return;
+    setDraft(await api<Draft>(`/operator/conversations/${selected.id}/booking-offer-draft`, {
+      method: "POST",
+      body: JSON.stringify({ manual_search_text: searchQuery.trim() }),
+    }, token));
+  };
   const clearMessageSelection = () => setSelectedMessageIds(new Set());
   const takeOver = async () => {
     if (!selected) return;
@@ -815,6 +833,10 @@ export function OperatorPage() {
             <label htmlFor="operator-reply">Resposta<textarea id="operator-reply" value={text} onChange={(event) => setText(event.target.value)} required /></label>
             <button>Enviar</button>
           </form>
+          {/* 012 / OB-4: between "Enviar" and "Encerrar conversa". Produces
+              an ordinary draft (renders in the IA/Evidências panel), never
+              a customer-visible message. */}
+          <button type="button" className="btn-secondary" disabled={!aiEligible} onClick={() => void generateBookingOffer().catch((caught) => setError(errorMessage(caught)))}>Gerar oferta de agendamento</button>
           {confirmingClose
             ? <CloseConfirmPrompt onConfirm={() => void closeConversation().catch((caught) => setError(errorMessage(caught)))} onCancel={() => setConfirmingClose(false)} />
             : <button type="button" className="btn-ghost" onClick={() => setConfirmingClose(true)}>Encerrar conversa</button>}

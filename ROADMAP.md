@@ -34,6 +34,24 @@ technical-portfolio demonstration, not a real clinical service). **DONE**
 (2026-08-21) — see that package's own `acceptance.md`. Telegram is the
 live next decision point.
 
+**2026-08-27 update:** the human authorized
+`specs/012-appointment-availability-continuity-and-booking-action/`
+(D-044) to resolve a real reported defect — a fresh Docker stack has no
+seeded agenda, so every booking request `ABSTAIN`s and N5 (correctly,
+per Amendment 1.3.0) masks it with a free-form reply that never books.
+Two changes: **AC** keeps the simulated agenda populated via a
+query-independent reseed (bootstrap fill + a low-water-mark top-up on the
+operator queue poll — not the resolver/query path), and **OB** adds an
+operator "Gerar oferta de agendamento" button that runs the
+`appointment_availability` resolver directly into an ordinary N2 draft
+(never autonomous). Narrowly supersedes one clause of `specs/004` AA-9
+(more write entry points, all still non-query); no Constitution change.
+Not a scope change to anything below; Telegram remains the next decision
+point. Spec package authored and **implemented 2026-08-27** (code verdict
+GO — backend `pytest` 290/0, all lint/type/build green, app boots with
+the new endpoint live); closure CONDITIONAL on a credential-backed
+Playwright/smoke run — see that package's `acceptance.md`.
+
 Not a scope change — a sequencing decision for what gets authorized next,
 once the items already registered under "Era A — Existence" below
 (specialty scheduling breadth and its date-range/volume seeding, and

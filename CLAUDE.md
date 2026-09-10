@@ -151,6 +151,45 @@ Read and obey `AGENTS.md` first.
   assume `n5_kill_switch_enabled` starts false, but this shared dev DB's
   own live/demo state has it true — clear it before running either file's
   full suite and restore afterward.
+- **The human authorized `specs/012-appointment-availability-continuity-
+  and-booking-action/` on 2026-08-27 (D-044).** Resolves a real reported
+  defect: a freshly rebuilt Docker stack has no seeded `schedule_slots`,
+  so every booking request `ABSTAIN`s (`DYNAMIC_DATA_UNAVAILABLE`) and N5
+  — correctly, per Amendment 1.3.0 clause (b) — masks it with a free-form
+  reply that never books. N5 is **left unchanged**. Two changes instead:
+  **AC (Availability Continuity)** keeps the simulated agenda populated
+  via a query-independent reseed only — an env-gated startup bootstrap
+  fill (reusing `ensure_wide_availability()` + `ensure_seed_availability()`)
+  plus a low-water-mark top-up (`ensure_generalist_floor()`) evaluated
+  lazily from the operator queue poll `list_conversations()`, never from a
+  resolver/draft/anonymous path; **OB (Operator Booking-Offer action)**
+  adds `POST /operator/conversations/{id}/booking-offer-draft` and a
+  "Gerar oferta de agendamento" button between "Enviar" and "Encerrar
+  conversa", which runs the `appointment_availability` resolver directly
+  into an ordinary N2 draft (`trigger='MANUAL_BOOKING_OFFER'`, never
+  autonomous-eligible). Narrowly supersedes one clause of `specs/004`
+  AA-9 (more write entry points, all still query-independent); `specs/004`
+  clarification item 6 ("no slot generation as a side effect of a
+  customer/operator query") is **preserved** and re-proven by a negative
+  test. No Constitution Article or Amendment is affected; `booking_script/`
+  is untouched. **Spec package authored 2026-08-27** —
+  `spec.md`/`plan.md`/`data-model.md`/`contracts/openapi.yaml`/`tasks.md`/
+  `acceptance.md`/`analysis.md` are complete. **Implemented 2026-08-27**
+  (`analysis.md` §7 verdict: **GO for the code; closure CONDITIONAL** on a
+  credential-backed Playwright/smoke run not available in the
+  implementation session — `frontend/e2e/v12.spec.ts` is authored but not
+  run). Backend `pytest` 290 pass / 0 fail (21 new; the 26 first-pass
+  ERRORs were pre-existing 2026-08-21 shared-DB fixture residue — orphan
+  `ai_generations`/autonomous `messages` referencing `t010-*`/`t011-*`
+  fixture categories — root-caused, cleared, both `test_governed_autonomy.py`
+  and `test_ungoverned_n5.py` then 27/27); `ruff`/`mypy` clean; frontend
+  `eslint`/`tsc`/`vitest`/`build` clean; the app boots with the new
+  `POST /operator/conversations/{id}/booking-offer-draft` route live and
+  the env-gated startup bootstrap hook a safe no-op. When running the
+  autonomy test files here, clear `n5_kill_switch_enabled` first and
+  restore it to `true` after (unchanged from the D-043-2 note above), and
+  clear any leftover `t010-*`/`t011-*` fixture-category residue from prior
+  interrupted runs.
 
 Read in this order:
 

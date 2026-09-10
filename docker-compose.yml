@@ -32,6 +32,10 @@ services:
       ANONYMOUS_TOKEN_RATE_LIMIT_MAX_LOCKOUT_SECONDS: ${ANONYMOUS_TOKEN_RATE_LIMIT_MAX_LOCKOUT_SECONDS:-900}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AI_PROVIDER: ${AI_PROVIDER:-openai}
+      # 012 / AC-1: when truthy, the app runs an idempotent
+      # appointment-availability bootstrap fill on startup so a fresh
+      # stack never has an empty agenda. Off by default.
+      RUN_BOOTSTRAP_SEED: ${RUN_BOOTSTRAP_SEED:-false}
       AI_GENERATION_MODEL: ${AI_GENERATION_MODEL:-gpt-5-mini}
       AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
       AI_EMBEDDING_DIMENSION: ${AI_EMBEDDING_DIMENSION:-1536}

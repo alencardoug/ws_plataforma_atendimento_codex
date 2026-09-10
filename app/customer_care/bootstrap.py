@@ -1,3 +1,6 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -14,11 +17,28 @@ from customer_care.shared.http import RequestContextMiddleware
 from customer_care.shared.settings import get_settings
 
 
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # 012 / AC-1: env-gated idempotent appointment-availability bootstrap
+    # fill. No-op unless RUN_BOOTSTRAP_SEED is set (so the test process
+    # never seeds). Imported lazily to keep app import cheap and
+    # cycle-free. A failure here must not stop the app from serving —
+    # manual seeding via the operator buttons / `python -m` always remains.
+    try:
+        from customer_care.scheduling.bootstrap_seed import maybe_run_bootstrap_seed_on_startup
+
+        maybe_run_bootstrap_seed_on_startup()
+    except Exception:  # pragma: no cover - defensive; startup must still proceed
+        pass
+    yield
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     application = FastAPI(
         title="Customer Care AI V1 API",
         version="1.0.0",
+        lifespan=_lifespan,
     )
     application.add_middleware(RequestContextMiddleware)
     api_prefix = settings.api_root_path.rstrip("/")

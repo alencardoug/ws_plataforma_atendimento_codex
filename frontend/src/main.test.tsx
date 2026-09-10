@@ -549,6 +549,51 @@ describe("V1 routes", () => {
     expect(await screen.findByRole("button", { name: "Encerrar conversa" })).toBeInTheDocument();
   });
 
+  it("generates an appointment-availability offer as a draft, between Enviar and Encerrar conversa, sending nothing (012/OB-4)", async () => {
+    sessionStorage.setItem("operator_token", "operator-token");
+    const conversationDetail = {
+      id: "conv-1",
+      status: "ACTIVE",
+      effective_mode: "N2",
+      messages: [{ id: "cust-1", author_type: "CUSTOMER", body: "Quero agendar uma consulta" }],
+    };
+    let bookingOfferCalls = 0;
+    let sendCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/operator/conversations?scope=all")) return { ok: true, json: async () => [{ id: "conv-1", status: "ACTIVE", effective_mode: "N2" }] };
+        if (url.endsWith("/operator/runtime-config")) return { ok: true, json: async () => ({ n1_assistive_search_enabled: true }) };
+        if (url.endsWith("/operator/conversations/conv-1")) return { ok: true, json: async () => conversationDetail };
+        if (url.endsWith("/operator/conversations/conv-1/booking-offer-draft") && init?.method === "POST") {
+          bookingOfferCalls += 1;
+          return { ok: true, json: async () => ({ id: "gen-ob-1", status: "ANSWER", draft_text: "Oncologia geral (triagem) — Dra. Renata Silveira (simulação)\nquinta-feira 28/08 às 09:00", evidence: [], trigger: "MANUAL_BOOKING_OFFER" }) };
+        }
+        if (url.endsWith("/operator/conversations/conv-1/messages") && init?.method === "POST") {
+          sendCalls += 1;
+          return { ok: true, json: async () => ({}) };
+        }
+        throw new Error(`Unexpected fetch: ${url} ${init?.method ?? "GET"}`);
+      }),
+    );
+
+    render(<MemoryRouter initialEntries={["/operator"]}><OperatorPage /></MemoryRouter>);
+    fireEvent.click(await screen.findByRole("button", { name: /Em atendimento/ }));
+
+    const button = await screen.findByRole("button", { name: "Gerar oferta de agendamento" });
+    expect(button).not.toBeDisabled();
+    // sits between the reply "Enviar" and "Encerrar conversa"
+    const actions = screen.getAllByRole("button").map((b) => b.textContent);
+    expect(actions.indexOf("Enviar")).toBeLessThan(actions.indexOf("Gerar oferta de agendamento"));
+    expect(actions.indexOf("Gerar oferta de agendamento")).toBeLessThan(actions.indexOf("Encerrar conversa"));
+
+    fireEvent.click(button);
+    expect(await screen.findByText(/Oncologia geral \(triagem\)/)).toBeInTheDocument();
+    expect(bookingOfferCalls).toBe(1);
+    expect(sendCalls).toBe(0);
+  });
+
   it("ensures appointment availability from the queue sidebar with no conversation selected (AA-9, T061)", async () => {
     sessionStorage.setItem("operator_token", "operator-token");
     let ensureCalls = 0;

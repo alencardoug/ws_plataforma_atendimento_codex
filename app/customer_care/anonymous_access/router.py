@@ -7,10 +7,11 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from customer_care.ai.router import automatic_draft_status, evaluate_automatic_trigger
+from customer_care.ai.router import automatic_draft_status, evaluate_automatic_trigger, evaluate_unclaimed_autonomous_trigger
 from customer_care.anonymous_access.rate_limit import enforce_not_locked_out, record_attempt
 from customer_care.anonymous_access.security import digest_conversation_token, issue_conversation_token
 from customer_care.audit.service import record_event
+from customer_care.autonomy.service import resolve_elapsed_autonomous_sends
 from customer_care.booking_script.service import advance_booking_script, persisted_customer_body
 from customer_care.conversations.projections import customer_projection
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
@@ -25,6 +26,30 @@ from customer_care.shared.schemas import BodyIn, ConversationOut, CreateConversa
 from customer_care.shared.settings import get_settings
 
 router = APIRouter(prefix="/public/conversations", tags=["Public Customer"])
+
+
+def _drive_unclaimed_autonomy(session: DbSession, conversation: Conversation) -> None:
+    """012 / D-044 follow-on (human requirement 2026-08-27: "preciso que
+    funcione, independente do operador"). Autonomous replies (N4 governed /
+    N5 ungoverned) were only ever evaluated as a side effect of an
+    *operator* queue poll — so with no operator logged in, an unclaimed
+    conversation's reply was generated but never delivered. This drives
+    the exact same debounce/eligibility path
+    (`evaluate_unclaimed_autonomous_trigger` → `maybe_open_autonomous_window`,
+    both kill switches and per-category policy still fully in force) plus
+    the shared send step (`resolve_elapsed_autonomous_sends`) from the
+    customer's own message/heartbeat/poll instead. No new send mechanism,
+    no scheduler, no new infrastructure — just a second lazy-evaluation
+    entry point on requests that were already happening. Both callees
+    self-gate (WAITING+N2 only, idle-debounce, `auto_draft_covers_through_message_id`
+    coverage, `FOR UPDATE SKIP LOCKED`) and swallow their own failures;
+    this wrapper adds one more guard so a hiccup here can never break the
+    customer's read or send."""
+    try:
+        evaluate_unclaimed_autonomous_trigger(session, conversation)
+        resolve_elapsed_autonomous_sends(session)
+    except Exception:
+        pass
 
 
 def token_bound_conversation(
@@ -76,11 +101,13 @@ def customer_draft_status(session: DbSession, conversation: Conversation) -> dic
     computation verbatim — no duplicated logic, no new query. The countdown
     number itself (`_seconds_remaining`) is discarded here, before it ever
     reaches a response model, so it never crosses into any /public/*
-    response (CS-3). No evaluate_automatic_trigger() call here by design
-    (plan.md §2): this is a plain read of already-committed state, not a
-    mutation, so no same-request ORM-freshness concern applies — adding one
-    would make this GET side-effecting, a new trigger path spec.md never
-    asked for."""
+    response (CS-3). This helper itself stays a plain read of
+    already-committed state. (The enclosing `read_conversation` GET *is*
+    now mildly side-effecting via `_drive_unclaimed_autonomy()` — D-044
+    follow-on, so an unclaimed autonomous reply is delivered without an
+    operator watching the queue — but that lives at the route, not here,
+    and is self-gated to fire real work at most once per customer
+    message.)"""
     eligible, _seconds_remaining = automatic_draft_status(session, conversation)
     return {"preparing_response": eligible}
 
@@ -99,6 +126,10 @@ def customer_booking_summary_fields(session: DbSession, conversation: Conversati
 
 @router.get("/{conversation_id}", response_model=ConversationOut)
 def read_conversation(conversation: Annotated[Conversation, Depends(token_bound_conversation)], session: DbSession) -> dict:
+    # D-044 follow-on: the customer's ~2 s poll is what delivers an
+    # unclaimed autonomous reply when no operator is watching the queue.
+    # Self-gated and cheap until the idle debounce elapses, then fires once.
+    _drive_unclaimed_autonomy(session, conversation)
     return {**customer_projection(session, conversation), **customer_draft_status(session, conversation), **customer_booking_summary_fields(session, conversation)}
 
 
@@ -152,6 +183,13 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
     advance_guided_booking(session, conversation, payload.body)  # 005/D-033 — same principle, GB's own parallel N2-draft flow; no-op if AA-10 just took over
     session.commit()
     session.refresh(message)
+    # D-044 follow-on: the autonomous reply is driven by the customer's
+    # subsequent GET polls / typing heartbeats — deliberately NOT here.
+    # `evaluate_unclaimed_autonomous_trigger()` runs a full RAG+LLM
+    # generation (~seconds); doing it inline in this POST made the
+    # customer's own "send" wait on it before the compose box cleared
+    # (visible regression, reported 2026-08-27). The ~2 s GET poll picks it
+    # up immediately after.
     return message
 
 
@@ -168,6 +206,8 @@ def typing_heartbeat(conversation: Annotated[Conversation, Depends(token_bound_c
     # resets it — otherwise the check below would always see "just now" and
     # never fire from within this same call.
     evaluate_automatic_trigger(session, conversation)
+    # D-044 follow-on: also drive the unclaimed (no-operator) autonomy path.
+    _drive_unclaimed_autonomy(session, conversation)
     now = datetime.now(UTC)
     conversation.last_customer_typing_at = now
     conversation.last_customer_activity_at = now
