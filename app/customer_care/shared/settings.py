@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     langfuse_secret_key: SecretStr | None = None
     langfuse_base_url: str | None = None
     langfuse_host: str | None = None
+    langfuse_tracing_environment: str = "local-n5"
     api_root_path: str = "/api/v1"
     log_level: str = "INFO"
     anonymous_token_rate_limit_max_failures: int = Field(default=30, ge=1)
@@ -42,6 +43,11 @@ class Settings(BaseSettings):
     def tracing_flag_fail_open(cls, value: object) -> bool:
         # A typo in optional telemetry configuration must not stop startup.
         return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+    @field_validator("langfuse_tracing_environment", mode="before")
+    @classmethod
+    def tracing_environment(cls, value: object) -> str:
+        return "local-test" if value == "local-test" else "local-n5"
 
 
 @lru_cache

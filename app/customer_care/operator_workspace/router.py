@@ -7,6 +7,8 @@ from pydantic import BaseModel
 from sqlalchemy import func, or_, select, text
 
 from customer_care.ai.router import automatic_draft_status, evaluate_automatic_trigger, evaluate_unclaimed_autonomous_trigger, evidence_for_generation, generation_dict, is_customer_typing, latest_generation_dict
+from customer_care.infrastructure import telemetry
+from customer_care.infrastructure.telemetry_events import pending_snapshot, publish_pending
 from customer_care.audit.service import record_event
 from customer_care.autonomy.service import resolve_elapsed_autonomous_sends
 from customer_care.conversations.projections import assigned_operator_id, customer_projection
@@ -196,12 +198,14 @@ def list_conversations(
     # worker (plan.md §2.4).
     for row in rows:
         if row.status == "WAITING":
-            evaluate_unclaimed_autonomous_trigger(session, row)
+            with telemetry.execution_origin("operator_poll"):
+                evaluate_unclaimed_autonomous_trigger(session, row)
     # 012 / AC-2: keep the simulated generalist agenda topped up so a
     # booking request never ABSTAINs for lack of seeded slots. Once per
     # poll (not per row), query-independent, self-debounced, never raises.
     ensure_generalist_floor(session)
-    resolve_elapsed_autonomous_sends(session)
+    with telemetry.execution_origin("operator_poll"):
+        resolve_elapsed_autonomous_sends(session)
     unread_by_conversation = unread_customer_message_counts(session, [row.id for row in rows])
     pending_by_conversation = pending_autonomous_send_summaries(session, [row.id for row in rows])
     return [summary(row, unread_by_conversation, pending_by_conversation) for row in rows]
@@ -210,8 +214,9 @@ def list_conversations(
 @router.get("/conversations/{conversation_id}")
 def operator_conversation_detail(conversation_id: UUID, operator: CurrentOperator, session: DbSession) -> dict:
     conversation = require_assignment(session, conversation_id, operator.id)
-    evaluate_automatic_trigger(session, conversation)
-    resolve_elapsed_autonomous_sends(session)
+    with telemetry.execution_origin("operator_detail"):
+        evaluate_automatic_trigger(session, conversation)
+        resolve_elapsed_autonomous_sends(session)
     return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation), **booking_summary_fields(session, conversation), **pending_autonomous_send_fields(session, conversation)}
 
 
@@ -280,7 +285,9 @@ def take_over(conversation_id: UUID, operator: CurrentOperator, session: DbSessi
         pending.resolved_at = datetime.now(UTC)
         pending.resolved_by_operator_id = operator.id
     record_event(session, "conversation.taken_over", "OPERATOR", actor_id=operator.id, conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"from_mode": "N2", "to_mode": "N1"})
+    observation = pending_snapshot(session, pending)
     session.commit()
+    publish_pending(observation)
     return {**summary(conversation, unread_customer_message_counts(session, [conversation.id])), **customer_projection(session, conversation, include_generation_id=True), "is_customer_typing": is_customer_typing(conversation), "latest_generation": latest_generation_dict(session, conversation), **automatic_draft_fields(session, conversation), **booking_summary_fields(session, conversation), **pending_autonomous_send_fields(session, conversation)}
 
 
@@ -332,7 +339,9 @@ def send_operator_message(conversation_id: UUID, payload: OperatorSendIn, operat
         pending.resolved_at = message.created_at
         pending.resolved_by_operator_id = operator.id
     conversation.last_message_at = message.created_at
+    observation = pending_snapshot(session, pending)
     session.commit()
+    publish_pending(observation)
     session.refresh(message)
     citations = session.scalars(select(MessageCitation).where(MessageCitation.message_id == message.id)).all()
     return {"id": message.id, "author_type": "OPERATOR", "body": message.body, "citations": [{"title": c.display_title, "section": c.display_section, "url": c.display_url} for c in citations], "created_at": message.created_at}
@@ -355,7 +364,9 @@ def pause_pending_autonomous_send(conversation_id: UUID, pending_id: UUID, opera
     pending.resolved_at = datetime.now(UTC)
     pending.resolved_by_operator_id = operator.id
     record_event(session, "autonomy.pending_send_paused", "OPERATOR", actor_id=operator.id, conversation_id=conversation_id, payload={"pending_autonomous_send_id": str(pending.id)})
+    observation = pending_snapshot(session, pending)
     session.commit()
+    publish_pending(observation)
     return {"id": pending.id, "status": pending.status}
 
 

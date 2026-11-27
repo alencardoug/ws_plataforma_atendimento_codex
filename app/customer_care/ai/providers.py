@@ -1,12 +1,13 @@
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
-from typing import Protocol
+from typing import Any, Protocol
 
 from openai import OpenAI
 
 from customer_care.ai.prompts import load_prompt
+from customer_care.infrastructure import telemetry
 from customer_care.rag.service import Evidence
 from customer_care.shared.settings import get_settings
 
@@ -185,28 +186,31 @@ class OpenAIGenerationProvider:
 
     def generate(self, history: list[dict[str, str]], evidence: list[Evidence], system_prompt: str) -> GenerationResult:
         request_messages = build_request_messages(history, evidence, system_prompt)
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=request_messages,  # type: ignore[call-overload]
-            response_format={"type": "json_object"},
-        )
-        payload = json.loads(response.choices[0].message.content or "{}")
-        status = payload.get("status")
-        if status not in {"ANSWER", "ABSTAIN"}:
-            raise ValueError("provider returned invalid status")
-        reason = payload.get("reason_code")
-        allowed_reasons = {"INSUFFICIENT_EVIDENCE", "CONFLICTING_EVIDENCE", "OUT_OF_SCOPE", "RETRIEVAL_FAILURE"}
-        if status == "ABSTAIN" and reason not in allowed_reasons:
-            reason = "INSUFFICIENT_EVIDENCE"
-        if status == "ANSWER":
-            reason = None
-        allowed_ids = {str(item.retrieval_hit_id) for item in evidence}
-        used = [value for value in payload.get("used_hit_ids", []) if value in allowed_ids]
-        draft_text = str(payload.get("draft_text", "")).strip()
-        if status == "ANSWER" and not draft_text:
-            raise ValueError("provider returned empty answer draft")
-        usage = response.usage
-        return GenerationResult(status, draft_text, reason, used, usage.prompt_tokens if usage else None, usage.completion_tokens if usage else None, request_messages=request_messages)
+        with telemetry.observe("ai.answer", lambda: _request_observation(self.model, request_messages, system_prompt, json_output=True), kind="generation") as observation:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=request_messages,  # type: ignore[call-overload]
+                response_format={"type": "json_object"},
+            )
+            _observe_response(observation, response, self.model)
+            payload = json.loads(response.choices[0].message.content or "{}")
+            status = payload.get("status")
+            if status not in {"ANSWER", "ABSTAIN"}:
+                raise ValueError("provider returned invalid status")
+            reason = payload.get("reason_code")
+            allowed_reasons = {"INSUFFICIENT_EVIDENCE", "CONFLICTING_EVIDENCE", "OUT_OF_SCOPE", "RETRIEVAL_FAILURE"}
+            if status == "ABSTAIN" and reason not in allowed_reasons:
+                reason = "INSUFFICIENT_EVIDENCE"
+            if status == "ANSWER":
+                reason = None
+            allowed_ids = {str(item.retrieval_hit_id) for item in evidence}
+            used = [value for value in payload.get("used_hit_ids", []) if value in allowed_ids]
+            draft_text = str(payload.get("draft_text", "")).strip()
+            if status == "ANSWER" and not draft_text:
+                raise ValueError("provider returned empty answer draft")
+            usage = response.usage
+            observation.update(lambda: {"metadata": {"parsed_result": {"status": status, "draft_text": draft_text, "reason_code": reason, "used_hit_ids": used}}})
+            return GenerationResult(status, draft_text, reason, used, usage.prompt_tokens if usage else None, usage.completion_tokens if usage else None, request_messages=request_messages)
 
     def rerank_clinical(self, customer_text: str, candidate_text: str) -> bool:
         """Human decision, 2026-08-19: a clinical-deflection candidate
@@ -218,13 +222,18 @@ class OpenAIGenerationProvider:
         unlike GB-2's ordinal/embedding matching, this is not something a
         deterministic parser can reliably do)."""
         system_prompt = _RERANK_SYSTEM_PROMPT_TEMPLATE.format(candidate_text=candidate_text, deflection_text=CLINICAL_DEFLECTION_TEXT)
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": customer_text}],
-            response_format={"type": "json_object"},
-        )
-        payload = json.loads(response.choices[0].message.content or "{}")
-        return payload.get("chosen") == "B"
+        messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": customer_text}]
+        with telemetry.observe("ai.clinical_rerank", lambda: _request_observation(self.model, messages, _RERANK_SYSTEM_PROMPT_TEMPLATE, json_output=True), kind="generation") as observation:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,  # type: ignore[call-overload]
+                response_format={"type": "json_object"},
+            )
+            _observe_response(observation, response, self.model)
+            payload = json.loads(response.choices[0].message.content or "{}")
+            chosen = payload.get("chosen") == "B"
+            observation.update(lambda: {"metadata": {"parsed_result": {"clinical_deflection": chosen}}})
+            return chosen
 
     def generate_ungoverned(self, history: list[dict[str, str]], system_prompt: str) -> str:
         """011 (Constitution Amendment 1.3.0, N5): a plain chat completion —
@@ -232,9 +241,13 @@ class OpenAIGenerationProvider:
         The model always returns free text, which the caller sends to the
         customer as-is (plan.md §2)."""
         messages = [{"role": "system", "content": system_prompt}, *[{"role": "user" if item["role"] == "customer" else "assistant", "content": item["content"]} for item in history]]
-        response = self.client.chat.completions.create(model=self.model, messages=messages)  # type: ignore[arg-type]
-        text = (response.choices[0].message.content or "").strip()
-        return text or "Posso ajudar com isso — pode me contar um pouco mais sobre o que você precisa?"
+        with telemetry.observe("ai.n5_free", lambda: _request_observation(self.model, messages, system_prompt), kind="generation") as observation:
+            response = self.client.chat.completions.create(model=self.model, messages=messages)  # type: ignore[arg-type]
+            _observe_response(observation, response, self.model)
+            text = (response.choices[0].message.content or "").strip()
+            result = text or "Posso ajudar com isso — pode me contar um pouco mais sobre o que você precisa?"
+            observation.update(lambda: {"metadata": {"parsed_result": {"draft_text": result}, "prompt_version": UNGOVERNED_N5_PROMPT_VERSION}})
+            return result
 
     def extract_date_intent(self, customer_text: str, reference_date: date) -> StructuredDateIntent | None:
         """006/ND-1: classifies only the 8 structured fields — never
@@ -250,32 +263,67 @@ class OpenAIGenerationProvider:
         though both fall through identically today)."""
         prompt = load_prompt("date_intent.md")
         user_content = json.dumps({"customer_text": customer_text, "reference_date": reference_date.isoformat()}, ensure_ascii=False)
+        messages = [{"role": "system", "content": prompt.content}, {"role": "user", "content": user_content}]
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": prompt.content}, {"role": "user", "content": user_content}],
-                response_format={"type": "json_object"},
-            )
-            payload = json.loads(response.choices[0].message.content or "{}")
+            with telemetry.observe("ai.date_intent", lambda: {**_request_observation(self.model, messages, prompt.content, json_output=True), "version": prompt.version}, kind="generation") as observation:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,  # type: ignore[call-overload]
+                    response_format={"type": "json_object"},
+                )
+                _observe_response(observation, response, self.model)
+                payload = json.loads(response.choices[0].message.content or "{}")
+                result = _parse_date_intent(payload)
+                observation.update(lambda: {"metadata": {"parsed_result": asdict(result)}})
+                return result
         except (json.JSONDecodeError, OSError):
             return None
 
-        def _int_or_none(value: object) -> int | None:
-            return value if isinstance(value, int) else None
 
-        def _str_or_none(value: object) -> str | None:
-            return value if isinstance(value, str) else None
+def _parse_date_intent(payload: dict[str, Any]) -> StructuredDateIntent:
+    def _int_or_none(value: object) -> int | None:
+        return value if isinstance(value, int) else None
 
-        return StructuredDateIntent(
-            relative_unit=_str_or_none(payload.get("relative_unit")),
-            relative_count=_int_or_none(payload.get("relative_count")),
-            weekday=_int_or_none(payload.get("weekday")),
-            nth_weekday_of_month=_int_or_none(payload.get("nth_weekday_of_month")),
-            month=_int_or_none(payload.get("month")),
-            day=_int_or_none(payload.get("day")),
-            time_range_start=_int_or_none(payload.get("time_range_start")),
-            time_range_end=_int_or_none(payload.get("time_range_end")),
-        )
+    def _str_or_none(value: object) -> str | None:
+        return value if isinstance(value, str) else None
+
+    return StructuredDateIntent(
+        relative_unit=_str_or_none(payload.get("relative_unit")),
+        relative_count=_int_or_none(payload.get("relative_count")),
+        weekday=_int_or_none(payload.get("weekday")),
+        nth_weekday_of_month=_int_or_none(payload.get("nth_weekday_of_month")),
+        month=_int_or_none(payload.get("month")),
+        day=_int_or_none(payload.get("day")),
+        time_range_start=_int_or_none(payload.get("time_range_start")),
+        time_range_end=_int_or_none(payload.get("time_range_end")),
+    )
+
+
+def _request_observation(model: str, messages: list[dict[str, str]], prompt: str, *, json_output: bool = False) -> dict[str, Any]:
+    return {
+        "input": messages, "model": model,
+        "model_parameters": {"response_format": {"type": "json_object"}} if json_output else {},
+        "metadata": {"provider": "openai", "prompt_hash": hashlib.sha256(prompt.encode()).hexdigest()},
+    }
+
+
+def _observe_response(observation: telemetry.Observation, response: Any, requested_model: str) -> None:
+    # Only plain, explicitly selected fields cross the provider boundary.
+    # The usage buckets are disjoint: cached/reasoning tokens must not be
+    # billed a second time on top of the corresponding totals.
+    def payload() -> dict[str, Any]:
+        values: dict[str, Any] = {"output": response.choices[0].message.content, "model": getattr(response, "model", None) or requested_model}
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            cached = getattr(getattr(usage, "prompt_tokens_details", None), "cached_tokens", 0) or 0
+            reasoning = getattr(getattr(usage, "completion_tokens_details", None), "reasoning_tokens", 0) or 0
+            values["usage_details"] = {
+                "input": usage.prompt_tokens - cached, "input_cached_tokens": cached,
+                "output": usage.completion_tokens - reasoning, "output_reasoning_tokens": reasoning,
+            }
+        return values
+
+    observation.update(payload)
 
 
 def configured_generation_provider() -> GenerationProvider:

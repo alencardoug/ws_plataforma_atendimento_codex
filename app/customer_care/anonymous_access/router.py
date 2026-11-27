@@ -14,6 +14,7 @@ from customer_care.audit.service import record_event
 from customer_care.autonomy.service import resolve_elapsed_autonomous_sends
 from customer_care.booking_script.service import advance_booking_script, persisted_customer_body
 from customer_care.conversations.projections import customer_projection
+from customer_care.infrastructure import telemetry
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.scheduling.availability import render_booking_summary_line
 from customer_care.scheduling.guided_booking import advance_guided_booking, latest_unconfirmed_offer_generation_id
@@ -129,7 +130,8 @@ def read_conversation(conversation: Annotated[Conversation, Depends(token_bound_
     # D-044 follow-on: the customer's ~2 s poll is what delivers an
     # unclaimed autonomous reply when no operator is watching the queue.
     # Self-gated and cheap until the idle debounce elapses, then fires once.
-    _drive_unclaimed_autonomy(session, conversation)
+    with telemetry.execution_origin("customer_poll"):
+        _drive_unclaimed_autonomy(session, conversation)
     return {**customer_projection(session, conversation), **customer_draft_status(session, conversation), **customer_booking_summary_fields(session, conversation)}
 
 
@@ -180,7 +182,9 @@ def send_customer_message(payload: BodyIn, conversation: Annotated[Conversation,
     gb_offer_pending = conversation.booking_script_step is None and latest_unconfirmed_offer_generation_id(session, conversation) is not None
     if not gb_offer_pending:
         advance_booking_script(session, conversation, payload.body)  # AA-10 — raw input remains request-local; never calls an LLM
-    advance_guided_booking(session, conversation, payload.body)  # 005/D-033 — same principle, GB's own parallel N2-draft flow; no-op if AA-10 just took over
+    with telemetry.correlation(lambda: {"session_id": str(conversation.id), "trace_id": message.id.hex,
+                                       "triggering_message_id": str(message.id), "operation_purpose": "guided_booking_customer_input"}):
+        advance_guided_booking(session, conversation, payload.body)  # 005/D-033 — same principle, GB's own parallel N2-draft flow; no-op if AA-10 just took over
     session.commit()
     session.refresh(message)
     # D-044 follow-on: the autonomous reply is driven by the customer's
@@ -205,9 +209,10 @@ def typing_heartbeat(conversation: Annotated[Conversation, Depends(token_bound_c
     # Check using the *previous* activity timestamp before this heartbeat
     # resets it — otherwise the check below would always see "just now" and
     # never fire from within this same call.
-    evaluate_automatic_trigger(session, conversation)
-    # D-044 follow-on: also drive the unclaimed (no-operator) autonomy path.
-    _drive_unclaimed_autonomy(session, conversation)
+    with telemetry.execution_origin("customer_typing"):
+        evaluate_automatic_trigger(session, conversation)
+        # D-044 follow-on: also drive the unclaimed (no-operator) autonomy path.
+        _drive_unclaimed_autonomy(session, conversation)
     now = datetime.now(UTC)
     conversation.last_customer_typing_at = now
     conversation.last_customer_activity_at = now

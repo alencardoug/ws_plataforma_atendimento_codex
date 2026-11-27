@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from customer_care.audit.service import record_event
+from customer_care.infrastructure import telemetry
 from customer_care.infrastructure.models import KnowledgeChunk, KnowledgeDocument, QAEntry, RetrievalHit, RetrievalRun
 from customer_care.knowledge.embeddings import DeterministicTestEmbeddingProvider, EmbeddingProvider, OpenAIEmbeddingProvider
 from customer_care.shared.settings import get_settings
@@ -39,6 +40,25 @@ def retrieve(
     conversation_id: UUID | None = None,
     triggering_message_id: UUID | None = None,
 ) -> tuple[RetrievalRun, list[Evidence]]:
+    with telemetry.observe("rag.retrieve", lambda: {
+        "input": {"query": query, "top_k": top_k},
+        "metadata": {"retrieval_purpose": purpose, "conversation_id": str(conversation_id) if conversation_id else None,
+                     "triggering_message_id": str(triggering_message_id) if triggering_message_id else None},
+    }, identity=None if telemetry.current().trace_id else lambda: {"session_id": str(conversation_id) if conversation_id else None}, kind="retriever"):
+        return _retrieve(session, operator_id=operator_id, query=query, purpose=purpose, top_k=top_k,
+                         conversation_id=conversation_id, triggering_message_id=triggering_message_id)
+
+
+def _retrieve(
+    session: Session,
+    *,
+    operator_id: UUID | None,
+    query: str,
+    purpose: str,
+    top_k: int,
+    conversation_id: UUID | None = None,
+    triggering_message_id: UUID | None = None,
+) -> tuple[RetrievalRun, list[Evidence]]:
     provider = configured_embedding_provider()
     started = perf_counter()
     run = RetrievalRun(conversation_id=conversation_id, triggering_message_id=triggering_message_id, operator_id=operator_id, purpose=purpose, query_text=query, embedding_model=provider.model, top_k=top_k, status="STARTED")
@@ -56,6 +76,7 @@ def retrieve(
             candidates.append((float(distance), "CLINICAL_CHILD", chunk, document))
         candidates.sort(key=lambda item: item[0])
         evidence: list[Evidence] = []
+        observed_hits: list[RetrievalHit] = []
         seen_parents: set[str] = set()
         for distance, kind, matched, parent in candidates:
             if len(evidence) >= top_k:
@@ -74,10 +95,23 @@ def retrieve(
                 seen_parents.add(parent.document_id)
                 item = Evidence(hit.id, "CLINICAL", hit.rank, hit.score, parent.title, matched.heading, parent.content_markdown or matched.content_markdown, matched.content_markdown, parent.customer_citation_allowed)
             evidence.append(item)
+            observed_hits.append(hit)
         run.status = "COMPLETED"
         run.duration_ms = round((perf_counter() - started) * 1000)
         run.completed_at = datetime.now(UTC)
         record_event(session, "rag.search_completed", "OPERATOR", actor_id=operator_id, conversation_id=conversation_id, payload={"retrieval_run_id": str(run.id), "hit_count": len(evidence), "duration_ms": run.duration_ms})
+        telemetry.current().update(lambda: {
+            "metadata": {"retrieval_run_id": str(run.id), "embedding_model": provider.model},
+            "output": {"status": run.status, "evidence": [
+                {"retrieval_hit_id": str(item.retrieval_hit_id), "type": item.knowledge_type,
+                 "rank": item.rank, "score": item.score, "title": item.title, "section": item.section,
+                 "content": item.content, "content_length": len(item.content), "matched_child_excerpt": item.matched_child_excerpt,
+                 "matched_qa_id": hit.matched_qa_id, "matched_chunk_id": hit.matched_chunk_id,
+                 "expanded_parent_document_id": hit.expanded_parent_document_id,
+                 "customer_citation_allowed": item.customer_citation_allowed}
+                for item, hit in zip(evidence, observed_hits, strict=True)
+            ]},
+        })
         return run, evidence
     except Exception as exc:
         run.status = "FAILED"

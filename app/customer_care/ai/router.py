@@ -1,8 +1,10 @@
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 from time import perf_counter
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -12,6 +14,8 @@ from customer_care.ai.providers import CLINICAL_DEFLECTION_TEXT, UNGOVERNED_N5_P
 from customer_care.ai.prompts import load_prompt
 from customer_care.audit.service import record_event
 from customer_care.conversations.projections import assigned_operator_id
+from customer_care.infrastructure import telemetry
+from customer_care.infrastructure.telemetry_events import pending_snapshot, publish_pending
 from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Category, Conversation, KnowledgeDocument, Message, MessageSelection, PendingAutonomousSend, QAEntry, RetrievalHit, RetrievalRun, SystemSettings
 from customer_care.knowledge.dynamic_binding import DynamicResolution, DynamicResolutionError, resolve_dynamic_pattern
 from customer_care.rag.service import Evidence, configured_embedding_provider, evidence_dict, load_evidence, retrieve
@@ -357,9 +361,18 @@ def generate_draft(
             record_event(session, "ai.dynamic_pattern_resolved", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id), **(dynamic_extra or {})})
         if clinical_deflection_applied:
             record_event(session, "ai.clinical_deflection_applied", "OPERATOR", actor_id=operator_id, conversation_id=conversation.id, payload={"ai_generation_id": str(generation.id)})
+        telemetry.current().update(lambda: {"output": _generation_observation(generation), "metadata": {
+            "retrieval_run_id": str(run.id), "prompt_version": prompt_version,
+            "initial_rank_one": {"retrieval_hit_id": str(evidence[0].retrieval_hit_id), "type": evidence[0].knowledge_type,
+                                 "score": evidence[0].score} if evidence else None,
+            "dynamic_parameters": dynamic_extra,
+            "offered_slot_ids": [str(row[0].slot_id) for row in offered_rows] if offered_rows else [],
+            "selected_offer_id": str(conversation.guided_booking_selected_offer_id) if conversation.guided_booking_selected_offer_id else None,
+        }})
         session.commit()
         return generation, [evidence_dict(item) for item in evidence], result.request_messages
     except Exception as exc:
+        telemetry.current().error(exc)
         generation = AIGeneration(conversation_id=conversation.id, triggering_message_id=triggering_message_id, retrieval_run_id=run.id, prior_generation_id=prior_generation_id, operator_id=operator_id, status="FAILED", draft_text="", abstention_reason="PROVIDER_FAILURE", provider="unavailable", model="unavailable", prompt_version=prompt_version, duration_ms=round((perf_counter() - started) * 1000), trigger=trigger)
         session.add(generation)
         session.commit()
@@ -391,7 +404,8 @@ def draft(conversation_id: UUID, payload: DraftIn, operator: CurrentOperator, se
     # select_evidence's MANUAL_EVIDENCE ones are distinct trigger types, not
     # "regenerate", and must not set this.
     prior_generation_id = session.scalar(select(AIGeneration.id).where(AIGeneration.conversation_id == conversation.id, AIGeneration.status != "FAILED").order_by(AIGeneration.created_at.desc()))
-    generation, evidence, request_messages = generate_draft(session, operator.id, conversation, selected_messages, manual_search_text, prior_generation_id=prior_generation_id, instruction_text=payload.instruction_text.strip())
+    with telemetry.correlation(lambda: {"session_id": str(conversation.id), "operation_purpose": "manual_draft"}):
+        generation, evidence, request_messages = generate_draft(session, operator.id, conversation, selected_messages, manual_search_text, prior_generation_id=prior_generation_id, instruction_text=payload.instruction_text.strip())
     return generation_dict(session, generation, evidence, request_messages)
 
 
@@ -645,8 +659,9 @@ def evaluate_automatic_trigger(session: DbSession, conversation: Conversation) -
     conversation.auto_draft_covers_through_message_id = newest_customer.id
     session.commit()
     try:
-        generation, _evidence, _messages = generate_draft(session, operator_id, conversation, selected_messages, "", trigger="AUTOMATIC")
-        maybe_open_autonomous_window(session, generation, conversation)
+        with _observe_turn(conversation, newest_customer, selected_messages):
+            generation, _evidence, _messages = generate_draft(session, operator_id, conversation, selected_messages, "", trigger="AUTOMATIC")
+            maybe_open_autonomous_window(session, generation, conversation)
     except Exception:
         pass
 
@@ -669,8 +684,9 @@ def evaluate_unclaimed_autonomous_trigger(session: DbSession, conversation: Conv
     conversation.auto_draft_covers_through_message_id = newest_customer.id
     session.commit()
     try:
-        generation, _evidence, _messages = generate_draft(session, None, conversation, selected_messages, "", trigger="AUTOMATIC", allow_unclaimed=True)
-        maybe_open_autonomous_window(session, generation, conversation)
+        with _observe_turn(conversation, newest_customer, selected_messages):
+            generation, _evidence, _messages = generate_draft(session, None, conversation, selected_messages, "", trigger="AUTOMATIC", allow_unclaimed=True)
+            maybe_open_autonomous_window(session, generation, conversation)
     except Exception:
         pass
 
@@ -707,7 +723,13 @@ def _open_pending(session: DbSession, generation: AIGeneration, conversation: Co
     opens_at = datetime.now(UTC)
     pending = PendingAutonomousSend(generation_id=generation.id, conversation_id=conversation.id, category=category, mechanism=mechanism, window_seconds=window_seconds, opens_at=opens_at, resolves_at=opens_at + timedelta(seconds=window_seconds), status="PENDING")
     session.add(pending)
+    observation = pending_snapshot(session, pending, generation)
     session.commit()
+    if observation is not None:
+        publish_pending(observation, committed_id=str(pending.id))
+    telemetry.current().update(lambda: {"output": {"decision": "pending_opened", "pending_id": str(pending.id),
+                                                "final_generation": _generation_observation(generation)},
+                                       "metadata": {"mechanism": mechanism}})
 
 
 # D-043-2 (2026-08-21): GB (005) generations carry their own trigger
@@ -746,6 +768,38 @@ def _clinical_top_evidence_score(session: DbSession, generation: AIGeneration) -
     return hit.score if hit else None
 
 
+def _generation_observation(generation: AIGeneration) -> dict[str, Any]:
+    return {"ai_generation_id": str(generation.id), "trigger": generation.trigger, "status": generation.status,
+            "provider": generation.provider, "model": generation.model, "draft_text": generation.draft_text,
+            "reason_code": generation.abstention_reason, "category_slug": generation.category_slug,
+            "prompt_version": generation.prompt_version,
+            "retrieval_run_id": str(generation.retrieval_run_id) if generation.retrieval_run_id else None,
+            "prior_generation_id": str(generation.prior_generation_id) if generation.prior_generation_id else None}
+
+
+@contextmanager
+def _observe_turn(conversation: Conversation, newest: Message, selected: list[Message]) -> Iterator[None]:
+    with telemetry.observe("n5.process_turn", lambda: {
+        "input": [{"id": str(row.id), "role": row.author_type, "content": row.body} for row in selected],
+        "metadata": {"selected_message_ids": [str(row.id) for row in selected], "effective_mode": conversation.effective_mode,
+                     "preceding_message_trace_ids": [row.id.hex for row in selected if row.id != newest.id]},
+    }, identity=lambda: {"trace_id": newest.id.hex, "session_id": str(conversation.id),
+                        "turn_id": str(newest.id), "turn_created_at": newest.created_at.astimezone(UTC).isoformat(), "attempt_id": str(uuid4())}) as observation:
+        context = observation.metadata
+        if "turn_id" in context:
+            telemetry.score("n5.turn_started", 1.0, key=context["turn_id"], timestamp=context["turn_created_at"], data_type="BOOLEAN")
+        yield
+
+
+def _observe_decision(function: Callable[[DbSession, AIGeneration, Conversation], None]) -> Callable[[DbSession, AIGeneration, Conversation], None]:
+    @wraps(function)
+    def observed(session: DbSession, generation: AIGeneration, conversation: Conversation) -> None:
+        with telemetry.observe("autonomy.decision", lambda: {"input": _generation_observation(generation)}):
+            function(session, generation, conversation)
+    return observed
+
+
+@_observe_decision
 def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, conversation: Conversation) -> None:
     """010/GA-2, GA-3 + 011 (Amendment 1.3.0, N5): the single point where
     category policy, both kill switches, and the ANSWER/evidence gate all
@@ -800,17 +854,26 @@ def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, c
       decision 2026-08-21: gate autonomous send (never manual N1/N2
       drafting) on `_AUTONOMOUS_CLINICAL_MIN_SCORE` for this one shortcut."""
     if generation.trigger != "AUTOMATIC" and generation.trigger not in _N5_ELIGIBLE_GB_TRIGGERS:
+        telemetry.current().update(lambda: {"output": {"decision": "ineligible_trigger"}})
         return
     settings = session.get(SystemSettings, True)
     if not settings:
+        telemetry.current().update(lambda: {"output": {"decision": "settings_missing"}})
         return
-    weak_clinical_shortcut = generation.provider == "clinical-parent-document" and (_clinical_top_evidence_score(session, generation) or 0.0) < _AUTONOMOUS_CLINICAL_MIN_SCORE
+    clinical_score = _clinical_top_evidence_score(session, generation) if generation.provider == "clinical-parent-document" else None
+    weak_clinical_shortcut = generation.provider == "clinical-parent-document" and (clinical_score or 0.0) < _AUTONOMOUS_CLINICAL_MIN_SCORE
+    telemetry.current().update(lambda: {"metadata": {
+        "governed_switch": settings.autonomy_kill_switch_enabled, "n5_switch": settings.n5_kill_switch_enabled,
+        "window_seconds": settings.autonomy_window_seconds, "idle_seconds": settings.automatic_trigger_idle_seconds,
+        "initial_clinical_score": clinical_score, "weak_clinical_shortcut": weak_clinical_shortcut,
+    }})
 
     # Governed branch (010, Amendment 1.2.0) — unchanged conditions, plus
     # the D-043-2 clinical-relevance gate; AUTOMATIC-trigger only, GB's
     # own triggers were never in scope for N3/N4.
     if generation.trigger == "AUTOMATIC" and generation.status == "ANSWER" and generation.category_slug and settings.autonomy_kill_switch_enabled and not weak_clinical_shortcut:
         category = session.get(Category, generation.category_slug)
+        telemetry.current().update(lambda: {"metadata": {"category_autonomy_enabled": category.autonomy_enabled if category else None}})
         if category and category.autonomy_enabled:
             _open_pending(session, generation, conversation, category=category.slug, mechanism="governed_autonomy", window_seconds=settings.autonomy_window_seconds)
             return  # a real grounded answer already exists — N5 adds no value here
@@ -822,14 +885,23 @@ def maybe_open_autonomous_window(session: DbSession, generation: AIGeneration, c
             # D-043-2: GB's own fixed-template output — never subject to
             # the clinical-relevance gate (that only ever applies to
             # provider == "clinical-parent-document", which GB never is).
+            telemetry.current().update(lambda: {"metadata": {"n5_path": "guided_booking"}})
+            telemetry.turn_scores("guided_booking")
             _open_pending(session, generation, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
         elif generation.status == "ANSWER" and not weak_clinical_shortcut:
             # D-043: a grounded answer already exists — N5 delivers it
             # as-is, never re-generating an evidence-free replacement.
+            telemetry.current().update(lambda: {"metadata": {"n5_path": "reuse_answer"}})
+            telemetry.turn_scores("reuse_answer")
             _open_pending(session, generation, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
         else:
             # ABSTAIN, or an ANSWER too weak to trust unattended (D-043-2)
             # — both fall back to a free-form, evidence-free reply rather
             # than leaving the customer without one.
+            fallback_reason = "initial_not_answer" if generation.status != "ANSWER" else "weak_clinical_shortcut"
+            telemetry.current().update(lambda: {"metadata": {"n5_path": "freeform_fallback", "fallback_reason": fallback_reason}})
+            telemetry.turn_scores("freeform_fallback", fallback_reason)
             ungoverned = generate_ungoverned_reply(session, conversation, generation)
             _open_pending(session, ungoverned, conversation, category=None, mechanism="ungoverned_n5", window_seconds=settings.autonomy_window_seconds)
+    else:
+        telemetry.current().update(lambda: {"output": {"decision": "no_applicable_mechanism"}})

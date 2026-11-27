@@ -9,6 +9,7 @@ from customer_care.ai.router import router as ai_router
 from customer_care.auth.router import router as auth_router
 from customer_care.evaluation.router import router as evaluation_router
 from customer_care.infrastructure.database import check_database
+from customer_care.infrastructure import telemetry
 from customer_care.knowledge.router import router as knowledge_crud_router
 from customer_care.operator_workspace.router import router as operator_router
 from customer_care.rag.router import router as rag_router
@@ -19,6 +20,7 @@ from customer_care.shared.settings import get_settings
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    telemetry.initialize()
     # 012 / AC-1: env-gated idempotent appointment-availability bootstrap
     # fill. No-op unless RUN_BOOTSTRAP_SEED is set (so the test process
     # never seeds). Imported lazily to keep app import cheap and
@@ -30,7 +32,10 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         maybe_run_bootstrap_seed_on_startup()
     except Exception:  # pragma: no cover - defensive; startup must still proceed
         pass
-    yield
+    try:
+        yield
+    finally:
+        telemetry.shutdown()
 
 
 def create_app() -> FastAPI:

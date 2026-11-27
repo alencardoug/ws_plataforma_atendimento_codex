@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolatedDatabaseName } from "./isolated-database";
 
 import { expect, test } from "@playwright/test";
 
@@ -29,10 +30,10 @@ function psql(sql: string): void {
   // Postgres deadlock (found live, v8.spec.ts). One retry after a short
   // pause is enough in practice.
   try {
-    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
   } catch {
     execFileSync("sleep", ["2"]);
-    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
   }
 }
 
@@ -142,7 +143,7 @@ test.describe("007 acceptance — completed booking visibility", () => {
       await sendCustomerMessage(customer, "sim, paguei");
       await draftAndSend(operator, "sim, paguei"); // GUIDED_BOOKING_COMPLETE
 
-      execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-c", "SELECT m.body, g.status, g.trigger, g.abstention_reason, left(g.draft_text,80), g.dynamic_pattern_used, g.created_at FROM customer_service.ai_generations g JOIN customer_service.messages m ON m.id=g.triggering_message_id ORDER BY g.created_at;"], { cwd: repoRoot, stdio: "inherit" });
+      execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-c", "SELECT m.body, g.status, g.trigger, g.abstention_reason, left(g.draft_text,80), g.dynamic_pattern_used, g.created_at FROM customer_service.ai_generations g JOIN customer_service.messages m ON m.id=g.triggering_message_id ORDER BY g.created_at;"], { cwd: repoRoot, stdio: "inherit" });
 
       // Both sides show the same full-detail line (BS-2 sourced it from
       // the specific offer GB-2 identified, not just the specialty) —

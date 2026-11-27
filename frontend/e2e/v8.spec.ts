@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolatedDatabaseName } from "./isolated-database";
 
 import { expect, test } from "@playwright/test";
 
@@ -31,10 +32,10 @@ function psql(sql: string): void {
   // deadlock would be a real problem worth surfacing, not silently
   // retried away.
   try {
-    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
   } catch {
     execFileSync("sleep", ["2"]);
-    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
   }
 }
 

@@ -171,8 +171,14 @@ Material aproveitável do pacote do Codex, hoje **provisório**:
 
 Checkpoint em 2026-09-10: prova LF-1 persistida no Cloud; ver
 [analysis.md §8](../specs/013-local-langfuse-observability/analysis.md).
-Revisar os hooks globais do SDK, captura de embeddings e identificador
-público automático descritos na spec antes de LF-2.
+Continuação LF-2..LF-5 autorizada pelo humano (“continue”). A captura do
+atendimento usa observações explícitas com os clientes OpenAI originais;
+o wrapper global continua somente na prova CLI. Implementar os limites
+de exportação/shutdown e os negativos da spec R06 antes de integrar os
+três pontos. LF-5 continua sendo o checkpoint antes da sessão LF-6.
+O executor LF-5 usa projeto Compose separado e banco
+`oncology_langfuse_test`; API/UI cotidianos não são substituídos. O banco
+cotidiano só fornece snapshot read-only, com seu estado inicial restaurado.
 
 ## 8. Entregáveis
 

@@ -46,10 +46,11 @@ def test_autonomy_service_has_exactly_one_operator_message_construction_site() -
 
 
 def test_resolve_elapsed_autonomous_sends_is_imported_only_from_its_authorized_callers() -> None:
-    """plan.md §4 — invoked from list_conversations() and
-    operator_conversation_detail() (both in operator_workspace/router.py),
-    both existing lazily-evaluated poll endpoints, never from a
-    write/send-triggering endpoint."""
+    """010 + D-044: operator polls and customer GET/typing may resolve.
+
+    The customer-side caller was authorized in 012 and already existed
+    before 013; the original 010-only allowlist had not caught up.
+    """
     importing_files: list[Path] = []
     for path in _iter_source_files():
         if AUTONOMY_DIR in path.parents:
@@ -58,7 +59,14 @@ def test_resolve_elapsed_autonomous_sends_is_imported_only_from_its_authorized_c
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and any(alias.name == "resolve_elapsed_autonomous_sends" for alias in node.names):
                 importing_files.append(path)
-    assert importing_files == [ROOT / "operator_workspace" / "router.py"], importing_files
+    assert set(importing_files) == {ROOT / "operator_workspace" / "router.py", ROOT / "anonymous_access" / "router.py"}, importing_files
+
+
+def test_customer_message_post_does_not_drive_autonomous_generation_or_send() -> None:
+    tree = ast.parse((ROOT / "anonymous_access" / "router.py").read_text(encoding="utf-8"))
+    post = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "send_customer_message")
+    called = {node.func.id for node in ast.walk(post) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert not called & {"_drive_unclaimed_autonomy", "evaluate_automatic_trigger", "evaluate_unclaimed_autonomous_trigger", "resolve_elapsed_autonomous_sends"}
 
 
 def test_autonomy_service_does_not_import_booking_script() -> None:

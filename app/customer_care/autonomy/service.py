@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from customer_care.audit.service import record_event
 from customer_care.infrastructure.models import AIGeneration, Conversation, Message, PendingAutonomousSend
+from customer_care.infrastructure.telemetry_events import pending_snapshot, publish_pending
 
 
 def resolve_elapsed_autonomous_sends(session: Session) -> None:
@@ -54,4 +55,6 @@ def resolve_elapsed_autonomous_sends(session: Session) -> None:
         pending.status = "SENT"
         pending.resolved_at = message.created_at
         record_event(session, "autonomy.message_sent", "SYSTEM", conversation_id=pending.conversation_id, payload={"conversation_id": str(pending.conversation_id), "message_id": str(message.id), "pending_autonomous_send_id": str(pending.id), "generation_id": str(generation.id), "category": pending.category, "mechanism": pending.mechanism})
+        observation = pending_snapshot(session, pending, generation, message)
         session.commit()
+        publish_pending(observation)

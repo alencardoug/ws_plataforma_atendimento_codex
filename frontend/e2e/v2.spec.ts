@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolatedDatabaseName, waitForBackend } from "./isolated-database";
 
 import { expect, test } from "@playwright/test";
 
@@ -23,16 +24,16 @@ function psql(sql: string): void {
   // reliably completes its own real "Gerar rascunho" call instead of
   // failing early). One retry after a short pause is enough in practice.
   try {
-    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
   } catch {
     execFileSync("sleep", ["2"]);
-    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
   }
 }
 
 function restartBackend(): void {
   execFileSync("docker", ["compose", "restart", "backend"], { cwd: repoRoot, stdio: "inherit" });
-  execFileSync("bash", ["-c", "until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done"], { cwd: repoRoot, stdio: "inherit", timeout: 30_000 });
+  waitForBackend();
 }
 
 // Each of T124/T125/T126/T127 claims an operator conversation slot (cap is
