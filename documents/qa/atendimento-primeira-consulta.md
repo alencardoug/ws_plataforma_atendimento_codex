@@ -82,7 +82,7 @@ O chatbot consulta `scheduling.available_offers`: apresenta até quatro vagas po
 
 ## Quantos horários o chatbot oferece?
 
-São oferecidas no máximo quatro vagas por especialidade em cada janela dinâmica: próximo dia útil e primeiro dia útil calculado a partir de D+7 (simulação).
+O chatbot mostra até quatro horários por vez, sempre a partir do próximo dia útil (domingos e feriados não contam). Você pode indicar a especialidade, o dia ou o período (manhã ou tarde) para ver opções mais adequadas (simulação).
 
 `qa_id: QA-014` · `categoria: agenda`
 

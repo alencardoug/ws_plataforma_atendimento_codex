@@ -844,3 +844,8 @@ keyword), calibrated with real embeddings. Operator booking-offer button
 not gated. See `DECISIONS.md` D-047, `specs/004-…/spec.md` §9. Ingested locally and in
 production (`embedded: 1`). **Deployed to production 2026-11-27 (rev
 `-00013-sl6`); not committed.**
+
+Content follow-up (2026-11-27): `QA-014` ("Quantos horários o chatbot
+oferece?") still described the retired D+1/D+7 windows; its answer now
+matches D-046 (up to four times per reply, from the next business day,
+filterable by specialty/day/period). Re-ingested locally and in production.
