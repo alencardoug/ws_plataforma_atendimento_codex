@@ -223,3 +223,11 @@ Phase 1 (migrations)
   -> Phase 7 (needs 1-6 complete)
   -> Phase 8 (needs 7's gates green)
 ```
+
+## Phase 10 — Correction (2026-11-27, D-045): CPF before offers
+
+- [x] T100 Migration widening `ai_generations_trigger_check` (`GUIDED_CPF_REQUEST`, `GUIDED_BOOKING_CANCELLED`).
+- [x] T101 Reorder `scheduling/guided_booking.py` per spec §13 items 11-15.
+- [x] T102 `ai/router.py`: CPF-request text on offer drafts, payment question on slot choice, N5 trigger set.
+- [x] T103 Update `test_guided_booking.py` and every affected test/smoke to the new order; add tests for the no-agenda path (no CPF asked), cancel at CPF step, slot choice refused before CPF, redaction position.
+- [x] T104 Gates: backend `pytest` 330 pass, `ruff`/`mypy` clean, `smoke_v5_guided_booking.py` + `smoke_v11_ungoverned_n5.py` pass (real embeddings/LLM, local DB). `v7.spec.ts` reordered but Playwright not run (no frontend deps/full stack in session).

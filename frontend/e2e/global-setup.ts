@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolatedDatabaseName, waitForBackend } from "./isolated-database";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -17,6 +18,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../
 // scenario file's rate-limit state can leak into another's, in either
 // direction, regardless of run order.
 export default function globalSetup(): void {
+  isolatedDatabaseName();
   execFileSync("docker", ["compose", "restart", "backend"], { cwd: repoRoot, stdio: "inherit" });
-  execFileSync("bash", ["-c", "until curl -sf http://127.0.0.1:8000/health >/dev/null; do sleep 1; done"], { cwd: repoRoot, stdio: "inherit", timeout: 30_000 });
+  waitForBackend();
 }

@@ -141,25 +141,30 @@ def run() -> None:
             detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()
             return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" for m in detail["messages"])
 
-        assert _wait_for(offers_sent_autonomously, timeout_seconds=45), "expected the initial offers draft to autonomously send within 45s"
+        assert _wait_for(offers_sent_autonomously, timeout_seconds=45), "expected the initial (D-045: CPF-request) offer draft to autonomously send within 45s"
 
-        slot_msg = client.post(f"/api/v1/public/conversations/{conversation4_id}/messages", headers=customer4_headers, json={"body": "primeira opção"})
-        assert slot_msg.status_code == 201, slot_msg.text
+        def gb_step_autosends(customer_body: str, expected_text: str, label: str) -> None:
+            """D-043-2/D-045: each GB step's fixed-template reply must reach
+            the customer under N5 with no operator send."""
+            posted = client.post(f"/api/v1/public/conversations/{conversation4_id}/messages", headers=customer4_headers, json={"body": customer_body})
+            assert posted.status_code == 201, posted.text
 
-        def has_pending4_slot() -> bool:
-            detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers)
-            return detail.json().get("pending_autonomous_send") is not None
+            def has_pending() -> bool:
+                pending = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json().get("pending_autonomous_send")
+                return pending is not None and expected_text in pending["draft_text"]
 
-        assert _wait_for(has_pending4_slot, timeout_seconds=40), "expected the GB slot-choice draft (trigger=GUIDED_SLOT_SELECTION) to become a pending N5 send — this is the exact bug report D-043-2 closes"
-        pending4 = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()["pending_autonomous_send"]
-        assert pending4["mechanism"] == "ungoverned_n5", pending4
-        assert "Informe seu CPF" in pending4["draft_text"], pending4
+            assert _wait_for(has_pending, timeout_seconds=40), f"expected the GB {label} draft to become a pending N5 send"
+            pending = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()["pending_autonomous_send"]
+            assert pending["mechanism"] == "ungoverned_n5", pending
 
-        def slot_sent_autonomously() -> bool:
-            detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()
-            return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" and "Informe seu CPF" in m.get("body", "") for m in detail["messages"])
+            def sent() -> bool:
+                detail = client.get(f"/api/v1/operator/conversations/{conversation4_id}", headers=headers).json()
+                return not detail.get("pending_autonomous_send") and any(m.get("autonomous_source") == "ungoverned_n5" and expected_text in m.get("body", "") for m in detail["messages"])
 
-        assert _wait_for(slot_sent_autonomously, timeout_seconds=10), "expected the GB slot-choice confirmation to autonomously send within 10s"
+            assert _wait_for(sent, timeout_seconds=10), f"expected the GB {label} reply to autonomously send within 10s"
+
+        gb_step_autosends("12345678910", "Escolha um dos horários disponíveis", "CPF-confirmed offers (GUIDED_CPF_CONFIRMED)")
+        gb_step_autosends("primeira opção", "O valor foi pago?", "slot-choice (GUIDED_SLOT_SELECTION)")
         close4 = client.post(f"/api/v1/operator/conversations/{conversation4_id}/close", headers=headers)
         assert close4.status_code == 200, close4.text
 

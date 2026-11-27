@@ -2,7 +2,7 @@
 
 Data: 2026-09-10. Escopo: revisão documental anterior à instrumentação.
 Resultado da revisão inicial: **LF-0 preparado para revisão humana**.
-Atualização: **LF-0 aprovado; prova LF-1 disponível para revisão**, conforme §7–§8.
+Atualização: **LF-1 revisado; LF-2..LF-5 em execução**, conforme §7–§9.
 
 ## 1. Método e fontes
 
@@ -331,3 +331,59 @@ existentes; R02 explicitado com a evidência do SDK; AC-01 comprovado
 tecnicamente e entregue ao checkpoint. A contenção global do wrapper,
 fail-open de entrada/update/saída, captura de embeddings sem duplicação
 e os demais aceites continuam a cargo de LF-2..LF-5, após esta revisão.
+
+## 9. Continuação LF-2..LF-5 — revisão anterior ao código (2026-09-10)
+
+Refinamento de isolamento após a primeira tentativa dos gates: o container
+PostgreSQL cotidiano estava sem rede Compose e o frontend antigo referia
+uma imagem indisponível. A tentativa falhou antes das migrações/testes.
+O executor passa a usar projeto Compose separado, banco/volume de teste
+próprios e portas temporárias; não recria mais API/UI cotidianos. Snapshot
+de conteúdo continua read-only por socket local. Esta alteração é apenas
+do harness LF-5 e foi reconciliada em spec → roteiro → análise antes de
+reexecutar; não altera o Compose versionado nem a infraestrutura do produto.
+
+O humano solicitou “continue” após a entrega da prova LF-1. A instrução
+foi interpretada explicitamente na sessão como autorização para avançar
+desse checkpoint até LF-5; LF-6 conserva sua divisão humano + Claude Code.
+Checkout inicial `9a58971`, sem alterações versionadas; a imagem não
+versionada em `portfolio/screenshots/` é preservada. Compose cotidiano
+encontrado parado; nenhuma limpeza ou exportação de histórico autorizada.
+
+Revisão equivalente ao analyze: constituição, contrato, estado, spec 013,
+roteiro LF, revisão Claude Code, playbook, contratos §3/§5, specs 010/011,
+D-043/D-043-2/D-044 e os pontos reais de geração/recuperação/decisão/envio.
+AC-02/03 cobrem o adaptador; AC-04 cobre cada ramo e suas chamadas;
+AC-05/06 cobrem confirmação pós-commit, veto e privacidade; AC-07 cobre
+regressão em banco isolado. Todos continuam pendentes de execução.
+
+Dois detalhes reconciliados **spec → roteiro → análise**, antes do código:
+
+- O wrapper `langfuse.openai` modifica classes OpenAI globalmente e
+  captura erros automaticamente. A captura explícita de observações,
+  documentada pela [API oficial](https://langfuse.com/docs/observability/sdk/instrumentation)
+  e confirmada no código instalado `langfuse==4.15.1`, atende aos mesmos
+  campos com os clientes originais. O wrapper permanece exclusivo da
+  prova CLI. Não haverá patch/despatch global nem duplicação de embeddings.
+- `Langfuse.flush()` espera queues sem teto; o resource manager registra
+  `shutdown` em `atexit`. O adaptador usa tracer próprio, batches 64/1 s,
+  HTTP 3 s e shutdown daemon com join máximo de 5 s, removendo somente
+  o callback específico do SDK. Testes devem provar a contenção inclusive
+  com flush bloqueado, além de falhas de entrada/update/end/export.
+
+Os helpers Playwright atuais contêm `psql -d oncology` literal. LF-5
+precisa propagar e validar o destino isolado também nesses comandos;
+trocar apenas `DATABASE_URL` do backend não atende AC-07/§5. O executor
+preservará o estado inicial dos serviços e o `.env`, inclusive em falha.
+Nenhuma migração, mudança de prompt, decisão de autonomia ou escrita de
+agenda foi adicionada ao escopo por essas escolhas.
+
+Primeira regressão: 70 testes locais passaram (adaptador, prova LF-1,
+providers e datas). O teste de allowlist de imports de 010 ainda esperava
+somente `operator_workspace/router.py`; `git show HEAD` confirmou o
+caller `anonymous_access/router.py` já presente por D-044. Atualizado para
+esses **dois arquivos exatos**, adicionando o negativo que proíbe disparar
+geração/envio no POST de mensagem. É alinhamento de teste ao baseline R01,
+sem caller ou caminho de envio novo. Uma extração inicial da decisão
+também quebrou a inspeção de fonte de 012; substituída por wrapper local
+com `functools.wraps`, preservando a função e seu teste original.

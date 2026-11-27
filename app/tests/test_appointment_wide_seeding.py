@@ -58,7 +58,7 @@ class TestWideSeedBusinessDays:
 
 class TestCreateWideSlotsOn:
     def test_creates_fourteen_slots_per_active_professional_forty_five_minutes_apart(self) -> None:
-        target_date = date(2027, 3, 15)  # a Monday, far outside any real seed window this test's own cleanup can't reach
+        target_date = date(2029, 3, 12)  # a Monday beyond the D-046 horizon (which now reaches 2027-12-31), so no seeded slots exist there
         session_factory = get_session_factory()
         try:
             with session_factory() as db:
@@ -87,7 +87,7 @@ class TestCreateWideSlotsOn:
                 db.commit()
 
     def test_second_call_on_the_same_day_creates_nothing_idempotent(self) -> None:
-        target_date = date(2027, 3, 16)  # a Tuesday
+        target_date = date(2029, 3, 13)  # a Tuesday, beyond the D-046 horizon
         session_factory = get_session_factory()
         try:
             with session_factory() as db:

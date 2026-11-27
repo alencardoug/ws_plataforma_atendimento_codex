@@ -22,7 +22,16 @@ from `booking_script/*`; `booking_script/service.py` itself (home of the
 actual autonomous-send mechanism, `send_scripted_message`) is never
 imported, and `conversation.booking_script_step` is never written by this
 module. See specs/005-dynamic-pricing-and-guided-booking/spec.md
-GB-2..GB-8 (as corrected) and `DECISIONS.md` D-033."""
+GB-2..GB-8 (as corrected) and `DECISIONS.md` D-033.
+
+**Reordered 2026-11-27 (human decision, D-045): CPF before offers.** The
+booking-intent message still resolves availability (so no agenda still
+abstains and never asks a pointless CPF), but the customer first sees a
+CPF request (`cpf_request_text`); the persisted offers are shown, numbered,
+only once a valid CPF arrives (`GUIDED_CPF_CONFIRMED`), then slot choice
+(`GUIDED_SLOT_SELECTION`) asks the payment question, then completion.
+"Cancelar"/"voltar" while the CPF is pending ends the flow
+(`GUIDED_BOOKING_CANCELLED`). spec.md §13."""
 
 import re
 from collections.abc import Sequence
@@ -154,11 +163,33 @@ def persist_presented_offers(session: Session, provider: EmbeddingProvider, ai_g
         session.add(AppointmentOfferPresentation(ai_generation_id=ai_generation_id, slot_id=slot.slot_id, display_order=order, description=description, embedding=vector))
 
 
-_GB_ALL_FLOW_TRIGGERS = ("GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE")
-_GB_TERMINAL_TRIGGER = "GUIDED_BOOKING_COMPLETE"
+_GB_ALL_FLOW_TRIGGERS = (
+    "GUIDED_CPF_REQUEST",
+    "GUIDED_CPF_CONFIRMED",
+    "GUIDED_SLOT_SELECTION",
+    "GUIDED_SLOT_RESELECTION",
+    "GUIDED_BOOKING_COMPLETE",
+    "GUIDED_BOOKING_CANCELLED",
+)
+# D-045: a cancelled flow is as finished as a completed one.
+_GB_TERMINAL_TRIGGERS = ("GUIDED_BOOKING_COMPLETE", "GUIDED_BOOKING_CANCELLED")
+
+_CPF_PROMPT = "informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos."
+_CANCEL_HINT = "Digite Cancelar para desistir do agendamento."
+_VOLTAR_HINT = "Digite Voltar para escolher outro horário."
+GB_CANCELLED_TEXT = "Tudo bem, o agendamento foi cancelado. Há algo mais em que posso ajudar?"
 
 
-def _latest_offer_generation_id(session: Session, conversation: Conversation) -> Row[tuple[UUID, datetime]] | None:
+def cpf_request_text(rows: Sequence[Any]) -> str:
+    """D-045: the customer-visible text of an offer-resolution draft. The
+    offers themselves are persisted (GB-1) but shown only after a valid
+    CPF (`interpret_cpf_reply`). `rows` are the resolver's `_SlotRow`
+    tuples; every row shares one specialty (AA-2 filters by one slug)."""
+    specialty_name = rows[0][1].display_name
+    return f"Encontrei horários disponíveis para {specialty_name}.\n\nPara continuar o agendamento, {_CPF_PROMPT}\n\n{_CANCEL_HINT}"
+
+
+def _latest_offer_generation_id(session: Session, conversation: Conversation, *, sent_only: bool = False) -> Row[tuple[UUID, datetime]] | None:
     """The most recent `appointment_availability` resolution's offer set
     for this conversation — no "already acted on" filtering. Shared base
     query: `latest_unconfirmed_offer_generation_id` below adds that
@@ -169,16 +200,21 @@ def _latest_offer_generation_id(session: Session, conversation: Conversation) ->
     *payment* step, `GUIDED_CPF_CONFIRMED` has necessarily already
     happened, so going through the filtered lookup there would always
     (incorrectly) come back empty."""
-    return session.execute(
+    query = (
         select(AppointmentOfferPresentation.ai_generation_id, AIGeneration.created_at)
         .join(AIGeneration, AIGeneration.id == AppointmentOfferPresentation.ai_generation_id)
         .where(AIGeneration.conversation_id == conversation.id)
-        .order_by(AIGeneration.created_at.desc())
-        .limit(1)
-    ).first()
+    )
+    if sent_only:
+        # D-045: GB answers only an offer set the customer was actually sent
+        # (its CPF request) — a newer, unsent offer draft must not hijack it.
+        query = query.where(
+            select(Message.id).where(Message.source_generation_id == AIGeneration.id, Message.author_type == "OPERATOR").exists()
+        )
+    return session.execute(query.order_by(AIGeneration.created_at.desc()).limit(1)).first()
 
 
-def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conversation) -> UUID | None:
+def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conversation, *, sent_only: bool = False) -> UUID | None:
     """005/GB-2: the most recent `appointment_availability` resolution's
     offer set for this conversation — but only while it is genuinely
     still *unconfirmed*. Returns `None` when either:
@@ -230,7 +266,7 @@ def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conve
     regardless of which subsystem finished it."""
     if conversation.booking_script_step is not None:
         return None
-    row = _latest_offer_generation_id(session, conversation)
+    row = _latest_offer_generation_id(session, conversation, sent_only=sent_only)
     if row is None:
         return None
     generation_id, resolved_at = row
@@ -244,7 +280,7 @@ def latest_unconfirmed_offer_generation_id(session: Session, conversation: Conve
         .order_by(AIGeneration.created_at.desc())
         .limit(1)
     )
-    if latest_flow_trigger == _GB_TERMINAL_TRIGGER:
+    if latest_flow_trigger in _GB_TERMINAL_TRIGGERS:
         return None
     completed_via_booking_script = session.scalar(
         select(AppointmentBooking.booking_id)
@@ -262,8 +298,8 @@ def interpret_slot_choice(session: Session, provider: EmbeddingProvider, convers
     content) — no LLM call either way. Returns `None` on no pending offer
     set or no confident match of either kind, letting the caller fall
     through to ordinary RAG composition (GB-3) by construction."""
-    generation_id = latest_unconfirmed_offer_generation_id(session, conversation)
-    if generation_id is None:
+    generation_id = latest_unconfirmed_offer_generation_id(session, conversation, sent_only=True)
+    if generation_id is None or not _cpf_confirmed_for_offer_set(session, conversation, generation_id):
         return None
     ordinal = _parse_ordinal_choice(customer_text)
     if ordinal is not None:
@@ -296,6 +332,27 @@ def interpret_slot_choice(session: Session, provider: EmbeddingProvider, convers
     return best[0]
 
 
+def _cpf_confirmed_for_offer_set(session: Session, conversation: Conversation, generation_id: UUID) -> bool:
+    """D-045: slot choice is only accepted once the customer was actually
+    *sent* a `GUIDED_CPF_CONFIRMED` message (the numbered offers) after
+    this offer set was resolved — an unsent draft never counts."""
+    resolved_at = session.scalar(select(AIGeneration.created_at).where(AIGeneration.id == generation_id))
+    if resolved_at is None:
+        return False
+    sent = session.scalar(
+        select(Message.id)
+        .join(AIGeneration, AIGeneration.id == Message.source_generation_id)
+        .where(
+            Message.conversation_id == conversation.id,
+            Message.author_type == "OPERATOR",
+            AIGeneration.trigger == "GUIDED_CPF_CONFIRMED",
+            AIGeneration.created_at > resolved_at,
+        )
+        .limit(1)
+    )
+    return sent is not None
+
+
 def offer_price_text(session: Session, offer: AppointmentOfferPresentation) -> str:
     """Reads price live through `offer.slot_id` (never denormalized, same
     read-through-the-FK design as the rest of GB-1). Mirrors
@@ -317,22 +374,46 @@ def offer_price_text(session: Session, offer: AppointmentOfferPresentation) -> s
     return f"{format_price_brl(price_cents)} (simulação)" if price_cents is not None else "a combinar (simulação)"
 
 
-def render_offer_reselection_text(session: Session, generation_id: UUID) -> str:
-    """D-035: re-presents the *same* originally shown offer set (not a
-    fresh query — the point of "voltar" is to go back, not to search
-    again) as a numbered list, so a follow-up ordinal reply
-    ("primeira"/"2"/...) resolves the same way it did the first time via
-    `interpret_slot_choice`."""
+def _render_offer_lines(session: Session, generation_id: UUID) -> str:
+    """The persisted offer set (never a fresh query) as a numbered list, so
+    an ordinal reply ("primeira"/"2"/...) resolves via `interpret_slot_choice`."""
     offers = session.scalars(
         select(AppointmentOfferPresentation).where(AppointmentOfferPresentation.ai_generation_id == generation_id).order_by(AppointmentOfferPresentation.display_order)
     ).all()
-    lines = [f"{offer.display_order}. {offer.description} — {offer_price_text(session, offer)}." for offer in offers]
-    return "Sem problema! Escolha outra opção:\n\n" + "\n".join(lines)
+    return "\n".join(f"{offer.display_order}. {offer.description} — {offer_price_text(session, offer)}." for offer in offers)
 
 
-def _latest_operator_message_trigger(session: Session, conversation: Conversation) -> str | None:
-    """The most recent OPERATOR message's originating generation's
-    `trigger`, with no "customer already replied" gating — used only by
+def render_offer_reselection_text(session: Session, generation_id: UUID) -> str:
+    """D-035: re-presents the *same* originally shown offer set (not a
+    fresh query — the point of "voltar" is to go back, not to search
+    again)."""
+    return "Sem problema! Escolha outra opção:\n\n" + _render_offer_lines(session, generation_id)
+
+
+def render_offers_after_cpf_text(session: Session, generation_id: UUID, cpf: str) -> str:
+    """D-045: the first time the customer sees the offers — right after a
+    valid CPF."""
+    return f"CPF {cpf} confirmado.\n\nEscolha um dos horários disponíveis:\n\n{_render_offer_lines(session, generation_id)}\n\nResponda com o número da opção desejada."
+
+
+def generation_awaits_cpf(session: Session, generation: AIGeneration | None) -> bool:
+    """D-045: does this sent generation leave the customer's next reply as
+    a CPF? True for an offer-resolution generation (any non-GB trigger
+    with persisted offers — its text is `cpf_request_text`) and for the
+    invalid-CPF retry (`GUIDED_CPF_REQUEST`)."""
+    if generation is None:
+        return False
+    if generation.trigger == "GUIDED_CPF_REQUEST":
+        return True
+    if generation.trigger in _GB_ALL_FLOW_TRIGGERS:
+        return False
+    has_offers = session.scalar(select(AppointmentOfferPresentation.id).where(AppointmentOfferPresentation.ai_generation_id == generation.id).limit(1))
+    return has_offers is not None
+
+
+def _latest_operator_message_generation(session: Session, conversation: Conversation) -> AIGeneration | None:
+    """The most recent OPERATOR message's originating generation, with no
+    "customer already replied" gating — used only by
     `pending_redaction_step`, which must decide *before* the new customer
     message it concerns is inserted. Contrast with
     `latest_sent_generation_trigger` below, used by draft-time
@@ -342,8 +423,7 @@ def _latest_operator_message_trigger(session: Session, conversation: Conversatio
     )
     if latest_operator_message is None or latest_operator_message.source_generation_id is None:
         return None
-    generation = session.get(AIGeneration, latest_operator_message.source_generation_id)
-    return generation.trigger if generation is not None else None
+    return session.get(AIGeneration, latest_operator_message.source_generation_id)
 
 
 def pending_redaction_step(session: Session, conversation: Conversation) -> str | None:
@@ -357,8 +437,8 @@ def pending_redaction_step(session: Session, conversation: Conversation) -> str 
     vocabulary for the one value that still applies."""
     if conversation.booking_script_step is not None:
         return None
-    trigger = _latest_operator_message_trigger(session, conversation)
-    if trigger == "GUIDED_SLOT_SELECTION":
+    # D-045: the CPF step now precedes the offers.
+    if generation_awaits_cpf(session, _latest_operator_message_generation(session, conversation)):
         return "AWAITING_CPF"
     return None
 
@@ -377,6 +457,11 @@ def persisted_customer_body(session: Session, conversation: Conversation, raw_bo
 
 
 def latest_sent_generation_trigger(session: Session, conversation: Conversation) -> str | None:
+    generation = latest_sent_generation(session, conversation)
+    return generation.trigger if generation is not None else None
+
+
+def latest_sent_generation(session: Session, conversation: Conversation) -> AIGeneration | None:
     """The trigger of the most recent OPERATOR-sent message's originating
     generation, requiring at least one customer message after it (so this
     only fires once per operator message, at the moment a real reply to it
@@ -396,39 +481,41 @@ def latest_sent_generation_trigger(session: Session, conversation: Conversation)
     )
     if has_customer_reply_after is None:
         return None
-    generation = session.get(AIGeneration, latest_operator_message.source_generation_id)
-    return generation.trigger if generation is not None else None
+    return session.get(AIGeneration, latest_operator_message.source_generation_id)
 
 
 def interpret_cpf_reply(session: Session, conversation: Conversation, customer_text: str) -> tuple[str, str] | None:
-    """005/GB-4 (corrected): `None` if this customer message isn't a reply
-    to a GB-issued CPF request. Else `(draft_text, next_trigger)` — reuses
+    """005/GB-4, reordered by D-045: `None` unless this customer message
+    replies to a CPF request — the sent offer-resolution generation itself,
+    or the `GUIDED_CPF_REQUEST` retry. Valid CPF → the persisted offers,
+    numbered (`GUIDED_CPF_CONFIRMED`); invalid → retry
+    (`GUIDED_CPF_REQUEST`); "cancelar"/"voltar" → `GUIDED_BOOKING_CANCELLED`
+    (terminal). Else `(draft_text, next_trigger)` — reuses
     `booking_script.parsing.extract_cpf` verbatim (same digit-count-only
     validation, never the real CPF check-digit algorithm, matching AA-10's
     own "é uma simulação" framing).
 
-    **D-035:** "voltar"/"cancelar"/"alterar horário" (checked first, before
-    `extract_cpf`) step back to a fresh slot choice instead — the same
-    originally offered set, re-presented, `trigger='GUIDED_SLOT_RESELECTION'`
-    so a follow-up reply is routed to `interpret_slot_choice` again (GB-2)
-    rather than back into this CPF-parsing gate."""
+    D-035's step-back is checked first, before `extract_cpf`; since D-045
+    there is no earlier step to return to, so it cancels the flow."""
     if conversation.booking_script_step is not None:
         return None
-    if latest_sent_generation_trigger(session, conversation) != "GUIDED_SLOT_SELECTION":
+    if not generation_awaits_cpf(session, latest_sent_generation(session, conversation)):
         return None
+    # D-045: no earlier step exists to go back to — "voltar"/"cancelar"
+    # here ends the flow (terminal), never "CPF inválido".
     if _wants_to_step_back(customer_text):
-        row = _latest_offer_generation_id(session, conversation)
-        if row is not None:
-            return render_offer_reselection_text(session, row[0]), "GUIDED_SLOT_RESELECTION"
+        return GB_CANCELLED_TEXT, "GUIDED_BOOKING_CANCELLED"
     cpf = extract_cpf(customer_text)
-    if cpf is None:
-        return "CPF inválido. Informe um número válido de 11 dígitos.", "GUIDED_SLOT_SELECTION"
-    return f"CPF {cpf} confirmado.\n\nO valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", "GUIDED_CPF_CONFIRMED"
+    row = _latest_offer_generation_id(session, conversation, sent_only=True)
+    if cpf is None or row is None:
+        return f"CPF inválido. Informe um número válido de 11 dígitos.\n\n{_CANCEL_HINT}", "GUIDED_CPF_REQUEST"
+    return render_offers_after_cpf_text(session, row[0], cpf), "GUIDED_CPF_CONFIRMED"
 
 
 def interpret_payment_reply(session: Session, conversation: Conversation, customer_text: str) -> tuple[str, str] | None:
-    """005/GB-4 (corrected): `None` if this customer message isn't a reply
-    to a GB-issued payment question. Else `(draft_text, next_trigger)` —
+    """005/GB-4, reordered by D-045: `None` unless this customer message
+    replies to the payment question, now asked by the slot-choice draft
+    (`GUIDED_SLOT_SELECTION`). Else `(draft_text, next_trigger)` —
     reuses `booking_script.parsing.extract_payment_confirmation` verbatim
     (same sim/não word-boundary matching, unlimited retries on
     negative/unclear).
@@ -440,10 +527,10 @@ def interpret_payment_reply(session: Session, conversation: Conversation, custom
     re-ask (both share this trigger, so one check covers both)."""
     if conversation.booking_script_step is not None:
         return None
-    if latest_sent_generation_trigger(session, conversation) != "GUIDED_CPF_CONFIRMED":
+    if latest_sent_generation_trigger(session, conversation) != "GUIDED_SLOT_SELECTION":
         return None
     if _wants_to_step_back(customer_text):
-        row = _latest_offer_generation_id(session, conversation)
+        row = _latest_offer_generation_id(session, conversation, sent_only=True)
         if row is not None:
             return render_offer_reselection_text(session, row[0]), "GUIDED_SLOT_RESELECTION"
     if extract_payment_confirmation(customer_text) is True:
@@ -457,7 +544,7 @@ def interpret_payment_reply(session: Session, conversation: Conversation, custom
                 record_appointment_booking(session, conversation, source="guided_booking", specialty_id=slot.specialty_id, professional_id=slot.professional_id, unit_id=slot.unit_id, slot_starts_at=slot.starts_at)
             conversation.guided_booking_selected_offer_id = None
         return "Verificando pagamento. Pagamento verificado. Agendamento realizado com sucesso. Há algo mais que posso ajudar?", "GUIDED_BOOKING_COMPLETE"
-    return "O valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", "GUIDED_CPF_CONFIRMED"
+    return f"O valor foi pago? Responda sim ou não.\n\n{_VOLTAR_HINT}", "GUIDED_SLOT_SELECTION"
 
 
 def advance_guided_booking(session: Session, conversation: Conversation, raw_customer_text: str) -> None:

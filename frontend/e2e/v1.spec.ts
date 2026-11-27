@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolatedDatabaseName } from "./isolated-database";
 
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
@@ -15,7 +16,7 @@ const operatorPassword = requiredEnvironment("E2E_OPERATOR_PASSWORD");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function psql(sql: string): void {
-  execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", "oncology", "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
+  execFileSync("docker", ["compose", "exec", "-T", "db", "psql", "-U", "oncology", "-d", isolatedDatabaseName(), "-v", "ON_ERROR_STOP=1", "-c", sql], { cwd: repoRoot, stdio: "inherit" });
 }
 
 const conversationTables = "customer_service.audit_events, customer_service.message_selections, customer_service.message_citations, customer_service.ai_generation_sources, customer_service.ai_generations, customer_service.retrieval_hits, customer_service.retrieval_runs, customer_service.messages, customer_service.conversation_assignments, customer_service.conversations";

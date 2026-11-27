@@ -1,7 +1,7 @@
 # Especificação leve — Observabilidade local N5 com Langfuse Cloud
 
-Data: 2026-09-10. Estado: **LF-0 aprovado; prova LF-1 disponível para revisão**.
-Instrumentação do atendimento não iniciada. “Local” nomeia a execução da aplicação; o
+Data: 2026-09-10. Estado: **LF-1 revisado; LF-2..LF-5 em execução**.
+Continuação autorizada pelo humano (“continue”). “Local” nomeia a execução da aplicação; o
 destino da telemetria é **Langfuse Cloud**.
 
 ## 1. Objetivo e autorização desta etapa
@@ -16,7 +16,9 @@ A primeira instrução autorizou **LF-0**: este `spec.md` e
 [analysis.md](analysis.md), entregues para revisão. Em 2026-09-10, o humano
 aprovou a continuação (“Pode seguir”), pediu o baseline SQL primeiro e
 forneceu as chaves pelo `.env` local. **LF-1** está autorizado até a prova
-curta e seu checkpoint; LF-2..LF-5 aguardam essa revisão. Permanece a
+curta e seu checkpoint. A instrução posterior “continue” autoriza
+LF-2..LF-5 a partir da prova entregue; o próximo checkpoint é LF-5,
+antes da leitura pareada LF-6. Permanece a
 exceção documental explícita ao pacote SDD completo, registrada em
 [instrucoes_codex.md §2](../../LANGFUSE/instrucoes_codex.md) e
 [revisao_claude_code.md §2.2](../../LANGFUSE/revisao_claude_code.md): sem
@@ -134,6 +136,12 @@ O SDK fixado em LF-1 (`4.15.1`) registra hooks globais no processo,
 inclusive para embeddings. LF-2/LF-3 devem conter esses hooks e impedir
 que captura explícita e automática contem a mesma chamada duas vezes;
 a premissa antiga de que o wrapper não cobre embeddings está corrigida.
+Implementação LF-2/LF-3: observações explícitas do SDK envolvem os
+clientes OpenAI originais; o atendimento não importa `langfuse.openai`
+nem instala seus hooks. O wrapper continua exclusivo da CLI LF-1.
+Isso contém a captura global e mantém um único registro de consumo por
+chamada. Requests/usage são selecionados no próprio adaptador do provider;
+objetos de resposta não atravessam a interface de observabilidade.
 Em LF-1, a prova é um comando isolado, sem banco ou endpoints, que usa
 um cliente de prova em `ai/providers.py`. O construtor normal do provider
 continua sem instrumentação; adaptador de atendimento e ciclo de vida
@@ -213,6 +221,15 @@ recuperar uma falha de telemetria. Exportar em lote, enfileirando localmente
 sem rede de telemetria aguardada na transação ou sob trava de envio.
 Inicialização/exportação são por processo, com flush de duração limitada
 no shutdown; falha de exportação não aciona rollback de negócio.
+Limites LF-2: batches de até 64 observações, intervalo de 1 s, timeout
+HTTP de telemetria de 3 s e espera máxima de 5 s no shutdown. O shutdown
+do SDK é executado em thread daemon; seu callback automático `atexit`
+é retirado para não repetir uma espera ilimitada ao sair do processo.
+O tracer é próprio do adaptador e não registra instrumentação global.
+Quando o teto é atingido, pode haver perda de telemetria; nunca repetir
+a operação de atendimento para recuperar um trace. A API de observação
+aceita apenas payloads explícitos de tipos simples e registra erros por
+classe, sem mensagem, stack trace ou captura automática de argumentos.
 
 **Sem migração de schema**, coluna, endpoint, mudança de UI ou contrato
 público. Sem alterações de `docker-compose.yml`, self-hosted, ClickHouse,
@@ -239,6 +256,10 @@ Gates com banco usam **`oncology_langfuse_test`**, validando banco/host
 local antes de reset, com um worker e restauração do backend cotidiano
 inclusive em falha, sem editar persistentemente o `.env` do usuário
 ([detalhamento §5](../../LANGFUSE/detalhamento_execucao.md)).
+O executor usa um projeto Compose temporário separado, incluindo seu
+PostgreSQL de teste, sem recriar API/UI cotidianos. O PostgreSQL cotidiano
+só é iniciado quando necessário para o snapshot read-only do conteúdo e
+volta ao estado inicial; os contêineres de validação são parados ao sair.
 `smoke_ingestion_changed.py` nunca roda na dev DB de trabalho. Resíduos
 `t010-*`/`t011-*` e configurações de autonomia são tratados somente no
 destino isolado; não normalizar a demo compartilhada para a suíte.

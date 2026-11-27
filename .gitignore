@@ -18,3 +18,6 @@ app/.venv312/
 
 # Backups locais do Postgres (nao versionar)
 backups/
+
+# Caixa de correio entre projetos (local)
+/alinhamento.md

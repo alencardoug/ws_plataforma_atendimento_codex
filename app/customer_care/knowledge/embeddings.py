@@ -4,6 +4,7 @@ from typing import Protocol
 
 from openai import OpenAI
 
+from customer_care.infrastructure import telemetry
 from customer_care.shared.settings import get_settings
 
 
@@ -27,8 +28,18 @@ class OpenAIEmbeddingProvider:
         self.client = OpenAI(api_key=settings.openai_api_key.get_secret_value())
 
     def embed(self, texts: list[str]) -> list[list[float]]:
-        response = self.client.embeddings.create(model=self.model, input=texts, dimensions=self.dimension)
-        return [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+        with telemetry.observe("ai.embedding", lambda: {
+            "input": texts, "model": self.model, "model_parameters": {"dimensions": self.dimension},
+            "metadata": {"provider": "openai", "text_count": len(texts)},
+        }, kind="embedding") as observation:
+            response = self.client.embeddings.create(model=self.model, input=texts, dimensions=self.dimension)
+            result = [item.embedding for item in sorted(response.data, key=lambda item: item.index)]
+            observation.update(lambda: {
+                "output": {"vector_count": len(result), "dimensions": [len(vector) for vector in result]},
+                "model": response.model,
+                **({"usage_details": {"input": response.usage.prompt_tokens}} if response.usage else {}),
+            })
+            return result
 
 
 class DeterministicTestEmbeddingProvider:

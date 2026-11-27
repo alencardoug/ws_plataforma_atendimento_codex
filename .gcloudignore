@@ -1,25 +1,19 @@
-# Scopes `gcloud run deploy --source .` (repo root) to only what the root
-# Dockerfile actually needs: app/ and prompts/. Everything else (frontend/,
-# documents/, specs/, docs/, db/, .git/, this session's worktrees, etc.) is
-# irrelevant to the backend image and would only slow the upload/build.
-.git/
-.gitignore
-.claude/
-frontend/
-documents/
-specs/
-docs/
-db/
-adr/
-scripts/
-backups/
-teste_humano.md
-/*.md
-DOCS_PESSOAIS/
-app/.venv312/
-app/__pycache__/
+# Scopes `gcloud run deploy --source .` (repo root) to exactly what the root
+# Dockerfile uses: Dockerfile, app/ and prompts/. Allowlist, not denylist —
+# corrected 2026-11-27 after finding that the denylist version let the root
+# `.env` (local secrets) into every uploaded source archive since 2026-08-17
+# and the root `.venv/` (~250 MB) into the 2026-11-27 one. Anything new at
+# the repo root is now excluded by default.
+/*
+!/Dockerfile
+!/app/
+!/prompts/
+
+# Inside app/: never local secrets, virtualenvs or caches.
+app/.env
+app/.env.*
+app/.venv*/
 app/**/__pycache__/
 app/.pytest_cache/
 app/.mypy_cache/
 app/.ruff_cache/
-app/.env

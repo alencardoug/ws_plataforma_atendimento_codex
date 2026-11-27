@@ -801,3 +801,51 @@ incident; test residue conversations (`cc419438`, `9274f9c3`, `55f8682b`,
 `e658eece`, …) and operator `verify012-*@example.invalid`; Neon agenda is
 shallow (AC-2 tops up generalist D+1/D+7 on demand). `TRUNCATE` the
 conversation tables per `DEPLOYMENT.md` step 5 when convenient.
+
+## D-045 correction — GB CPF before offers — implemented locally (2026-11-27)
+
+Human-reported from production: booking went straight to the offered
+times; the expected flow asks for the CPF first. Not a defect (D-043 left
+GB as the only booking path, ordered offers → CPF); the human chose to
+reorder GB itself. New order: booking intent → CPF request → numbered
+offers → slot choice → payment → completion; "cancelar" at the CPF step
+ends the flow. CPF only (no name). See `DECISIONS.md` D-045 and
+`specs/005-dynamic-pricing-and-guided-booking/spec.md` §13. One new
+migration (`20261127_0001`, trigger CHECK). Verified locally: backend
+`pytest` 330 pass, `ruff`/`mypy` clean, `smoke_v5_guided_booking.py` and
+`smoke_v11_ungoverned_n5.py` pass. **Deployed to production 2026-11-27 (rev `-00013-sl6`); not committed.** `frontend/e2e/v7.spec.ts` reordered but not run. Local dev DB
+note: `automatic_trigger_idle_seconds=0` (demo state) makes
+`smoke_v5_guided_booking.py` race the automatic trigger — raise it while
+running that smoke, then restore.
+
+## D-046 correction — next-business-day offers + rolling 60-day horizon — implemented locally (2026-11-27)
+
+Human-requested after testing D-045: a slot 30 minutes away was offered,
+and the agenda occasionally ran out. (NB) the AA-2 resolver now offers
+only slots from 00:00 of `scheduling.next_business_day(today + 1)`
+(Saturday counts; Sunday and non-business holidays do not).
+(RH) `scheduling/seeding.py::ensure_rolling_availability()` keeps every
+specialty filled for every business day through max(today + 60 days, 2027-12-31) (006's
+grid, one bulk `INSERT … SELECT`, at most 7 days per run, non-blocking
+lock, hard timeouts, 10-minute debounce, failures swallowed), evaluated
+from `POST /public/conversations` and the operator queue poll — no
+operator needed, no new infrastructure. See `DECISIONS.md` D-046,
+`specs/004-…/spec.md` §8, `specs/012-…/spec.md` §11. Verified locally:
+backend `pytest` 339 pass (9 new in `test_availability_horizon.py`),
+`ruff`/`mypy` clean. **Deployed to production 2026-11-27 (Cloud Run rev `customer-care-backend-00013-sl6`, Neon migrated to `20261127_0002`, QA-095 ingested); not committed.**
+
+## D-047 correction — greeting/capability question no longer opens the booking flow — implemented locally (2026-11-27)
+
+"olá, o que consigo fazer neste chat?" opened the booking flow (weak
+rank-1 match 0.450 to an `appointment_availability` entry). Added static
+`QA-095` ("O que consigo fazer neste chat?", now rank-1 at 0.644) and an
+availability-intent gate on AA-1 dispatch (score ≥ 0.55 or a booking
+keyword), calibrated with real embeddings. Operator booking-offer button
+not gated. See `DECISIONS.md` D-047, `specs/004-…/spec.md` §9. Ingested locally and in
+production (`embedded: 1`). **Deployed to production 2026-11-27 (rev
+`-00013-sl6`); not committed.**
+
+Content follow-up (2026-11-27): `QA-014` ("Quantos horários o chatbot
+oferece?") still described the retired D+1/D+7 windows; its answer now
+matches D-046 (up to four times per reply, from the next business day,
+filterable by specialty/day/period). Re-ingested locally and in production.

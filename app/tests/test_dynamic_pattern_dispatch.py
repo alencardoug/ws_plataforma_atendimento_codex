@@ -10,6 +10,7 @@ exactly as before — proves the dispatch change is additive, not a
 replacement. Real-database integration tests, mirroring
 tests/smoke_n2.py's own RetrievalRun/RetrievalHit construction pattern."""
 
+import dataclasses
 from uuid import uuid4
 
 import pytest
@@ -123,4 +124,50 @@ def test_generic_qa_dynamic_bindings_path_still_resolves_unaffected(operator_id)
             db.execute(delete(QADynamicBinding).where(QADynamicBinding.qa_id == qa_id))
             db.execute(delete(QAEntry).where(QAEntry.qa_id == qa_id))
             db.execute(delete(DynamicFixtureRow).where(DynamicFixtureRow.category == category))
+            db.commit()
+
+
+@pytest.mark.parametrize(
+    "query,score,should_dispatch",
+    [
+        # D-047: the reported message — weak rank-1 availability match, no booking signal.
+        ("ola, o que consigo fazer neste chat?", 0.450, False),
+        ("Bom dia", 0.337, False),
+        ("qual a marca do aparelho?", 0.40, False),
+        # genuine low-scoring requests still dispatch via the keyword
+        ("quero marcar", 0.435, True),
+        ("Gostaria de agendar com nutricionista na segunda", 0.490, True),
+        # a strong semantic match dispatches regardless of keywords
+        ("pode ser de manhã cedo?", 0.62, True),
+    ],
+)
+def test_availability_dispatch_requires_a_booking_signal(operator_id, query: str, score: float, should_dispatch: bool) -> None:
+    """D-047 (specs/004 §9): `appointment_availability` opens the booking
+    flow only on a strong match (≥ 0.55) or a booking keyword. Scores are
+    the real text-embedding-3-small values measured for these messages."""
+    session_factory = get_session_factory()
+    with session_factory() as db:
+        qa = db.get(QAEntry, "QA-018")
+        assert qa is not None and qa.dynamic_resolver == "appointment_availability"
+        run = RetrievalRun(operator_id=operator_id, purpose="N2_MANUAL_SEARCH", query_text="t047", embedding_model="smoke", top_k=1, status="COMPLETED")
+        db.add(run)
+        db.flush()
+        hit = RetrievalHit(retrieval_run_id=run.id, matched_kind="ADMIN_QA", matched_qa_id="QA-018", rank=1, score=score)
+        db.add(hit)
+        db.commit()
+        hit_id = hit.id
+    try:
+        with session_factory() as db:
+            qa = db.get(QAEntry, "QA-018")
+            evidence = dataclasses.replace(_evidence_for(qa, hit_id), score=score)
+            outcome = dynamic_pattern_result(db, [evidence], query)
+            db.rollback()
+        if should_dispatch:
+            assert outcome is not None, "a booking request must still reach the resolver"
+        else:
+            assert outcome is None, "no booking signal: fall through to the ordinary evidence path"
+    finally:
+        with session_factory() as db:
+            db.execute(delete(RetrievalHit).where(RetrievalHit.id == hit_id))
+            db.execute(delete(RetrievalRun).where(RetrievalRun.operator_id == operator_id))
             db.commit()

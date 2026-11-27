@@ -26,6 +26,7 @@ from customer_care.infrastructure.models import (
 )
 from customer_care.knowledge.embeddings import DeterministicTestEmbeddingProvider
 from customer_care.scheduling.guided_booking import (
+    GB_CANCELLED_TEXT,
     GB_CPF_INPUT_REDACTION,
     advance_guided_booking,
     interpret_cpf_reply,
@@ -100,7 +101,9 @@ def conversation_with_generation(operator_id):
     with session_factory() as db:
         db.execute(delete(Message).where(Message.conversation_id == conversation_id))
         db.execute(delete(AppointmentOfferPresentation).where(AppointmentOfferPresentation.ai_generation_id == generation_id))
-        db.execute(delete(AIGeneration).where(AIGeneration.id == generation_id))
+        # D-045: tests add their own later GB-step generations via
+        # _add_generation(); remove every generation of this conversation.
+        db.execute(delete(AIGeneration).where(AIGeneration.conversation_id == conversation_id))
         db.execute(delete(ScheduleSlot).where(ScheduleSlot.slot_id == slot_id))
         db.execute(delete(RetrievalRun).where(RetrievalRun.operator_id == operator_id))
         db.commit()
@@ -122,6 +125,8 @@ def conversation_with_generation(operator_id):
             db.rollback()
 
 
+
+
 def _send_operator_message(db, conversation_id, generation_id, operator_id, body: str) -> None:
     db.add(Message(conversation_id=conversation_id, author_type="OPERATOR", operator_id=operator_id, body=body, source_generation_id=generation_id))
     db.commit()
@@ -132,76 +137,78 @@ def _send_customer_message(db, conversation_id, body: str) -> None:
     db.commit()
 
 
+def _add_generation(conversation_id, operator_id, trigger: str, *, send: bool = False, body: str | None = None) -> UUID:
+    """A later GB-step generation (own transaction, so its created_at is
+    strictly after the fixture's offer generation). `send=True` also
+    delivers it as an OPERATOR message. Removed by the fixture teardown."""
+    with get_session_factory()() as db:
+        run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text=f"t005-gb-{trigger}", embedding_model="smoke", top_k=1, status="COMPLETED")
+        db.add(run)
+        db.flush()
+        generation = AIGeneration(
+            conversation_id=conversation_id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER",
+            draft_text=body or trigger, provider="guided-booking", model="not-applicable", prompt_version="not-applicable",
+            trigger=trigger, dynamic_pattern_used=True,
+        )
+        db.add(generation)
+        db.commit()
+        generation_id = generation.id
+        if send:
+            _send_operator_message(db, conversation_id, generation_id, operator_id, body or trigger)
+    return generation_id
+
+
+def _send_cpf_request(conversation_id, generation_id, operator_id) -> None:
+    """D-045: the offer-resolution generation itself is the CPF request."""
+    with get_session_factory()() as db:
+        _send_operator_message(db, conversation_id, generation_id, operator_id, "Para continuar o agendamento, informe seu CPF...")
+
+
+def _confirm_cpf(conversation_id, generation_id, operator_id) -> UUID:
+    """D-045: sends the offer set's CPF request, then the
+    `GUIDED_CPF_CONFIRMED` (numbered offers) that slot choice now requires."""
+    _send_cpf_request(conversation_id, generation_id, operator_id)
+    return _add_generation(conversation_id, operator_id, "GUIDED_CPF_CONFIRMED", send=True, body="CPF confirmado. Escolha um dos horários...")
+
+
+def _reload(db, conversation_id) -> Conversation:
+    conversation = db.get(Conversation, conversation_id)
+    assert conversation is not None
+    return conversation
+
+
 class TestLatestUnconfirmedOfferGenerationId:
     def test_returns_the_generation_id_when_offers_are_pending(self, conversation_with_generation) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            assert latest_unconfirmed_offer_generation_id(db, conversation) == generation_id
+            assert latest_unconfirmed_offer_generation_id(db, _reload(db, conversation_id)) == generation_id
 
     def test_returns_none_once_booking_script_has_taken_over(self, conversation_with_generation) -> None:
         conversation_id, _generation_id, _descriptions = conversation_with_generation
         session_factory = get_session_factory()
         with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            conversation.booking_script_step = "AWAITING_CPF"
+            _reload(db, conversation_id).booking_script_step = "AWAITING_CPF"
             db.commit()
         with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
+            assert latest_unconfirmed_offer_generation_id(db, _reload(db, conversation_id)) is None
+
+    @pytest.mark.parametrize("terminal_trigger", ["GUIDED_BOOKING_COMPLETE", "GUIDED_BOOKING_CANCELLED"])
+    def test_returns_none_once_the_flow_has_finished(self, conversation_with_generation, operator_id, terminal_trigger: str) -> None:
+        """Bug found 2026-08-19 (D-034): a finished flow must stop being "the
+        pending offer set". D-045 adds the cancelled terminal state."""
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
+        _add_generation(conversation_id, operator_id, terminal_trigger)
+        with get_session_factory()() as db:
+            conversation = _reload(db, conversation_id)
             assert latest_unconfirmed_offer_generation_id(db, conversation) is None
+            assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is None
 
-    def test_returns_none_once_the_booking_has_actually_completed(self, conversation_with_generation, operator_id) -> None:
-        """Bug found 2026-08-19: without this check, a *completed* booking
-        never stopped being "the pending offer set" — the next customer
-        message (even an unrelated question) kept getting matched against
-        the same old offers instead of falling through to RAG. Only the
-        terminal `GUIDED_BOOKING_COMPLETE` state excludes (D-035, revised)
-        — see below for why the other GB triggers must not."""
-        conversation_id, _generation_id, descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text="t005-gb-later", embedding_model="smoke", top_k=1, status="COMPLETED")
-            db.add(run)
-            db.flush()
-            later_generation = AIGeneration(
-                conversation_id=conversation_id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER",
-                draft_text="later", provider="guided-booking", model="not-applicable", prompt_version="not-applicable",
-                trigger="GUIDED_BOOKING_COMPLETE", dynamic_pattern_used=True,
-            )
-            db.add(later_generation)
-            db.commit()
-            later_generation_id, later_run_id = later_generation.id, run.id
-        try:
-            with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
-                assert latest_unconfirmed_offer_generation_id(db, conversation) is None
-                # The regression itself: an exact-text match against the old
-                # offer must NOT resolve once the set has been acted on.
-                assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is None
-        finally:
-            # Clean up before the fixture's own teardown, which deletes
-            # every RetrievalRun for operator_id and would otherwise hit
-            # the same FK this bug's own fix is unrelated to.
-            with session_factory() as db:
-                db.execute(delete(AIGeneration).where(AIGeneration.id == later_generation_id))
-                db.execute(delete(RetrievalRun).where(RetrievalRun.id == later_run_id))
-                db.commit()
-
-    def test_returns_none_once_booking_script_alone_completed_the_booking(self, conversation_with_generation) -> None:
-        """Second gap, found and fixed 2026-08-21 (D-043): AA-10's own
-        `booking_script` can independently complete a booking for this
-        conversation without ever writing a GB `ai_generations` row at all
-        (`booking_script/service.py` writes plain `Message` rows directly)
-        — so the `GUIDED_BOOKING_COMPLETE`-trigger check above can never
-        see it, and the offer set stayed "pending" forever, ready to
-        false-match a later, wholly unrelated customer question. Any
-        completed `AppointmentBooking` row for this conversation, whatever
-        its `source`, must also exclude the offer set."""
-        conversation_id, _generation_id, descriptions = conversation_with_generation
+    def test_returns_none_once_booking_script_alone_completed_the_booking(self, conversation_with_generation, operator_id) -> None:
+        """D-043: any completed `AppointmentBooking` row for this
+        conversation, whatever its `source`, also excludes the offer set."""
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
         session_factory = get_session_factory()
         with session_factory() as db:
             booking = AppointmentBooking(conversation_id=conversation_id, source="booking_script", specialty_id=_SPECIALTY_ID)
@@ -210,8 +217,7 @@ class TestLatestUnconfirmedOfferGenerationId:
             booking_id = booking.booking_id
         try:
             with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
+                conversation = _reload(db, conversation_id)
                 assert latest_unconfirmed_offer_generation_id(db, conversation) is None
                 assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is None
         finally:
@@ -219,100 +225,83 @@ class TestLatestUnconfirmedOfferGenerationId:
                 db.execute(delete(AppointmentBooking).where(AppointmentBooking.booking_id == booking_id))
                 db.commit()
 
-    @pytest.mark.parametrize("later_trigger", ["GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED"])
+    @pytest.mark.parametrize("later_trigger", ["GUIDED_CPF_REQUEST", "GUIDED_CPF_CONFIRMED", "GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION"])
     def test_still_pending_for_every_non_terminal_gb_trigger(self, conversation_with_generation, operator_id, later_trigger: str) -> None:
-        """D-035 (revised): every non-terminal GB state — picked, awaiting
-        payment, or mid-reselection — must remain re-matchable. Originally
-        `GUIDED_CPF_CONFIRMED` alone excluded (an older design with no way
-        back past it); once "voltar" could reach the payment step too, that
-        made a *later* `GUIDED_CPF_CONFIRMED` in the same conversation's
-        history permanently lock out re-matching even after a subsequent
-        "voltar" un-committed it — this checks the *latest* GB trigger, not
-        "any", so that no longer happens. GB-4's own message-creation-time
-        gating intercepts every reply during these three states anyway, so
-        relaxing this never causes a real mismatch."""
-        conversation_id, generation_id, descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text="t005-gb-later", embedding_model="smoke", top_k=1, status="COMPLETED")
-            db.add(run)
-            db.flush()
-            later_generation = AIGeneration(
-                conversation_id=conversation_id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER",
-                draft_text="later", provider="guided-booking", model="not-applicable", prompt_version="not-applicable",
-                trigger=later_trigger, dynamic_pattern_used=True,
-            )
-            db.add(later_generation)
-            db.commit()
-            later_generation_id, later_run_id = later_generation.id, run.id
-        try:
-            with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
-                assert latest_unconfirmed_offer_generation_id(db, conversation) == generation_id
-                assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is not None
-        finally:
-            with session_factory() as db:
-                db.execute(delete(AIGeneration).where(AIGeneration.id == later_generation_id))
-                db.execute(delete(RetrievalRun).where(RetrievalRun.id == later_run_id))
-                db.commit()
+        """D-035 (revised): only the *latest* GB trigger being terminal
+        excludes — every in-progress state stays pending."""
+        conversation_id, generation_id, _descriptions = conversation_with_generation
+        _add_generation(conversation_id, operator_id, later_trigger)
+        with get_session_factory()() as db:
+            assert latest_unconfirmed_offer_generation_id(db, _reload(db, conversation_id)) == generation_id
 
-    def test_a_later_voltar_makes_the_set_pending_again_after_a_cpf_confirmation(self, conversation_with_generation, operator_id) -> None:
-        """The exact scenario the "latest, not any" fix (above) targets:
-        CPF confirmed, then the customer says "voltar" — the offer set must
-        become re-matchable again, not stay excluded because
-        `GUIDED_CPF_CONFIRMED` occurred earlier in this same history."""
+    def test_a_later_voltar_keeps_the_set_matchable(self, conversation_with_generation, operator_id) -> None:
+        """Slot chosen, then "voltar" from the payment step: the offer set
+        must still be matchable for a fresh choice."""
         conversation_id, generation_id, descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        created_ids: list[tuple[UUID, UUID]] = []
-        try:
-            for trigger in ("GUIDED_CPF_CONFIRMED", "GUIDED_SLOT_RESELECTION"):
-                with session_factory() as db:
-                    run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text=f"t005-gb-{trigger}", embedding_model="smoke", top_k=1, status="COMPLETED")
-                    db.add(run)
-                    db.flush()
-                    generation = AIGeneration(
-                        conversation_id=conversation_id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER",
-                        draft_text=trigger, provider="guided-booking", model="not-applicable", prompt_version="not-applicable",
-                        trigger=trigger, dynamic_pattern_used=True,
-                    )
-                    db.add(generation)
-                    db.commit()
-                    created_ids.append((generation.id, run.id))
-            with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
-                assert latest_unconfirmed_offer_generation_id(db, conversation) == generation_id
-                assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is not None
-        finally:
-            with session_factory() as db:
-                for generation_id_to_delete, run_id_to_delete in created_ids:
-                    db.execute(delete(AIGeneration).where(AIGeneration.id == generation_id_to_delete))
-                    db.execute(delete(RetrievalRun).where(RetrievalRun.id == run_id_to_delete))
-                db.commit()
+        _confirm_cpf(conversation_id, generation_id, operator_id)
+        _add_generation(conversation_id, operator_id, "GUIDED_SLOT_SELECTION", send=True)
+        _add_generation(conversation_id, operator_id, "GUIDED_SLOT_RESELECTION", send=True)
+        with get_session_factory()() as db:
+            conversation = _reload(db, conversation_id)
+            assert latest_unconfirmed_offer_generation_id(db, conversation) == generation_id
+            assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is not None
 
 
 class TestInterpretSlotChoice:
-    def test_exact_text_match_returns_that_offer(self, conversation_with_generation) -> None:
-        conversation_id, _generation_id, descriptions = conversation_with_generation
+    def test_refused_before_the_cpf_was_confirmed(self, conversation_with_generation, operator_id) -> None:
+        """D-045: the whole point of the reorder — offers that were never
+        shown (CPF not yet confirmed) can't be chosen, by text or ordinal."""
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _send_cpf_request(conversation_id, generation_id, operator_id)
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            offer = interpret_slot_choice(db, PROVIDER, conversation, descriptions[1])
+            conversation = _reload(db, conversation_id)
+            assert interpret_slot_choice(db, PROVIDER, conversation, descriptions[1]) is None
+            assert interpret_slot_choice(db, PROVIDER, conversation, "2") is None
+
+    def test_an_unsent_cpf_confirmation_does_not_count(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, _generation_id, descriptions = conversation_with_generation
+        _add_generation(conversation_id, operator_id, "GUIDED_CPF_CONFIRMED", send=False)
+        with get_session_factory()() as db:
+            assert interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), descriptions[1]) is None
+
+    def test_a_newer_unsent_offer_draft_does_not_hijack_the_sent_set(self, conversation_with_generation, operator_id) -> None:
+        """D-045: GB answers only the offer set the customer was actually
+        sent. A later offer draft the operator never sent must not become
+        "the" set and block (or redirect) the customer's slot choice."""
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
+        newer_id = _add_generation(conversation_id, operator_id, "MANUAL_DRAFT")
+        with get_session_factory()() as db:
+            slot_id = db.scalar(select(AppointmentOfferPresentation.slot_id).where(AppointmentOfferPresentation.ai_generation_id == generation_id).limit(1))
+            [vector] = PROVIDER.embed(["Endocrinologia com Dra. Zoe, sexta-feira 30/08 às 11:00"])
+            db.add(AppointmentOfferPresentation(ai_generation_id=newer_id, slot_id=slot_id, display_order=1, description="Endocrinologia com Dra. Zoe, sexta-feira 30/08 às 11:00", embedding=vector))
+            db.commit()
+        try:
+            with get_session_factory()() as db:
+                offer = interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), "primeira opção")
+            assert offer is not None
+            assert offer.ai_generation_id == generation_id
+            assert offer.description == descriptions[0]
+        finally:
+            with get_session_factory()() as db:
+                db.execute(delete(AppointmentOfferPresentation).where(AppointmentOfferPresentation.ai_generation_id == newer_id))
+                db.commit()
+
+    def test_exact_text_match_returns_that_offer(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
+            offer = interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), descriptions[1])
         assert offer is not None
         assert offer.description == descriptions[1]
 
     @pytest.mark.parametrize("text,expected_order", [("segunda opção", 2), ("a segunda", 2), ("2", 2), ("primeira", 1), ("1", 1), ("quero a primeira opção por favor", 1)])
-    def test_ordinal_reference_matches_by_position_not_embedding(self, conversation_with_generation, text: str, expected_order: int) -> None:
-        """D-033: the whole point of the ordinal parser — these phrases
-        share no semantic content with either offer's own description, so
-        only positional parsing (not embedding similarity, even with the
-        real provider) can resolve them."""
-        conversation_id, _generation_id, descriptions = conversation_with_generation
+    def test_ordinal_reference_matches_by_position_not_embedding(self, conversation_with_generation, operator_id, text: str, expected_order: int) -> None:
+        """D-033: positional parsing, not embedding similarity."""
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            offer = interpret_slot_choice(db, PROVIDER, conversation, text)
+            offer = interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), text)
         assert offer is not None
         assert offer.display_order == expected_order
         assert offer.description == descriptions[expected_order - 1]
@@ -325,30 +314,19 @@ class TestInterpretSlotChoice:
             "quarta-feira de manhã",
         ],
     )
-    def test_ordinal_words_embedded_in_an_unrelated_sentence_do_not_false_match(self, conversation_with_generation, text: str) -> None:
-        """D-043 (2026-08-21): "primeira"/"segunda"/"terceira"/"quarta" are
-        ordinary Portuguese words that show up in plenty of sentences with
-        nothing to do with picking a slot — a bare word match previously
-        misread all three of these as an ordinal choice (the second and
-        third are the two real production messages this fix closes; see
-        `PROJECT_STATE.md`/`DECISIONS.md` D-043). None of these share
-        semantic content with either fixture offer either, so this also
-        confirms embedding similarity doesn't accidentally rescue a false
-        match."""
-        conversation_id, _generation_id, _descriptions = conversation_with_generation
+    def test_ordinal_words_embedded_in_an_unrelated_sentence_do_not_false_match(self, conversation_with_generation, operator_id, text: str) -> None:
+        """D-043: ordinary Portuguese ordinal words in a longer sentence are
+        not a slot choice."""
+        conversation_id, generation_id, _descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            assert interpret_slot_choice(db, PROVIDER, conversation, text) is None
+            assert interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), text) is None
 
-    def test_ordinal_out_of_range_falls_through_to_embedding_not_error(self, conversation_with_generation) -> None:
-        conversation_id, _generation_id, _descriptions = conversation_with_generation
+    def test_ordinal_out_of_range_falls_through_to_embedding_not_error(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, generation_id, _descriptions = conversation_with_generation
+        _confirm_cpf(conversation_id, generation_id, operator_id)
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            # Only 2 offers exist in this fixture; "quarta opção" (4) is
-            # out of range and must not raise.
-            interpret_slot_choice(db, PROVIDER, conversation, "quarta opção")  # no exception
+            interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), "quarta opção")  # only 2 offers; no exception
 
     def test_no_pending_offers_returns_none(self, operator_id) -> None:
         session_factory = get_session_factory()
@@ -359,9 +337,7 @@ class TestInterpretSlotChoice:
             conversation_id = conversation.id
         try:
             with session_factory() as db:
-                reloaded = db.get(Conversation, conversation_id)
-                assert reloaded is not None
-                assert interpret_slot_choice(db, PROVIDER, reloaded, "qualquer coisa") is None
+                assert interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), "qualquer coisa") is None
         finally:
             with session_factory() as db:
                 db.execute(delete(Conversation).where(Conversation.id == conversation_id))
@@ -369,184 +345,131 @@ class TestInterpretSlotChoice:
 
 
 class TestInterpretCpfReply:
+    """D-045: the CPF step is now the first one — reached by sending the
+    offer-resolution generation itself (its text is the CPF request)."""
+
     def test_none_when_no_cpf_request_was_sent(self, conversation_with_generation) -> None:
         conversation_id, _generation_id, _descriptions = conversation_with_generation
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            assert interpret_cpf_reply(db, conversation, "123.456.789-10") is None
+            assert interpret_cpf_reply(db, _reload(db, conversation_id), "123.456.789-10") is None
 
-    def test_invalid_cpf_reasks_staying_on_slot_selection_trigger(self, conversation_with_generation, operator_id) -> None:
+    def test_invalid_cpf_reasks_on_the_cpf_request_trigger(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, "Ah 123456a8910")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            result = interpret_cpf_reply(db, conversation, "Ah 123456a8910")
-        assert result == ("CPF inválido. Informe um número válido de 11 dígitos.", "GUIDED_SLOT_SELECTION")
+        with get_session_factory()() as db:
+            result = interpret_cpf_reply(db, _reload(db, conversation_id), "Ah 123456a8910")
+        assert result == ("CPF inválido. Informe um número válido de 11 dígitos.\n\nDigite Cancelar para desistir do agendamento.", "GUIDED_CPF_REQUEST")
 
-    def test_valid_cpf_confirms_and_asks_payment(self, conversation_with_generation, operator_id) -> None:
-        conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
+    def test_valid_cpf_shows_the_numbered_offers(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, "tabom 123.456..789.10")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            result = interpret_cpf_reply(db, conversation, "tabom 123.456..789.10")
+        with get_session_factory()() as db:
+            result = interpret_cpf_reply(db, _reload(db, conversation_id), "tabom 123.456..789.10")
         assert result is not None
         text, next_trigger = result
-        assert text == "CPF 123.456.789-10 confirmado.\n\nO valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário."
         assert next_trigger == "GUIDED_CPF_CONFIRMED"
+        assert text.startswith("CPF 123.456.789-10 confirmado.\n\nEscolha um dos horários disponíveis:\n\n1. ")
+        assert f"1. {descriptions[0]} — " in text
+        assert f"2. {descriptions[1]} — " in text
+        assert text.endswith("Responda com o número da opção desejada.")
+        assert "O valor foi pago" not in text
 
-    @pytest.mark.parametrize("text", ["Voltar", "voltar", "Cancelar", "cancela por favor", "quero alterar horário", "mudar o horário", "trocar horário", "outro horário"])
-    def test_step_back_phrase_re_presents_the_original_offers(self, conversation_with_generation, operator_id, text: str) -> None:
-        """D-035: checked before `extract_cpf` — must never produce "CPF
-        inválido" for one of these phrases."""
-        conversation_id, generation_id, descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
-            _send_customer_message(db, conversation_id, text)
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            result = interpret_cpf_reply(db, conversation, text)
+    def test_valid_cpf_after_an_invalid_retry(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, generation_id, _descriptions = conversation_with_generation
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        _add_generation(conversation_id, operator_id, "GUIDED_CPF_REQUEST", send=True)
+        with get_session_factory()() as db:
+            _send_customer_message(db, conversation_id, "12345678910")
+        with get_session_factory()() as db:
+            result = interpret_cpf_reply(db, _reload(db, conversation_id), "12345678910")
         assert result is not None
-        response_text, next_trigger = result
-        assert next_trigger == "GUIDED_SLOT_RESELECTION"
-        assert "CPF inválido" not in response_text
-        assert descriptions[0] in response_text
-        assert descriptions[1] in response_text
+        assert result[1] == "GUIDED_CPF_CONFIRMED"
 
-    def test_step_back_then_a_fresh_ordinal_choice_resolves_via_interpret_slot_choice(self, conversation_with_generation, operator_id) -> None:
-        """D-035 end-to-end at the interpretation layer: after "voltar",
-        the *next* reply must go through GB-2's ordinal/embedding matching
-        against the same original offer set, not back into CPF parsing."""
+    @pytest.mark.parametrize("text", ["Voltar", "voltar", "Cancelar", "cancela por favor", "outro horário"])
+    def test_step_back_phrase_cancels_the_flow(self, conversation_with_generation, operator_id, text: str) -> None:
+        """D-045: no earlier step exists before the CPF — "cancelar"/"voltar"
+        end the flow, and never produce "CPF inválido"."""
+        conversation_id, generation_id, _descriptions = conversation_with_generation
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
+            _send_customer_message(db, conversation_id, text)
+        with get_session_factory()() as db:
+            result = interpret_cpf_reply(db, _reload(db, conversation_id), text)
+        assert result == (GB_CANCELLED_TEXT, "GUIDED_BOOKING_CANCELLED")
+
+    def test_full_order_cpf_then_offers_then_slot_choice(self, conversation_with_generation, operator_id) -> None:
+        """D-045 end-to-end at the interpretation layer: CPF request → valid
+        CPF → numbered offers sent → an ordinal reply is a slot choice, not
+        a CPF."""
         conversation_id, generation_id, descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
-            _send_customer_message(db, conversation_id, "voltar")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            back_result = interpret_cpf_reply(db, conversation, "voltar")
-        assert back_result is not None
-        reselection_text, reselection_trigger = back_result
-        assert reselection_trigger == "GUIDED_SLOT_RESELECTION"
-        with session_factory() as db:
-            run = RetrievalRun(operator_id=operator_id, purpose="N2_DRAFT", query_text="t005-gb-reselect", embedding_model="smoke", top_k=1, status="COMPLETED")
-            db.add(run)
-            db.flush()
-            reselect_generation = AIGeneration(
-                conversation_id=conversation_id, retrieval_run_id=run.id, operator_id=operator_id, status="ANSWER",
-                draft_text=reselection_text, provider="guided-booking", model="not-applicable", prompt_version="not-applicable",
-                trigger=reselection_trigger, dynamic_pattern_used=True,
-            )
-            db.add(reselect_generation)
-            db.commit()
-            reselect_generation_id, reselect_run_id = reselect_generation.id, run.id
-            _send_operator_message(db, conversation_id, reselect_generation_id, operator_id, reselection_text)
-        try:
-            with session_factory() as db:
-                _send_customer_message(db, conversation_id, "primeira opção")
-            with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
-                # Not caught by the CPF-parsing gate any more (trigger moved
-                # off GUIDED_SLOT_SELECTION).
-                assert interpret_cpf_reply(db, conversation, "primeira opção") is None
-                offer = interpret_slot_choice(db, PROVIDER, conversation, "primeira opção")
-            assert offer is not None
-            assert offer.description == descriptions[0]
-        finally:
-            with session_factory() as db:
-                db.execute(delete(Message).where(Message.source_generation_id == reselect_generation_id))
-                db.execute(delete(AIGeneration).where(AIGeneration.id == reselect_generation_id))
-                db.execute(delete(RetrievalRun).where(RetrievalRun.id == reselect_run_id))
-                db.commit()
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
+            _send_customer_message(db, conversation_id, "12345678910")
+        with get_session_factory()() as db:
+            result = interpret_cpf_reply(db, _reload(db, conversation_id), "12345678910")
+        assert result is not None
+        _add_generation(conversation_id, operator_id, result[1], send=True, body=result[0])
+        with get_session_factory()() as db:
+            _send_customer_message(db, conversation_id, "primeira opção")
+        with get_session_factory()() as db:
+            conversation = _reload(db, conversation_id)
+            assert interpret_cpf_reply(db, conversation, "primeira opção") is None
+            assert interpret_payment_reply(db, conversation, "primeira opção") is None
+            offer = interpret_slot_choice(db, PROVIDER, conversation, "primeira opção")
+        assert offer is not None
+        assert offer.description == descriptions[0]
 
 
 class TestInterpretPaymentReply:
-    def test_none_when_no_payment_question_was_sent(self, conversation_with_generation) -> None:
-        conversation_id, _generation_id, _descriptions = conversation_with_generation
+    """D-045: the payment question now follows the slot choice
+    (`GUIDED_SLOT_SELECTION`)."""
+
+    def test_none_when_no_payment_question_was_sent(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, generation_id, _descriptions = conversation_with_generation
+        _send_cpf_request(conversation_id, generation_id, operator_id)
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            assert interpret_payment_reply(db, conversation, "sim") is None
+            _send_customer_message(db, conversation_id, "sim")
+        with get_session_factory()() as db:
+            assert interpret_payment_reply(db, _reload(db, conversation_id), "sim") is None
+
+    def _ask_payment(self, conversation_id, generation_id, operator_id) -> None:
+        _confirm_cpf(conversation_id, generation_id, operator_id)
+        _add_generation(conversation_id, operator_id, "GUIDED_SLOT_SELECTION", send=True, body="Entendi que você escolheu... O valor foi pago?")
 
     def test_affirmative_completes_the_booking(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_CPF_CONFIRMED"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "CPF confirmado. O valor foi pago?")
-        with session_factory() as db:
+        self._ask_payment(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, "tabom simm paguei")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            result = interpret_payment_reply(db, conversation, "tabom simm paguei")
-        assert result is not None
-        text, next_trigger = result
-        assert text == "Verificando pagamento. Pagamento verificado. Agendamento realizado com sucesso. Há algo mais que posso ajudar?"
-        assert next_trigger == "GUIDED_BOOKING_COMPLETE"
+        with get_session_factory()() as db:
+            result = interpret_payment_reply(db, _reload(db, conversation_id), "tabom simm paguei")
+        assert result == ("Verificando pagamento. Pagamento verificado. Agendamento realizado com sucesso. Há algo mais que posso ajudar?", "GUIDED_BOOKING_COMPLETE")
 
     def test_affirmative_records_an_appointment_booking_sourced_from_the_chosen_offer(self, conversation_with_generation, operator_id) -> None:
-        """007/BS-2: the full flow — interpret_slot_choice() (GB-2) stages
-        which offer was chosen, then interpret_payment_reply() (BS-2)
-        reads it back and records a scheduling.appointment_bookings row
-        with that offer's real specialty/professional/unit/slot detail."""
+        """007/BS-2: slot choice stages the offer; the affirmative payment
+        reply records the booking from it."""
         conversation_id, generation_id, descriptions = conversation_with_generation
         session_factory = get_session_factory()
+        _confirm_cpf(conversation_id, generation_id, operator_id)
         with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            offer = interpret_slot_choice(db, PROVIDER, conversation, descriptions[1])
+            offer = interpret_slot_choice(db, PROVIDER, _reload(db, conversation_id), descriptions[1])
             assert offer is not None
             db.commit()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_CPF_CONFIRMED"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "CPF confirmado. O valor foi pago?")
+        _add_generation(conversation_id, operator_id, "GUIDED_SLOT_SELECTION", send=True)
         with session_factory() as db:
             _send_customer_message(db, conversation_id, "sim, paguei")
         try:
             with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
+                conversation = _reload(db, conversation_id)
                 assert conversation.guided_booking_selected_offer_id == offer.id
-                result = interpret_payment_reply(db, conversation, "sim, paguei")
-                assert result is not None
+                assert interpret_payment_reply(db, conversation, "sim, paguei") is not None
                 db.commit()
             with session_factory() as db:
-                conversation = db.get(Conversation, conversation_id)
-                assert conversation is not None
-                assert conversation.guided_booking_selected_offer_id is None, "must be cleared after being consumed"
+                assert _reload(db, conversation_id).guided_booking_selected_offer_id is None, "must be cleared after being consumed"
                 booking = db.scalar(select(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation_id))
                 assert booking is not None
                 assert booking.source == "guided_booking"
@@ -559,40 +482,24 @@ class TestInterpretPaymentReply:
                 db.execute(delete(AppointmentBooking).where(AppointmentBooking.conversation_id == conversation_id))
                 db.commit()
 
-    def test_negative_reasks_staying_on_cpf_confirmed_trigger(self, conversation_with_generation, operator_id) -> None:
+    def test_negative_reasks_staying_on_slot_selection_trigger(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_CPF_CONFIRMED"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "CPF confirmado. O valor foi pago?")
-        with session_factory() as db:
+        self._ask_payment(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, "Então, não paguei")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            result = interpret_payment_reply(db, conversation, "Então, não paguei")
-        assert result == ("O valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", "GUIDED_CPF_CONFIRMED")
+        with get_session_factory()() as db:
+            result = interpret_payment_reply(db, _reload(db, conversation_id), "Então, não paguei")
+        assert result == ("O valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário.", "GUIDED_SLOT_SELECTION")
 
     @pytest.mark.parametrize("text", ["Voltar", "voltar", "Cancelar", "cancela por favor", "quero alterar horário", "mudar o horário", "trocar horário", "outro horário"])
     def test_step_back_phrase_re_presents_the_original_offers(self, conversation_with_generation, operator_id, text: str) -> None:
-        """D-035: the same step-back capability GB-4's CPF question already
-        has, extended to the payment question too — checked before
-        `extract_payment_confirmation`."""
+        """D-035: from the payment step, "voltar" re-presents the same offers."""
         conversation_id, generation_id, descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_CPF_CONFIRMED"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "CPF confirmado. O valor foi pago?")
-        with session_factory() as db:
+        self._ask_payment(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, text)
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            result = interpret_payment_reply(db, conversation, text)
+        with get_session_factory()() as db:
+            result = interpret_payment_reply(db, _reload(db, conversation_id), text)
         assert result is not None
         response_text, next_trigger = result
         assert next_trigger == "GUIDED_SLOT_RESELECTION"
@@ -604,91 +511,66 @@ class TestAdvanceGuidedBooking:
     """The message-creation-time orchestrator — the only place a raw CPF/
     payment reply is ever read (D-033)."""
 
-    def test_stages_pending_text_on_valid_cpf(self, conversation_with_generation, operator_id) -> None:
-        conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
+    def test_stages_the_offers_on_valid_cpf(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, generation_id, descriptions = conversation_with_generation
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, "tabom 123.456..789.10")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            advance_guided_booking(db, conversation, "tabom 123.456..789.10")
+        with get_session_factory()() as db:
+            advance_guided_booking(db, _reload(db, conversation_id), "tabom 123.456..789.10")
             db.commit()
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            assert conversation.guided_booking_pending_text == "CPF 123.456.789-10 confirmado.\n\nO valor foi pago? Responda sim ou não.\n\nDigite Voltar para escolher outro horário."
+        with get_session_factory()() as db:
+            conversation = _reload(db, conversation_id)
+            assert conversation.guided_booking_pending_text is not None
+            assert conversation.guided_booking_pending_text.startswith("CPF 123.456.789-10 confirmado.\n\nEscolha um dos horários disponíveis:")
+            assert descriptions[0] in conversation.guided_booking_pending_text
             assert conversation.guided_booking_pending_trigger == "GUIDED_CPF_CONFIRMED"
 
     def test_no_op_once_booking_script_has_taken_over(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            conversation.booking_script_step = "AWAITING_CPF"
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
+            _reload(db, conversation_id).booking_script_step = "AWAITING_CPF"
             db.commit()
-        with session_factory() as db:
+        with get_session_factory()() as db:
             _send_customer_message(db, conversation_id, "123.456.789-10")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            advance_guided_booking(db, conversation, "123.456.789-10")
+        with get_session_factory()() as db:
+            advance_guided_booking(db, _reload(db, conversation_id), "123.456.789-10")
             db.commit()
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
-            assert conversation.guided_booking_pending_text is None
+        with get_session_factory()() as db:
+            assert _reload(db, conversation_id).guided_booking_pending_text is None
 
 
 class TestRedaction:
-    """D-033: GB's own CPF reply must never reach durable storage raw —
-    same rule AA-10 already applies to its own script. The payment-
-    confirmation reply is deliberately *not* redacted (human decision,
-    2026-08-19) — kept verbatim for that step."""
+    """D-033, moved by D-045: the reply to a CPF request (now the first
+    step) is redacted; slot-choice and payment replies are kept verbatim."""
 
-    def test_pending_redaction_step_awaiting_cpf(self, conversation_with_generation, operator_id) -> None:
+    def test_reply_to_the_offer_cpf_request_is_redacted(self, conversation_with_generation, operator_id) -> None:
         conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_SLOT_SELECTION"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "Informe seu CPF...")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
+        _send_cpf_request(conversation_id, generation_id, operator_id)
+        with get_session_factory()() as db:
+            conversation = _reload(db, conversation_id)
             assert pending_redaction_step(db, conversation) == "AWAITING_CPF"
             assert persisted_customer_body(db, conversation, "123.456.789-10") == GB_CPF_INPUT_REDACTION
 
-    def test_payment_reply_is_kept_verbatim_not_redacted(self, conversation_with_generation, operator_id) -> None:
-        conversation_id, generation_id, _descriptions = conversation_with_generation
-        session_factory = get_session_factory()
-        with session_factory() as db:
-            generation = db.get(AIGeneration, generation_id)
-            assert generation is not None
-            generation.trigger = "GUIDED_CPF_CONFIRMED"
-            _send_operator_message(db, conversation_id, generation_id, operator_id, "O valor foi pago?")
-        with session_factory() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
+    def test_reply_to_the_invalid_cpf_retry_is_redacted(self, conversation_with_generation, operator_id) -> None:
+        conversation_id, _generation_id, _descriptions = conversation_with_generation
+        _add_generation(conversation_id, operator_id, "GUIDED_CPF_REQUEST", send=True)
+        with get_session_factory()() as db:
+            assert pending_redaction_step(db, _reload(db, conversation_id)) == "AWAITING_CPF"
+
+    @pytest.mark.parametrize("trigger", ["GUIDED_CPF_CONFIRMED", "GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_BOOKING_CANCELLED"])
+    def test_later_step_replies_are_kept_verbatim(self, conversation_with_generation, operator_id, trigger: str) -> None:
+        conversation_id, _generation_id, _descriptions = conversation_with_generation
+        _add_generation(conversation_id, operator_id, trigger, send=True)
+        with get_session_factory()() as db:
+            conversation = _reload(db, conversation_id)
             assert pending_redaction_step(db, conversation) is None
             assert persisted_customer_body(db, conversation, "sim") == "sim"
 
-    def test_no_redaction_outside_gb_cpf_payment_steps(self, conversation_with_generation) -> None:
+    def test_no_redaction_outside_gb_steps(self, conversation_with_generation) -> None:
         conversation_id, _generation_id, _descriptions = conversation_with_generation
         with get_session_factory()() as db:
-            conversation = db.get(Conversation, conversation_id)
-            assert conversation is not None
+            conversation = _reload(db, conversation_id)
             assert pending_redaction_step(db, conversation) is None
             assert persisted_customer_body(db, conversation, "qualquer coisa") == "qualquer coisa"

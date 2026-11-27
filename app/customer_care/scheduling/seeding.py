@@ -11,6 +11,7 @@ professionals' UUIDs sort lowest in `active_professional_specialty_pairs()`),
 never the generalist specialty most customer queries actually fall back
 to (AA-3a's default)."""
 
+import time
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
@@ -360,6 +361,156 @@ def ensure_generalist_floor(session: Session) -> None:
         session.commit()
     except Exception:
         session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# D-046 / 012 RH — rolling 60-day horizon for every specialty.
+#
+# AC-2's floor above only covers the generalist D+1/D+7 days and only runs
+# from the operator poll; 006's wide seed stops at a fixed date. This keeps
+# every specialty filled for every business day from the next business day
+# through today + AVAILABILITY_HORIZON_DAYS, evaluated from the operator
+# poll and from conversation creation (never from a resolver/draft path —
+# specs/004 clarification item 6 holds). Same defensive shape as
+# ensure_generalist_floor(): debounced, non-blocking lock, hard timeouts,
+# bounded work, failures swallowed. specs/012-…/spec.md §11.
+# ---------------------------------------------------------------------------
+
+AVAILABILITY_HORIZON_DAYS = 60
+# Human request 2026-11-27 ("amplie para 2027 também"): the window never
+# ends before this date; past it, the rolling 60 days take over.
+HORIZON_MIN_END_DATE = date(2027, 12, 31)
+HORIZON_MAX_DAYS_PER_RUN = 7  # bounded catch-up: a long gap is refilled over a few runs
+HORIZON_CHECK_INTERVAL_SECONDS = 600
+HORIZON_RETRY_SECONDS = 30  # sooner re-check while a catch-up is still in progress
+_HORIZON_LOCK_KEY = 725017004  # distinct from the other seeding locks
+_WIDE_GRID_SLOTS_PER_DAY = 14  # 08:00..17:45 every 45 min — same grid as create_wide_slots_on()
+_horizon_next_check_at = 0.0  # time.monotonic(); per process — idempotent across Cloud Run instances anyway
+
+_MISSING_HORIZON_DAYS_SQL = text(
+    """
+    WITH days AS (
+        SELECT d::date AS day
+        FROM generate_series(CAST(:start AS date), CAST(:end AS date), interval '1 day') AS d
+        WHERE extract(isodow FROM d) <> 7
+          AND NOT EXISTS (
+              SELECT 1 FROM scheduling.holidays h
+              WHERE h.holiday_date = d::date AND NOT h.is_business_day
+          )
+    ),
+    specialties AS (
+        SELECT DISTINCT ps.specialty_id
+        FROM scheduling.professional_specialties ps
+        JOIN scheduling.professionals p ON p.professional_id = ps.professional_id
+        WHERE p.active
+    ),
+    -- One pass over the window (no per-pair probe: schedule_slots has no
+    -- specialty index, and the window spans ~13 months).
+    present AS (
+        SELECT DISTINCT s.specialty_id, (s.starts_at AT TIME ZONE 'America/Sao_Paulo')::date AS day
+        FROM scheduling.schedule_slots s
+        WHERE s.starts_at >= (CAST(:start AS date)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+          AND s.starts_at < ((CAST(:end AS date) + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')
+    )
+    SELECT days.day, specialties.specialty_id
+    FROM days CROSS JOIN specialties
+    LEFT JOIN present ON present.specialty_id = specialties.specialty_id AND present.day = days.day
+    WHERE present.day IS NULL
+    ORDER BY days.day
+    """
+)
+
+_FILL_HORIZON_SQL = text(
+    """
+    INSERT INTO scheduling.schedule_slots (unit_id, specialty_id, professional_id, starts_at, ends_at, status)
+    SELECT CAST(:unit_id AS uuid), ps.specialty_id, ps.professional_id, t.starts_at,
+           t.starts_at + make_interval(mins => ps.appointment_duration_minutes), 'available'
+    FROM unnest(CAST(:days AS date[]), CAST(:specialty_ids AS uuid[])) AS m(day, specialty_id)
+    JOIN scheduling.professional_specialties ps ON ps.specialty_id = m.specialty_id
+    JOIN scheduling.professionals p ON p.professional_id = ps.professional_id AND p.active
+    CROSS JOIN LATERAL (
+        SELECT ((m.day + time '08:00') + k * make_interval(mins => :slot_minutes)) AT TIME ZONE 'America/Sao_Paulo' AS starts_at
+        FROM generate_series(0, :slots_per_day - 1) AS k
+    ) AS t
+    ON CONFLICT (professional_id, starts_at) DO NOTHING
+    """
+)
+
+
+def horizon_end(today: date) -> date:
+    return max(today + timedelta(days=AVAILABILITY_HORIZON_DAYS), HORIZON_MIN_END_DATE)
+
+
+def missing_horizon_days(session: Session, today: date) -> list[tuple[date, UUID]]:
+    """(business day, specialty_id) pairs inside the horizon window that
+    have no slot row at all. Booked slots count as present — a fully
+    booked day is never refilled."""
+    start = next_business_day_sql(session, today + timedelta(days=1))
+    end = horizon_end(today)
+    rows = session.execute(_MISSING_HORIZON_DAYS_SQL, {"start": start, "end": end}).all()
+    return [(row[0], row[1]) for row in rows]
+
+
+def fill_horizon_days(session: Session, pairs: list[tuple[date, UUID]]) -> int:
+    """One bulk statement for every (day, specialty) pair given — the same
+    grid as `create_wide_slots_on()`, `ON CONFLICT DO NOTHING`."""
+    if not pairs:
+        return 0
+    result = session.execute(
+        _FILL_HORIZON_SQL,
+        {
+            "unit_id": DEFAULT_UNIT_ID,
+            "days": [day for day, _ in pairs],
+            "specialty_ids": [specialty_id for _, specialty_id in pairs],
+            "slot_minutes": WIDE_SEED_SLOT_MINUTES,
+            "slots_per_day": _WIDE_GRID_SLOTS_PER_DAY,
+        },
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+def ensure_rolling_availability(session: Session, *, force: bool = False) -> int:
+    """RH-1..RH-4. Returns the number of slots created (0 when debounced,
+    contended, already complete, or on any failure). `force=True` skips
+    only the in-process debounce (admin/bootstrap/tests)."""
+    global _horizon_next_check_at
+    now_monotonic = time.monotonic()
+    if not force and now_monotonic < _horizon_next_check_at:
+        return 0
+    _horizon_next_check_at = now_monotonic + HORIZON_CHECK_INTERVAL_SECONDS
+    try:
+        session.commit()  # start from a clean transaction; SET LOCAL below is scoped to it
+        session.execute(text("SET LOCAL lock_timeout = '750ms'"))
+        session.execute(text("SET LOCAL statement_timeout = '5s'"))
+        if not session.execute(text("SELECT pg_try_advisory_xact_lock(:key)"), {"key": _HORIZON_LOCK_KEY}).scalar():
+            session.rollback()
+            return 0  # another request owns this cycle
+        missing = missing_horizon_days(session, _today_sao_paulo())
+        if not missing:
+            session.commit()
+            return 0
+        batch_days = sorted({day for day, _ in missing})[:HORIZON_MAX_DAYS_PER_RUN]
+        batch = [pair for pair in missing if pair[0] in set(batch_days)]
+        created = fill_horizon_days(session, batch)
+        record_event(
+            session,
+            "scheduling.availability_horizon_topped_up",
+            "SYSTEM",
+            payload={
+                "days": [day.isoformat() for day in batch_days],
+                "pairs": len(batch),
+                "created": created,
+                "remaining_pairs": len(missing) - len(batch),
+                "horizon_end": horizon_end(_today_sao_paulo()).isoformat(),
+            },
+        )
+        session.commit()
+        if len(missing) > len(batch):
+            _horizon_next_check_at = time.monotonic() + HORIZON_RETRY_SECONDS
+        return created
+    except Exception:
+        session.rollback()
+        return 0
 
 
 def run_bootstrap_seed(session: Session) -> None:

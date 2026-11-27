@@ -296,3 +296,38 @@ concurrent instances if traffic ever required `--max-instances` above 1. At
 demo/pilot traffic this is not expected to matter (Constitution Article VIII:
 don't add infrastructure ahead of a measured need) — noted here so it isn't
 mistaken for an oversight later if traffic grows.
+
+## Artifact retention (2026-11-27, from the gdados notice of 2026-11-18)
+
+Applied after the Owner's approval (gdados session 2026-11-18, confirmed in
+this project's session 2026-11-27):
+
+- **Artifact Registry** `cloud-run-source-deploy`: keep the **2** most recent
+  images, delete anything older than 30 days (`deploy/artifact-cleanup-policy.json`,
+  applied with `gcloud artifacts repositories set-cleanup-policies`). Two, not
+  one (the notice asked for one; the Owner chose two): with one, an image that
+  fails to start would leave traffic on the previous revision while the
+  cleanup deletes that revision's image, and the next cold start
+  (`min-instances=0`) would fail. The gdados project was notified to change
+  its rule.
+- **Source bucket** `run-sources-customer-care-prod-us-east1`: delete objects
+  older than 7 days (`deploy/run-sources-lifecycle.json`). The archives are
+  only Cloud Build input; the running service never reads them.
+- **Firebase Hosting**: `maxVersions: 2` on `plataforma-atendimento-prod` and
+  `customer-care-prod` (Hosting API `sites.updateConfig`). The previous version
+  allows an instant rollback; older ones are rebuilt from the commit — the
+  build is reproducible (`npm ci` on the committed, in-sync
+  `package-lock.json`; no external content fetched at build time).
+- **Monthly check:** `gcloud artifacts docker images list
+  us-east1-docker.pkg.dev/customer-care-prod/cloud-run-source-deploy` shows
+  ≤ 2 images; `gcloud storage ls -l gs://run-sources-customer-care-prod-us-east1/services/customer-care-backend/`
+  shows nothing older than 7 days; each Hosting site lists ≤ 2 versions.
+
+**Leak found and fixed the same day:** `.gcloudignore` was a denylist that
+excluded `app/.env` but not the repo-root `.env`, so every source archive since
+2026-08-17 carried the local `.env`, and the 2026-11-27 one also the root
+`.venv/` (81 MB). The image itself was never affected (the Dockerfile copies
+only `app/` and `prompts/`). The leaked values were local ones only — compared
+by hash, none matches a production secret. `.gcloudignore` is now an allowlist
+(`Dockerfile`, `app/`, `prompts/`; 166 files, 1.3 MB); the 2026-11-27 archive
+was deleted at once and the older ones expire under the 7-day rule.
