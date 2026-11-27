@@ -1,5 +1,7 @@
 # CLAUDE.md — Claude Code Entry Point
 
+Caixa de correio: ao iniciar a sessão, leia @alinhamento.md; se houver aviso depois de "a partir daqui", leu, atua, apaga (regras no próprio arquivo).
+
 Read and obey `AGENTS.md` first.
 
 ## Current lifecycle state
