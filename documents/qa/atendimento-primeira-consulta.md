@@ -517,3 +517,9 @@ O estadiamento ajuda a planejar o tratamento, mas não é, sozinho, uma sentenç
 Use com cautela. Essas estatísticas descrevem grupos de pacientes no passado, muitas vezes com protocolos diferentes dos atuais, e não descrevem um caso individual. Leve a dúvida para a consulta: o médico pode explicar o que é ou não aplicável à sua situação.
 
 `qa_id: QA-086` · `categoria: prognostico`
+
+## O que consigo fazer neste chat?
+
+Este chat é uma demonstração técnica de uma instituição oncológica fictícia. Aqui você pode: tirar dúvidas sobre a instituição, as especialidades e a primeira consulta (documentos, preparo e pagamento); consultar valores e horários disponíveis e simular um agendamento; e receber orientações educativas sobre câncer de mama e colorretal, tratamentos e apoio emocional. O chat não faz diagnóstico nem substitui a avaliação médica. Diante de sinais de alerta, procure um pronto atendimento. Quando necessário, um atendente pode assumir a conversa (simulação).
+
+`qa_id: QA-095` · `categoria: instituicao`

@@ -18,6 +18,7 @@ from customer_care.infrastructure import telemetry
 from customer_care.infrastructure.models import AIGeneration, Conversation, ConversationSatisfactionResponse, Message
 from customer_care.scheduling.availability import render_booking_summary_line
 from customer_care.scheduling.guided_booking import advance_guided_booking, latest_unconfirmed_offer_generation_id
+from customer_care.scheduling.seeding import ensure_rolling_availability
 from customer_care.scheduling.guided_booking import persisted_customer_body as guided_persisted_customer_body
 from customer_care.scheduling.models import AppointmentBooking
 from customer_care.shared.dependencies import DbSession, customer_bearer
@@ -94,7 +95,13 @@ def create_conversation(session: DbSession, request: Request) -> dict:
         session.add(conversation)
         session.flush()
         record_event(session, "conversation.created", "CUSTOMER", conversation_id=conversation.id, correlation_id=request.state.request_id, payload={"channel": "WEB"})
-    return {"conversation": customer_projection(session, conversation), "access_token": raw_token}
+    projection = customer_projection(session, conversation)
+    # D-046 / 012 RH-3: keep the simulated agenda's rolling horizon filled
+    # before this customer can ask for a slot — conversation creation, not
+    # a query (specs/004 clarification item 6 holds). Debounced, bounded,
+    # non-blocking, never raises.
+    ensure_rolling_availability(session)
+    return {"conversation": projection, "access_token": raw_token}
 
 
 def customer_draft_status(session: DbSession, conversation: Conversation) -> dict:

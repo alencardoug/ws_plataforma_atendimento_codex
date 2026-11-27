@@ -508,3 +508,44 @@ Also answered a related human question, logged in `ROADMAP.md` rather
 than implemented now: explicit calendar dates (e.g. "23/11/2026") are
 **not** currently parsed by `extract_parameters` (AA-3) — only relative
 keywords (`amanhã`, `sábado`, `semana que vem`, ...).
+
+## 13. Correction (2026-11-27, D-045) — CPF before offers
+
+Human-requested after a real production booking attempt: the customer
+expected to be asked for a CPF *before* seeing appointment times. Since
+D-043 GB is the only reachable booking path, so the order is changed in GB
+itself (AA-10's `booking_script` stays untouched and unreachable). This
+supersedes the ordering stated in GB-2/GB-4 and §12 item 8; every other
+GB property (draft-only under N2, deterministic templates, no LLM, offers
+persisted per GB-1, raw CPF never stored) is unchanged.
+
+11. **New order:** booking intent → CPF request → (valid CPF) numbered
+    offers → slot choice → payment question → completion.
+12. **Availability is still resolved on the booking-intent message.** If
+    the resolver raises (no agenda), the generation `ABSTAIN`s exactly as
+    before and no CPF is requested. If it returns offers, the offers are
+    persisted (GB-1) but the draft text is a fixed CPF request naming the
+    specialty found; the offers themselves are shown only after a valid
+    CPF, re-rendered from the persisted offer set as a numbered list (no
+    fresh query).
+13. **Trigger meanings:** the offer-resolution generation (whatever its
+    trigger: `AUTOMATIC`, `MANUAL_DRAFT`, `MANUAL_EVIDENCE`,
+    `MANUAL_BOOKING_OFFER`) = awaiting CPF; `GUIDED_CPF_REQUEST` (new) =
+    invalid-CPF retry, still awaiting CPF; `GUIDED_CPF_CONFIRMED` = CPF
+    valid, offers shown, awaiting slot choice; `GUIDED_SLOT_SELECTION` =
+    slot chosen, awaiting payment (negative/unclear payment replies keep
+    this trigger); `GUIDED_SLOT_RESELECTION` = "voltar" from the payment
+    step, unchanged; `GUIDED_BOOKING_COMPLETE` = terminal, unchanged;
+    `GUIDED_BOOKING_CANCELLED` (new) = "cancelar"/"voltar" while the CPF
+    is pending — there is no earlier step to go back to — terminal.
+14. **Slot choice (GB-2) is accepted only after the customer has been
+    sent a `GUIDED_CPF_CONFIRMED` message for that same offer set.** An
+    offer set whose CPF step was never completed can no longer be matched.
+15. **CPF redaction (D-033) follows the CPF step**: the customer reply to
+    an awaiting-CPF message is stored as `GB_CPF_INPUT_REDACTION`; the
+    payment reply stays verbatim.
+16. **N5 eligibility (D-043-2)** extends to the two new GB triggers only.
+    N3/N4 eligibility and `MANUAL_BOOKING_OFFER`'s never-autonomous rule
+    are unchanged.
+17. **CPF only, no name** (agent decision disclosed to the human): a name
+    would be a new personal-data element with no redaction rule.

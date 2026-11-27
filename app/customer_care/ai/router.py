@@ -19,8 +19,9 @@ from customer_care.infrastructure.telemetry_events import pending_snapshot, publ
 from customer_care.infrastructure.models import AIGeneration, AIGenerationSource, AuditEvent, Category, Conversation, KnowledgeDocument, Message, MessageSelection, PendingAutonomousSend, QAEntry, RetrievalHit, RetrievalRun, SystemSettings
 from customer_care.knowledge.dynamic_binding import DynamicResolution, DynamicResolutionError, resolve_dynamic_pattern
 from customer_care.rag.service import Evidence, configured_embedding_provider, evidence_dict, load_evidence, retrieve
-from customer_care.scheduling.availability import resolve_appointment_availability, resolve_price_lookup
+from customer_care.scheduling.availability import has_availability_intent, resolve_appointment_availability, resolve_price_lookup
 from customer_care.scheduling.guided_booking import (
+    cpf_request_text,
     interpret_slot_choice,
     offer_price_text,
     persist_presented_offers,
@@ -207,6 +208,11 @@ def dynamic_pattern_result(session: DbSession, evidence: list[Evidence], query_t
     qa = session.get(QAEntry, hit.matched_qa_id)
     if not qa or not qa.dynamic_data_required:
         return None
+    # D-047: a weak rank-1 availability match without any booking signal
+    # ("olá, o que consigo fazer neste chat?") must not open the booking
+    # flow — fall through to the ordinary evidence-based path instead.
+    if qa.dynamic_resolver == "appointment_availability" and not has_availability_intent(query_text, evidence[0].score):
+        return None
     try:
         resolver = NAMED_RESOLVERS.get(qa.dynamic_resolver) if qa.dynamic_resolver else None
         raw_result = resolver(session, query_text) if resolver else resolve_dynamic_pattern(session, qa)
@@ -218,7 +224,10 @@ def dynamic_pattern_result(session: DbSession, evidence: list[Evidence], query_t
         audit_extra: dict[str, object] | None = None
         if resolution.specialty_slug is not None or resolution.slot_count is not None:
             audit_extra = {"specialty_slug": resolution.specialty_slug, "slot_count": resolution.slot_count}
-        return GenerationResult("ANSWER", resolution.pattern_text, None, [str(evidence[0].retrieval_hit_id)]), True, None, audit_extra, offered_rows
+        # D-045: an offer resolution asks for the CPF first; the persisted
+        # offers are shown only after a valid CPF (guided_booking.py).
+        text = cpf_request_text(offered_rows) if offered_rows else resolution.pattern_text
+        return GenerationResult("ANSWER", text, None, [str(evidence[0].retrieval_hit_id)]), True, None, audit_extra, offered_rows
     except DynamicResolutionError as exc:
         return GenerationResult("ABSTAIN", "", "DYNAMIC_DATA_UNAVAILABLE", []), False, exc.cause, None, None
 
@@ -257,7 +266,7 @@ def guided_booking_result(session: DbSession, provider: Any, conversation: Conve
         text = (
             f"Entendi que você escolheu:\n\n"
             f"{offer.description} — {price_text}.\n\n"
-            f"Informe seu CPF - é uma simulação, informe qualquer número de 11 dígitos.\n\n"
+            f"O valor foi pago? Responda sim ou não.\n\n"
             f"Digite Voltar para escolher outro horário."
         )
         return GenerationResult("ANSWER", text, None, []), "GUIDED_SLOT_SELECTION"
@@ -522,7 +531,7 @@ def generate_booking_offer_draft(session: DbSession, operator_id: UUID, conversa
         dynamic_cause: str | None = None
         try:
             resolution, offered_rows = resolve_appointment_availability(session, query_text)
-            status, draft_text, reason_code = "ANSWER", resolution.pattern_text, None
+            status, draft_text, reason_code = "ANSWER", cpf_request_text(offered_rows), None  # D-045: CPF before offers
             dynamic_extra = {"specialty_slug": resolution.specialty_slug, "slot_count": resolution.slot_count}
         except DynamicResolutionError as exc:
             status, draft_text, reason_code = "ABSTAIN", "", "DYNAMIC_DATA_UNAVAILABLE"
@@ -738,7 +747,12 @@ def _open_pending(session: DbSession, generation: AIGeneration, conversation: Co
 # one would mean reaching into a private, underscore-prefixed name).
 # GUIDED_BOOKING_COMPLETE deliberately included — it is GB's own final
 # confirmation message, exactly as safe as its predecessors here.
-_N5_ELIGIBLE_GB_TRIGGERS = frozenset({"GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE"})
+# D-045 (2026-11-27): + GUIDED_CPF_REQUEST / GUIDED_BOOKING_CANCELLED, the
+# two fixed-template steps the CPF-first reorder added.
+_N5_ELIGIBLE_GB_TRIGGERS = frozenset({
+    "GUIDED_CPF_REQUEST", "GUIDED_CPF_CONFIRMED", "GUIDED_SLOT_SELECTION",
+    "GUIDED_SLOT_RESELECTION", "GUIDED_BOOKING_COMPLETE", "GUIDED_BOOKING_CANCELLED",
+})
 
 # D-043-2: calibrated 2026-08-21 against real text-embedding-3-small
 # scores (score = 1 - cosine_distance), not a guessed constant — the

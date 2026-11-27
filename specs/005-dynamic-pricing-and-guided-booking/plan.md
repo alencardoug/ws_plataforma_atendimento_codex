@@ -333,3 +333,22 @@ document's own design, superseding §5.2/§5.3 above where they conflict:
   (migration `20260819_0008`). `GUIDED_CONFIRMATION` (migration
   `20260819_0006`) is no longer produced by any code path — left in the
   CHECK allowlist unused, per this project's additive-only convention.
+
+## 12. Correction (2026-11-27, D-045) — CPF before offers
+
+- `scheduling/guided_booking.py`: `cpf_request_text(rows)` replaces the
+  offer block on any offer-resolution draft; `interpret_cpf_reply` gates on
+  "latest sent generation awaits CPF" (an offer-resolution generation, or
+  `GUIDED_CPF_REQUEST`) and on valid CPF returns the persisted offers as a
+  numbered list (`GUIDED_CPF_CONFIRMED`); "cancelar"/"voltar" there →
+  `GUIDED_BOOKING_CANCELLED`; `interpret_slot_choice` requires a sent
+  `GUIDED_CPF_CONFIRMED` after the offer set; `interpret_payment_reply`
+  gates on `GUIDED_SLOT_SELECTION`; `pending_redaction_step` follows the
+  CPF step; `latest_unconfirmed_offer_generation_id` treats
+  `GUIDED_BOOKING_CANCELLED` as terminal too.
+- `ai/router.py`: the three offer-producing call sites
+  (`dynamic_pattern_result`, `generate_booking_offer_draft`) use
+  `cpf_request_text`; slot-choice draft asks payment; `_N5_ELIGIBLE_GB_TRIGGERS`
+  gains the two new triggers.
+- Migration `20261127_0001`: widens `ai_generations_trigger_check` with
+  `GUIDED_CPF_REQUEST`, `GUIDED_BOOKING_CANCELLED`.

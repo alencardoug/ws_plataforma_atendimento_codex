@@ -610,3 +610,28 @@ outcome:**
   implementation, per `AGENTS.md`'s required SDD flow — `analysis.md`
   especially must re-verify AA-10's autonomous-send mechanism cannot leak
   into any other message path, given how exceptional it is.
+
+## 8. Correction (2026-11-27, D-046) — offers start at the next business day
+
+Human-requested: a slot 30 minutes away was offered. AA-2's resolver now
+offers only slots starting at or after 00:00 (America/Sao_Paulo) of
+`scheduling.next_business_day(today + 1)` — the database's existing
+business-day definition (not Sunday, not a non-business
+`scheduling.holidays` row; Saturday counts). A customer date expression
+that resolves before that window matches no rows and takes the existing
+`DYNAMIC_DATA_UNAVAILABLE` path. The resolver stays read-only.
+Clarification item 6 (no slot generation as a side effect of a query) is
+unchanged — see `specs/012-…/spec.md` §11 for the rolling-horizon refill.
+
+## 9. Correction (2026-11-27, D-047) — availability-intent gate on AA-1 dispatch
+
+Human-reported: "olá, o que consigo fazer neste chat?" opened the booking
+flow, because a weak rank-1 match (0.450) to an `appointment_availability`
+entry dispatched the resolver. AA-1 now dispatches `appointment_availability`
+only when the rank-1 score is ≥ 0.55 **or** the query contains a booking
+keyword (agendar, marcar, remarcar, consulta, horário, vaga, disponível,
+disponibilidade); otherwise generation falls through to the ordinary
+evidence-based path. Calibrated against real embeddings (genuine short
+requests score as low as 0.435, so a threshold alone would block them).
+The operator's explicit booking-offer action (012 OB) is not gated. A new
+static entry `QA-095` describes what the chat can do.

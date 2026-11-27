@@ -132,13 +132,13 @@ test.describe("007 acceptance — completed booking visibility", () => {
       await sendCustomerMessage(customer, "Existe consulta disponível amanhã?");
 
       await operator.getByRole("button", { name: /^Aguardando/ }).click();
-      await draftAndSend(operator, "Existe consulta disponível amanhã?", "Existe consulta disponível amanhã?"); // availability offers
-
-      await sendCustomerMessage(customer, "primeira opção");
-      await draftAndSend(operator, "primeira opção"); // GUIDED_SLOT_SELECTION — offer + CPF request
+      await draftAndSend(operator, "Existe consulta disponível amanhã?", "Existe consulta disponível amanhã?"); // D-045: availability resolved, CPF request
 
       await sendCustomerMessage(customer, "tabom 123.456..789.10");
-      await draftAndSend(operator, "tabom 123.456..789.10"); // GUIDED_CPF_CONFIRMED — payment question
+      await draftAndSend(operator, "tabom 123.456..789.10"); // GUIDED_CPF_CONFIRMED — numbered offers
+
+      await sendCustomerMessage(customer, "primeira opção");
+      await draftAndSend(operator, "primeira opção"); // GUIDED_SLOT_SELECTION — offer + payment question
 
       await sendCustomerMessage(customer, "sim, paguei");
       await draftAndSend(operator, "sim, paguei"); // GUIDED_BOOKING_COMPLETE

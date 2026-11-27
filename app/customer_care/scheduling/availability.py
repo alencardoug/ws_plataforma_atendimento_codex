@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Row, and_, extract, select
+from sqlalchemy import Row, and_, extract, select, text
 from sqlalchemy.orm import Session
 
 from customer_care.ai.prompts import load_prompt
@@ -267,6 +267,36 @@ def _now_sao_paulo() -> datetime:
     return datetime.now(SAO_PAULO)
 
 
+# D-047: AA-1 dispatches `appointment_availability` on the rank-1 hit only
+# when the customer actually signals a booking — a strong semantic match or
+# a booking keyword. Calibrated 2026-11-27 against real
+# text-embedding-3-small retrieval: noise rank-1 scores reached 0.524
+# ("oi, como funciona esse atendimento?") and a weak availability match
+# (0.450) opened the flow for "olá, o que consigo fazer neste chat?", while
+# genuine short requests score as low as 0.435 ("quero marcar") — so the
+# score alone cannot decide; the keyword covers the low-scoring genuine ones.
+AVAILABILITY_STRONG_MATCH_SCORE = 0.55
+_AVAILABILITY_INTENT = re.compile(
+    r"\b(agend\w*|marc(ar|ação|acao|ações|acoes)\b|marqu\w*|remarc\w*|consultas?\b|hor[áa]rios?\b|vagas?\b|dispon[íi]ve(l|is)\b|disponibilidade)",
+    re.IGNORECASE,
+)
+
+
+def has_availability_intent(query_text: str, rank_one_score: float) -> bool:
+    """D-047: may this query open the booking flow?"""
+    return rank_one_score >= AVAILABILITY_STRONG_MATCH_SCORE or _AVAILABILITY_INTENT.search(query_text) is not None
+
+
+def earliest_offer_start(session: Session) -> datetime:
+    """D-046: offers start at 00:00 (America/Sao_Paulo) of the next
+    business day — never later today. Reuses the database's own
+    `scheduling.next_business_day()` (not Sunday, not a non-business
+    `scheduling.holidays` row). A plain read: this module never writes."""
+    today = _now_sao_paulo().date()
+    day: date = session.execute(text("SELECT scheduling.next_business_day(:d)"), {"d": today + timedelta(days=1)}).scalar_one()
+    return datetime(day.year, day.month, day.day, tzinfo=SAO_PAULO)
+
+
 def format_price_brl(cents: int) -> str:
     reais, centavos = divmod(cents, 100)
     reais_str = f"{reais:,}".replace(",", ".")
@@ -315,7 +345,7 @@ def resolve_appointment_availability(session: Session, query_text: str) -> tuple
             ),
         )
         .join(Unit, ScheduleSlot.unit_id == Unit.unit_id)
-        .where(ScheduleSlot.status == "available", ScheduleSlot.starts_at >= _now_sao_paulo())
+        .where(ScheduleSlot.status == "available", ScheduleSlot.starts_at >= earliest_offer_start(session))  # D-046: next business day onward
         .where(Specialty.slug == params.specialty_slug)  # always present — defaults to GENERALIST_SLUG, never unfiltered
     )
     if params.target_date is not None:

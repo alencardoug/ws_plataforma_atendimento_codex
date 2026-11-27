@@ -24,7 +24,7 @@ from customer_care.infrastructure.models import (
 )
 from customer_care.scheduling.availability import booking_summary_dict
 from customer_care.scheduling.models import AppointmentBooking
-from customer_care.scheduling.seeding import ensure_generalist_floor
+from customer_care.scheduling.seeding import ensure_generalist_floor, ensure_rolling_availability
 from customer_care.shared.dependencies import CurrentOperator, DbSession
 from customer_care.shared.errors import api_error
 from customer_care.shared.schemas import ConversationSummaryOut, OperatorMessageOut, OperatorSendIn
@@ -204,6 +204,7 @@ def list_conversations(
     # booking request never ABSTAINs for lack of seeded slots. Once per
     # poll (not per row), query-independent, self-debounced, never raises.
     ensure_generalist_floor(session)
+    ensure_rolling_availability(session)  # D-046 / 012 RH-3: rolling 60-day horizon, all specialties
     with telemetry.execution_origin("operator_poll"):
         resolve_elapsed_autonomous_sends(session)
     unread_by_conversation = unread_customer_message_counts(session, [row.id for row in rows])

@@ -31,7 +31,7 @@ from customer_care.infrastructure.models import (
     RetrievalRun,
     SystemSettings,
 )
-from customer_care.scheduling.guided_booking import interpret_slot_choice
+from customer_care.scheduling.guided_booking import interpret_cpf_reply, interpret_slot_choice
 from customer_care.knowledge.embeddings import DeterministicTestEmbeddingProvider
 
 
@@ -62,6 +62,8 @@ def _make_conversation(db, *, status: str = "ACTIVE", effective_mode: str = "N2"
 def _purge_conversation(conversation_id, operator_id) -> None:
     factory = get_session_factory()
     with factory() as db:
+        # Operator messages reference generations (source_generation_id).
+        db.execute(delete(Message).where(Message.conversation_id == conversation_id, Message.author_type == "OPERATOR"))
         gen_ids = list(db.scalars(select(AIGeneration.id).where(AIGeneration.conversation_id == conversation_id)))
         run_ids = list(db.scalars(select(AIGeneration.retrieval_run_id).where(AIGeneration.conversation_id == conversation_id)))
         for gid in gen_ids:
@@ -99,11 +101,34 @@ def test_offer_then_slot_choice_flow(operator_id) -> None:
             assert generation.status == "ANSWER"
             assert generation.provider == "dynamic-pattern-resolver"
             assert generation.dynamic_pattern_used is True
-            assert generation.draft_text.strip()
+            # D-045: the offer draft asks for the CPF first; offers are
+            # persisted but not yet shown.
+            assert "informe seu CPF" in generation.draft_text
+            assert "(simulação)" not in generation.draft_text
+            run_id = generation.retrieval_run_id
         with factory() as db:
             offers = list(db.scalars(select(AppointmentOfferPresentation).where(AppointmentOfferPresentation.ai_generation_id == gen_id).order_by(AppointmentOfferPresentation.display_order)))
             assert len(offers) >= 1
-        # a subsequent ordinal reply resolves through the existing GB path
+            db.add(Message(conversation_id=conv_id, author_type="OPERATOR", operator_id=operator_id, body="cpf?", source_generation_id=gen_id))
+            db.commit()
+        with factory() as db:
+            conv = db.get(Conversation, conv_id)
+            assert interpret_slot_choice(db, DeterministicTestEmbeddingProvider(), conv, "opção 1") is None, "no slot choice before the CPF"
+            db.add(Message(conversation_id=conv_id, author_type="CUSTOMER", body="12345678910"))
+            db.commit()
+        with factory() as db:
+            conv = db.get(Conversation, conv_id)
+            result = interpret_cpf_reply(db, conv, "12345678910")
+            assert result is not None
+            text, trigger = result
+            assert trigger == "GUIDED_CPF_CONFIRMED"
+            assert f"1. {offers[0].description}" in text
+            confirmed = AIGeneration(conversation_id=conv_id, retrieval_run_id=run_id, operator_id=operator_id, status="ANSWER", draft_text=text, provider="guided-booking", model="not-applicable", prompt_version="not-applicable", trigger=trigger, dynamic_pattern_used=True)
+            db.add(confirmed)
+            db.flush()
+            db.add(Message(conversation_id=conv_id, author_type="OPERATOR", operator_id=operator_id, body=text, source_generation_id=confirmed.id))
+            db.commit()
+        # after the CPF, an ordinal reply resolves through the GB path
         with factory() as db:
             conv = db.get(Conversation, conv_id)
             picked = interpret_slot_choice(db, DeterministicTestEmbeddingProvider(), conv, "opção 1")
@@ -123,7 +148,7 @@ def test_hint_narrows_to_named_specialty(operator_id) -> None:
             conv = db.get(Conversation, conv_id)
             generation, _ev = generate_booking_offer_draft(db, operator_id, conv, "consulta de mastologia")
             assert generation.status == "ANSWER"
-            assert "Mastologia" in generation.draft_text
+            assert "Mastologia" in generation.draft_text  # D-045: named in the CPF request
     finally:
         _purge_conversation(conv_id, operator_id)
 

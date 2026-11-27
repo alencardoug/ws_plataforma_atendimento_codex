@@ -366,3 +366,32 @@ operator endpoint).
    trailing message could pull in a stray specialty keyword).
 5. Whether the OB button should be hidden entirely (vs. disabled) when the
    conversation has no customer message yet.
+
+## 11. Correction (2026-11-27, D-046) — rolling 60-day horizon (RH)
+
+Human-requested: "um mecanismo que não deixa o chatbot sem horário".
+AC-2's generalist D+1/D+7 floor only ran from the operator queue poll and
+the AC-1 bootstrap is env-gated off in production, so inventory decayed.
+
+- **RH-1** `ensure_rolling_availability()` keeps every specialty that has
+  active professionals filled for every business day from
+  `next_business_day(today + 1)` through today + 60 calendar days, with
+  006's SV grid (08:00–17:45 every 45 minutes, every active professional,
+  `ON CONFLICT DO NOTHING`). A (specialty, day) pair counts as missing only
+  when it has no slot row at all (booked slots are never refilled).
+- **RH-2** One bulk `INSERT … SELECT` per run, at most 7 missing days per
+  run (bounded catch-up); non-blocking advisory lock; `lock_timeout=750ms`,
+  `statement_timeout=5s`; 10-minute in-process debounce; failures
+  swallowed — never able to stall or fail the request it rides on.
+- **RH-3** Evaluated from the operator queue poll (next to AC-2) and from
+  `POST /public/conversations`. This narrowly supersedes AC-2's "never
+  from an anonymous-customer endpoint" clause (human request: must not
+  depend on an operator). Conversation creation precedes and is
+  independent of any question, so `specs/004` clarification item 6 still
+  holds; resolver and draft paths still never write.
+- **RH-4** Audit: `scheduling.availability_horizon_topped_up` (SYSTEM)
+  whenever a run creates slots.
+- **RH-5 (same day, human: "amplie para 2027 também")** the window never
+  ends before 2027-12-31: `horizon_end = max(today + 60 days, 2027-12-31)`.
+  Migration `20261127_0002` completes the 2027 holiday calendar (25/01,
+  26/03, 09/07) so those days get no slots.

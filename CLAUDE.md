@@ -192,6 +192,18 @@ Read and obey `AGENTS.md` first.
   restore it to `true` after (unchanged from the D-043-2 note above), and
   clear any leftover `t010-*`/`t011-*` fixture-category residue from prior
   interrupted runs.
+- **D-045 correction (2026-11-27), deployed to prod 2026-11-27 (rev `-00013-sl6`):**
+  GB (005) now asks the CPF before showing offered times (CPF → offers →
+  slot → payment → done; "cancelar" at the CPF step ends the flow). See
+  `DECISIONS.md` D-045, `specs/005-…/spec.md` §13, migration
+  `20261127_0001`.
+- **D-046 correction (2026-11-27), deployed to prod 2026-11-27 (rev `-00013-sl6`):**
+  booking offers start at the next business day (never today), and a
+  rolling 60-day horizon refills every specialty's agenda from
+  conversation creation and the operator poll. See `DECISIONS.md` D-046.
+- **D-047 correction (2026-11-27), deployed to prod 2026-11-27 (rev `-00013-sl6`):**
+  booking flow only opens on a booking signal (score ≥ 0.55 or keyword);
+  new `QA-095` answers "o que consigo fazer neste chat?". Re-ingested in prod. See `DECISIONS.md` D-047.
 
 Read in this order:
 

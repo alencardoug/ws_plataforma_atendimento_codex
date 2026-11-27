@@ -259,7 +259,7 @@ class TestGuidedBookingEligibility:
     output once booking_script's own D-043 fix made it the only real
     booking path."""
 
-    @pytest.mark.parametrize("gb_trigger", ["GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_CPF_CONFIRMED", "GUIDED_BOOKING_COMPLETE"])
+    @pytest.mark.parametrize("gb_trigger", ["GUIDED_CPF_REQUEST", "GUIDED_CPF_CONFIRMED", "GUIDED_SLOT_SELECTION", "GUIDED_SLOT_RESELECTION", "GUIDED_BOOKING_COMPLETE", "GUIDED_BOOKING_CANCELLED"])
     def test_gb_trigger_delivers_verbatim_under_n5(self, operator_id, category, gb_trigger: str) -> None:
         session_factory = get_session_factory()
         with session_factory() as db:
